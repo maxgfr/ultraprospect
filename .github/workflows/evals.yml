@@ -1,0 +1,79 @@
+name: Evals (network)
+
+# Canaries against five public APIs that nobody here controls, three of them
+# volunteer-run. They answer a question the unit suite cannot: do the upstreams
+# still speak the shape this code parses?
+#
+# Report-only, on a schedule, and never gating a PR — deliberately. An Overpass
+# outage is not a defect in this repository, and a gate that goes red for
+# somebody else's bad afternoon is a gate people learn to ignore. A red run here
+# means "go look at the API", and the interesting failures are the two
+# undocumented register behaviours the SIRENE lane is built around: if the
+# 10 000-result clamp ever lifts, or /near_point starts honouring the filters it
+# currently drops, this is the only thing that would say so.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  network-evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build the bundle
+        run: pnpm run build
+
+      - name: Upstream canaries (report-only)
+        id: canaries
+        continue-on-error: true
+        run: pnpm run eval:network | tee "$RUNNER_TEMP/eval-network.txt"
+
+      - name: The NAF catalogue still matches the register
+        continue-on-error: true
+        run: node scripts/refresh-naf.mjs --check
+
+      - name: Publish to the run summary
+        if: always()
+        run: |
+          {
+            echo "## Upstream canaries"
+            echo '```'
+            cat "$RUNNER_TEMP/eval-network.txt" 2>/dev/null || echo "no output"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open an issue when an upstream has drifted
+        if: steps.canaries.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          RUN="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          gh label create upstream-drift --color FBCA04 --description "A public API this skill parses has changed shape" --force >/dev/null 2>&1 || true
+          NUM=$(gh issue list --state open --label upstream-drift --limit 1 --json number --jq '.[0].number // empty')
+          BODY=$(printf '%s\n\n%s\n' \
+            "A weekly upstream canary failed: ${RUN}" \
+            "This is not necessarily a defect here — it may be a transient outage. If it repeats, an API changed shape and the lane that parses it needs updating.")
+          if [ -n "$NUM" ]; then gh issue comment "$NUM" --body "$BODY"; else gh issue create --title "An upstream API has drifted" --label upstream-drift --body "$BODY"; fi
+
+      - name: Close the tracking issue once a run is clean
+        if: steps.canaries.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          NUM=$(gh issue list --state open --label upstream-drift --limit 1 --json number --jq '.[0].number // empty')
+          if [ -z "$NUM" ]; then exit 0; fi
+          gh issue close "$NUM" --comment "Clean again: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+permissions:
+  contents: read
+  issues: write

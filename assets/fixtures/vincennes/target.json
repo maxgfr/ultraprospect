@@ -1,0 +1,18 @@
+{
+  "query": "Vincennes",
+  "label": "Vincennes, Nogent-sur-Marne, Val-de-Marne, Île-de-France, France métropolitaine, 94300, France",
+  "lat": 48.8474508,
+  "lon": 2.4396714,
+  "bbox": [
+    48.8408914,
+    48.8533651,
+    2.4186348,
+    2.457824
+  ],
+  "countryCode": "fr",
+  "osmType": "relation",
+  "osmId": 108346,
+  "postcode": "94300",
+  "source": "nominatim",
+  "codeCommune": "94080"
+}

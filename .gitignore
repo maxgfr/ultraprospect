@@ -1,0 +1,14 @@
+node_modules/
+coverage/
+*.log
+.DS_Store
+.idea/
+.vscode/
+/tmp/
+*.tgz
+.ultraprospect/
+**/.ultraprospect/
+prospects/
+evals/last-run.json
+eval-network-report.md
+eval-network-summary.json

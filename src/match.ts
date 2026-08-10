@@ -1,0 +1,279 @@
+// Fusing the two discovery lanes into one entity per company.
+//
+// OSM sees shopfronts; the register sees legal units at postal addresses. The
+// same bakery is a `shop=bakery` node with an awning and a SIRET filed at the
+// building — and the whole value of the French path is that the two get joined,
+// because neither half is a prospect on its own.
+//
+// The scoring is deliberately IDENTITY-DOMINANT. Proximity alone means nothing:
+// a Paris office block holds fifty registered companies inside twenty metres,
+// so distance can only ever confirm a name, never substitute for one. A pair
+// with no name, brand or street-address agreement is not a match at any
+// distance, and the code says so as a hard gate rather than as a low weight.
+//
+// And where the evidence is real but thin, the matcher DOES NOT DECIDE. Pairs in
+// the middle band go to MATCH.todo.json for the agent to adjudicate. A wrong
+// merge is invisible downstream — it produces one plausible company with
+// someone else's SIREN — so the cost of guessing is much higher here than the
+// cost of asking.
+import type { MatchCandidate, MatchTodo, OsmPoi, Place, PostalAddress, SireneRecord } from "./types.js";
+import { bestNameMatch, foldAccents, haversineM, nameSimilarity } from "./util.js";
+
+/** Beyond this, two records are not the same shopfront whatever they are called. */
+export const MAX_DISTANCE_M = 150;
+/** At or above: merge. */
+export const MERGE_HIGH = 0.72;
+/** Below: two distinct entities. Between the two: the agent decides. */
+export const MERGE_LOW = 0.4;
+/** Below this identity agreement, proximity cannot rescue the pair. */
+const MIN_IDENTITY = 0.25;
+
+/** Grid cell for the candidate index. ~0.002° is roughly 220 m of latitude. */
+const CELL = 0.002;
+
+function cellKey(lat: number, lon: number): string {
+  return `${Math.floor(lat / CELL)}:${Math.floor(lon / CELL)}`;
+}
+
+/** Every register record within one grid cell of a point, plus its neighbours. */
+function buildIndex(records: readonly SireneRecord[]): Map<string, SireneRecord[]> {
+  const index = new Map<string, SireneRecord[]>();
+  for (const r of records) {
+    if (typeof r.lat !== "number" || typeof r.lon !== "number") continue;
+    const key = cellKey(r.lat, r.lon);
+    const bucket = index.get(key);
+    if (bucket) bucket.push(r);
+    else index.set(key, [r]);
+  }
+  return index;
+}
+
+function nearby(index: Map<string, SireneRecord[]>, lat: number, lon: number): SireneRecord[] {
+  const out: SireneRecord[] = [];
+  const baseLat = Math.floor(lat / CELL);
+  const baseLon = Math.floor(lon / CELL);
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const bucket = index.get(`${baseLat + dy}:${baseLon + dx}`);
+      if (bucket) out.push(...bucket);
+    }
+  }
+  return out;
+}
+
+/** Every name the register knows this establishment by. */
+function registerNames(r: SireneRecord): string[] {
+  return [r.nomComplet, r.nomRaisonSociale, r.sigle, ...r.enseignes].filter((n): n is string => Boolean(n?.trim()));
+}
+
+/** The street address an OSM POI declares, when the mapper filled it in. */
+function poiAddress(poi: OsmPoi): PostalAddress {
+  return {
+    numero: poi.tags["addr:housenumber"],
+    libelleVoie: poi.tags["addr:street"],
+    codePostal: poi.tags["addr:postcode"],
+    commune: poi.tags["addr:city"],
+  };
+}
+
+/** Street names agree when their significant words do, type word aside. */
+function sameStreet(a: string | undefined, b: string | undefined, bType?: string): boolean {
+  if (!a || !b) return false;
+  const norm = (s: string) =>
+    foldAccents(s)
+      .toLowerCase()
+      .replace(/^(rue|avenue|av|boulevard|bd|quai|place|pl|impasse|allee|chemin|route|rte|cours|square|passage)\s+/i, "")
+      .replace(/\bde\s+la\b|\bdes\b|\bdu\b|\bde\b|\ble\b|\bla\b|\bl\b/g, " ")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  const na = norm(a);
+  const nb = norm(bType ? `${bType} ${b}` : b);
+  return na.length > 2 && na === nb;
+}
+
+export interface PairScore {
+  score: number;
+  parts: { distance: number; name: number; enseigne: number; address: number };
+  distanceM: number;
+  /** Which of the register's names produced `parts.name`. */
+  matchedName?: string;
+}
+
+/**
+ * Score one OSM POI against one register establishment.
+ *
+ * Returns score 0 when the pair fails the identity gate — which is the common
+ * case, and the reason a dense area does not collapse into nonsense.
+ */
+export function scorePair(poi: OsmPoi, rec: SireneRecord): PairScore {
+  const distanceM = typeof rec.lat === "number" && typeof rec.lon === "number" ? haversineM(poi.lat, poi.lon, rec.lat, rec.lon) : Number.POSITIVE_INFINITY;
+  const zero: PairScore = { score: 0, parts: { distance: 0, name: 0, enseigne: 0, address: 0 }, distanceM };
+  if (!Number.isFinite(distanceM) || distanceM > MAX_DISTANCE_M) return zero;
+
+  const poiName = poi.name ?? "";
+  // Which of the register's names actually matched is carried out of here, not
+  // just how well. The adjudication file used to print `nomComplet` whatever
+  // scored — so "Crèche Jean Burgeat <-> COMMUNE DE VINCENNES" appeared as an
+  // obvious no, when the 0.67 had come from the enseigne "CRECHE BURGEAT" and
+  // the pair was an obvious yes. The agent was being shown the wrong evidence.
+  const best = poiName ? bestNameMatch(poiName, registerNames(rec)) : { name: undefined, score: 0 };
+  const nameScore = best.score;
+  // The brand tag is a separate signal from the name: a franchise is mapped as
+  // `brand=Carrefour` with `name=Carrefour City Vincennes`, and the register
+  // files it under an enseigne rather than a denomination.
+  const brand = poi.tags.brand ?? poi.tags.operator ?? "";
+  const enseigneScore = brand && rec.enseignes.length ? Math.max(0, ...rec.enseignes.map((e) => nameSimilarity(brand, e))) : 0;
+
+  const pa = poiAddress(poi);
+  const numberAgrees = Boolean(
+    pa.numero && rec.address.numero && pa.numero.replace(/\s/g, "").toLowerCase() === rec.address.numero.replace(/\s/g, "").toLowerCase(),
+  );
+  const streetAgrees = sameStreet(pa.libelleVoie, rec.address.libelleVoie, rec.address.typeVoie);
+  const addressScore = numberAgrees && streetAgrees ? 1 : streetAgrees ? 0.6 : 0;
+
+  // A full street address is near-proof of identity even when the names differ —
+  // a shop trades under a sign, the register holds a holding company's name.
+  const identity = Math.max(nameScore, enseigneScore, addressScore === 1 ? 0.85 : addressScore * 0.5);
+  if (identity < MIN_IDENTITY) return zero;
+
+  const proximity = 1 - Math.min(1, distanceM / MAX_DISTANCE_M);
+  const score = 0.8 * identity + 0.2 * proximity;
+  return { score, parts: { distance: proximity, name: nameScore, enseigne: enseigneScore, address: addressScore }, distanceM, matchedName: best.name };
+}
+
+export interface MatchOutcome {
+  /** SIRET (or `siren:` key) -> OSM POI id, for pairs confident enough to merge. */
+  merged: Map<string, string>;
+  /** Pairs in the middle band, for the agent. */
+  undecided: MatchCandidate[];
+}
+
+function recordKey(rec: SireneRecord): string {
+  return rec.siret ?? `siren:${rec.siren}`;
+}
+
+function toCandidate(poi: OsmPoi, rec: SireneRecord, scored: PairScore): MatchCandidate {
+  return {
+    osmId: poi.id,
+    siret: rec.siret,
+    siren: rec.siren,
+    sireneName: rec.nomComplet ?? rec.nomRaisonSociale,
+    // The name the score came from, which is often NOT nomComplet.
+    matchedName: scored.matchedName,
+    osmName: poi.name,
+    score: Number(scored.score.toFixed(4)),
+    parts: {
+      distance: Number(scored.parts.distance.toFixed(4)),
+      name: Number(scored.parts.name.toFixed(4)),
+      enseigne: Number(scored.parts.enseigne.toFixed(4)),
+      address: Number(scored.parts.address.toFixed(4)),
+    },
+    distanceM: Math.round(scored.distanceM),
+  };
+}
+
+/**
+ * Pair the two lanes, one-to-one, best pairs first.
+ *
+ * Greedy on a descending score list rather than a global optimum: the
+ * assignment problem here is tiny per neighbourhood and the scores are
+ * well-separated, so the optimal matching and the greedy one agree except in
+ * cases that belong in the undecided band anyway.
+ */
+export function matchLanes(pois: readonly OsmPoi[], records: readonly SireneRecord[]): MatchOutcome {
+  const index = buildIndex(records);
+  const scored: { poi: OsmPoi; rec: SireneRecord; s: PairScore }[] = [];
+
+  for (const poi of pois) {
+    for (const rec of nearby(index, poi.lat, poi.lon)) {
+      const s = scorePair(poi, rec);
+      if (s.score >= MERGE_LOW) scored.push({ poi, rec, s });
+    }
+  }
+  scored.sort((a, b) => b.s.score - a.s.score);
+
+  const merged = new Map<string, string>();
+  const usedPoi = new Set<string>();
+  const usedRec = new Set<string>();
+  const undecided: MatchCandidate[] = [];
+
+  for (const { poi, rec, s } of scored) {
+    const key = recordKey(rec);
+    if (usedPoi.has(poi.id) || usedRec.has(key)) continue;
+    if (s.score >= MERGE_HIGH) {
+      merged.set(key, poi.id);
+      usedPoi.add(poi.id);
+      usedRec.add(key);
+    } else {
+      undecided.push(toCandidate(poi, rec, s));
+    }
+  }
+
+  return { merged, undecided };
+}
+
+export function buildMatchTodo(undecided: readonly MatchCandidate[]): MatchTodo {
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    // Strongest first: the agent works down a list that gets easier to reject,
+    // and can stop when the evidence thins out.
+    pairs: [...undecided].sort((a, b) => b.score - a.score),
+  };
+}
+
+/** An adjudication the agent hands back: merge this pair, or keep them apart. */
+export interface MatchVerdict {
+  osmId: string;
+  siret?: string;
+  siren?: string;
+  merge: boolean;
+  why?: string;
+}
+
+/**
+ * Fold the agent's verdicts into an existing place list.
+ *
+ * Only merges are acted on — a "keep apart" verdict is already the state of the
+ * world, and recording it as a change would make the run non-idempotent.
+ */
+export function applyVerdicts(places: Place[], verdicts: readonly MatchVerdict[]): { merged: number; skipped: number; unknown: string[] } {
+  const byOsm = new Map<string, Place>();
+  const byRecord = new Map<string, Place>();
+  for (const p of places) {
+    if (p.osm) byOsm.set(p.osm.id, p);
+    if (p.sirene) byRecord.set(recordKey(p.sirene), p);
+  }
+
+  let mergedCount = 0;
+  let skipped = 0;
+  const unknown: string[] = [];
+
+  for (const v of verdicts) {
+    if (!v.merge) {
+      skipped++;
+      continue;
+    }
+    const key = v.siret ?? (v.siren ? `siren:${v.siren}` : undefined);
+    const osmPlace = byOsm.get(v.osmId);
+    const recPlace = key ? byRecord.get(key) : undefined;
+    if (!osmPlace || !recPlace || osmPlace === recPlace) {
+      unknown.push(`${v.osmId} <-> ${key ?? "?"}`);
+      continue;
+    }
+    // Keep the OSM entity as the survivor: it carries the physical identity
+    // (name on the door, coordinates, category) the rest of the run keys on.
+    osmPlace.sirene = recPlace.sirene;
+    osmPlace.sources = [...new Set([...osmPlace.sources, "sirene" as const])];
+    osmPlace.matchConfidence = 1;
+    osmPlace.address = { ...recPlace.address, ...osmPlace.address };
+    recPlace.id = "";
+    mergedCount++;
+  }
+
+  // Dropping the absorbed entries in place keeps the caller's array identity,
+  // which matters because it is the same array the run writes back out.
+  for (let i = places.length - 1; i >= 0; i--) if (places[i]!.id === "") places.splice(i, 1);
+
+  return { merged: mergedCount, skipped, unknown };
+}
