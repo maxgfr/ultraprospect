@@ -147,6 +147,26 @@ describe("citations", () => {
     expect(r.counts.citations).toBe(1);
   });
 
+  it("accepts a WRAPPED paragraph whose citation is at the end", () => {
+    // Markdown wraps. A citation belongs at the end of the thing it supports,
+    // and flagging the earlier lines of a paragraph punishes the author for
+    // using a text width — the first real dossier produced 13 such errors
+    // against one properly-cited paragraph.
+    writeDossier(
+      "osm:n1",
+      "# X\n\n**What they do.** Renine is an Italian restaurant-pizzeria at 33 rue de\nStrasbourg in Vincennes, open Tuesday to Sunday, with a menu of more than\nfifty pizzas. [P1]\n",
+    );
+    expect(runCheck({ runDir, places: [place()], manifest: manifest() }).ok).toBe(true);
+  });
+
+  it("still rejects a wrapped paragraph with no citation anywhere in it", () => {
+    writeDossier(
+      "osm:n1",
+      "# X\n\n**What they do.** Renine is an Italian restaurant-pizzeria at 33 rue de\nStrasbourg in Vincennes, open Tuesday to Sunday.\n",
+    );
+    expect(runCheck({ runDir, places: [place()], manifest: manifest() }).errors.some((e) => e.rule === "claim-uncited")).toBe(true);
+  });
+
   it("REJECTS an uncited factual sentence", () => {
     writeDossier("osm:n1", "# X\n\n**What they do.** A long enough factual sentence to count as a claim about the world.\n");
     expect(runCheck({ runDir, places: [place()], manifest: manifest() }).errors.some((e) => e.rule === "claim-uncited")).toBe(true);

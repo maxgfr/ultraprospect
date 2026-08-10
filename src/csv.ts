@@ -83,7 +83,9 @@ function streetOf(place: Place): string {
   const a = place.address;
   const type = a.typeVoie?.trim();
   const name = a.libelleVoie?.trim();
-  if (!name) return [a.numero, type].filter(Boolean).join(" ");
+  // A house number with no street is not an address — OSM nodes often carry
+  // `addr:housenumber` alone, and rendering it produces the line "address: 20".
+  if (!name) return type ? [a.numero, type].filter(Boolean).join(" ") : "";
   const prefixed = type ? new RegExp(`^${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name) : false;
   return [a.numero, prefixed ? undefined : type, name].filter(Boolean).join(" ");
 }

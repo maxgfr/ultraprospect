@@ -94,8 +94,10 @@ describe("extractSocials", () => {
     expect(extractSocials('<iframe src="https://www.youtube.com/embed/hB8FxPdU3Xo?feature=oe"></iframe>', "P1")).toHaveLength(0);
   });
 
-  it("rejects share buttons", () => {
+  it("rejects share buttons, in both their shapes", () => {
     expect(extractSocials('<a href="https://www.facebook.com/sharer/sharer.php?u=https://x.fr">share</a>', "P1")).toHaveLength(0);
+    // Found on a Vincennes pizzeria, recorded as their Twitter profile.
+    expect(extractSocials('<a href="https://twitter.com/home?status=https://www.renine.fr/">tweet</a>', "P1")).toHaveLength(0);
   });
 
   it("rejects a bare link to the network itself", () => {

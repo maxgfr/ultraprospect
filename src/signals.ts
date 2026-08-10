@@ -135,13 +135,15 @@ export function extractPhones(html: string, pageId: string): SourcedValue[] {
  * Three kinds, and all three showed up in the first real run:
  *   - embedded content: `youtube.com/embed/<id>` is a video in the page, and a
  *     café's homepage carrying one does not mean that video id is their channel;
- *   - share buttons: `facebook.com/sharer/...?u=<our own url>`;
+ *   - share buttons, in all their shapes: `facebook.com/sharer/...?u=<our own
+ *     url>` and `twitter.com/home?status=<our own url>` — the second one showed
+ *     up on a Vincennes pizzeria and was recorded as their Twitter profile;
  *   - the network's own furniture: login, privacy, developer pages.
  * A CSV column headed "social profiles" containing a video id is worse than an
  * empty one — somebody clicks it.
  */
 const NOT_A_PROFILE =
-  /\/(?:sharer|share|intent|embed|watch|shorts|login|signup|policies|privacy|legal|about|developers?|plugins?|tr\?id=)\b|\?(?:u|text|url)=/i;
+  /\/(?:sharer|share|intent|embed|watch|shorts|login|signup|home|policies|privacy|legal|about|developers?|plugins?|tr\?id=)\b|[?&](?:u|text|url|status|via)=/i;
 
 /** Social profiles linked from the page. */
 export function extractSocials(html: string, pageId: string): SourcedValue[] {

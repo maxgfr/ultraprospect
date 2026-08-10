@@ -194,18 +194,46 @@ export function runCheck(input: CheckInput): CheckReport {
       }
     }
 
-    // Rule 2: every factual line is cited, or owned with [M].
+    // Rule 2: every factual PARAGRAPH is cited, or owned with [M].
+    //
+    // Paragraph, not line. Markdown wraps, and a citation belongs at the end of
+    // the thing it supports — so a four-line paragraph ending in [P1] is
+    // properly cited, and flagging its first three lines is just punishing the
+    // author for using a text width. Writing the first real dossier produced 13
+    // of those against one genuinely-cited paragraph, and the only ways out
+    // would have been one-line paragraphs or an id on every line: exactly the
+    // id-sprinkling that makes a citation stop meaning anything.
     const lines = text.split("\n");
     let inFence = false;
+    let start = 0;
+    let buffer: string[] = [];
+    const flush = () => {
+      if (buffer.length === 0) return;
+      const paragraph = buffer.join(" ");
+      buffer = [];
+      if (!isFactual(paragraph)) return;
+      if (citationRe().test(paragraph) || MODEL_MARK.test(paragraph)) return;
+      err("claim-uncited", `${rel}:${start + 1}`, `a factual paragraph with no [P#] and no [M]: "${paragraph.trim().slice(0, 90)}"`);
+    };
+
     for (const [i, line] of lines.entries()) {
       if (line.trim().startsWith("```")) {
+        flush();
         inFence = !inFence;
         continue;
       }
-      if (inFence || !isFactual(line)) continue;
-      if (citationRe().test(line) || MODEL_MARK.test(line)) continue;
-      err("claim-uncited", `${rel}:${i + 1}`, `a factual sentence with no [P#] and no [M]: "${line.trim().slice(0, 90)}"`);
+      if (inFence) continue;
+      if (line.trim() === "") {
+        flush();
+        continue;
+      }
+      // A heading, a table row or a rule closes the paragraph before it and is
+      // structure in its own right.
+      if (isStructural(line) && buffer.length === 0) continue;
+      if (buffer.length === 0) start = i;
+      buffer.push(line.trim());
     }
+    flush();
   }
 
   // ---- Warnings ---------------------------------------------------------------

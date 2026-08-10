@@ -5282,7 +5282,7 @@ function extractPhones(html, pageId) {
   }
   return [...out2.values()];
 }
-var NOT_A_PROFILE = /\/(?:sharer|share|intent|embed|watch|shorts|login|signup|policies|privacy|legal|about|developers?|plugins?|tr\?id=)\b|\?(?:u|text|url)=/i;
+var NOT_A_PROFILE = /\/(?:sharer|share|intent|embed|watch|shorts|login|signup|home|policies|privacy|legal|about|developers?|plugins?|tr\?id=)\b|[?&](?:u|text|url|status|via)=/i;
 function extractSocials(html, pageId) {
   const out2 = /* @__PURE__ */ new Map();
   const re = /https?:\/\/(?:[a-z]{2,3}\.)?(?:www\.)?(facebook\.com|instagram\.com|linkedin\.com|twitter\.com|x\.com|youtube\.com|tiktok\.com)\/[^\s"'<>)]+/gi;
@@ -5625,7 +5625,7 @@ function dossierPathFor(place) {
 function streetLine(a) {
   const type = a.typeVoie?.trim();
   const name = a.libelleVoie?.trim();
-  if (!name) return [a.numero, type].filter(Boolean).join(" ");
+  if (!name) return type ? [a.numero, type].filter(Boolean).join(" ") : "";
   const alreadyPrefixed = type ? new RegExp(`^${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name) : false;
   return [a.numero, alreadyPrefixed ? void 0 : type, name].filter(Boolean).join(" ");
 }
@@ -5901,15 +5901,32 @@ function runCheck(input) {
     }
     const lines = text2.split("\n");
     let inFence = false;
+    let start = 0;
+    let buffer = [];
+    const flush = () => {
+      if (buffer.length === 0) return;
+      const paragraph = buffer.join(" ");
+      buffer = [];
+      if (!isFactual(paragraph)) return;
+      if (citationRe().test(paragraph) || MODEL_MARK.test(paragraph)) return;
+      err("claim-uncited", `${rel}:${start + 1}`, `a factual paragraph with no [P#] and no [M]: "${paragraph.trim().slice(0, 90)}"`);
+    };
     for (const [i, line] of lines.entries()) {
       if (line.trim().startsWith("```")) {
+        flush();
         inFence = !inFence;
         continue;
       }
-      if (inFence || !isFactual(line)) continue;
-      if (citationRe().test(line) || MODEL_MARK.test(line)) continue;
-      err("claim-uncited", `${rel}:${i + 1}`, `a factual sentence with no [P#] and no [M]: "${line.trim().slice(0, 90)}"`);
+      if (inFence) continue;
+      if (line.trim() === "") {
+        flush();
+        continue;
+      }
+      if (isStructural(line) && buffer.length === 0) continue;
+      if (buffer.length === 0) start = i;
+      buffer.push(line.trim());
     }
+    flush();
   }
   if (manifest.truncated) {
     warn("run-truncated", "manifest.json", "this run does not cover the whole territory; anything written from it must say so in its first sentence.");
@@ -6005,7 +6022,7 @@ function streetOf(place) {
   const a = place.address;
   const type = a.typeVoie?.trim();
   const name = a.libelleVoie?.trim();
-  if (!name) return [a.numero, type].filter(Boolean).join(" ");
+  if (!name) return type ? [a.numero, type].filter(Boolean).join(" ") : "";
   const prefixed = type ? new RegExp(`^${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name) : false;
   return [a.numero, prefixed ? void 0 : type, name].filter(Boolean).join(" ");
 }
