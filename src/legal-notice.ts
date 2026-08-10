@@ -102,14 +102,26 @@ export function extractHandelsregister(text: string): { value: string; court?: s
   // The court is usually within a line or so of the number, either before
   // ("Amtsgericht München, HRB 12345") or after ("HRB 12345, Amtsgericht Berlin").
   const around = text.slice(Math.max(0, m.index - 120), m.index + 160);
-  const court = /\b(?:Amtsgericht|Registergericht|Handelsregister\s+(?:des|beim)?)\s*:?\s*([A-ZÄÖÜ][\wÄÖÜäöüß.-]+(?:\s+[A-ZÄÖÜ][\wÄÖÜäöüß.-]+)?)/.exec(around);
+  // Two negative lookaheads, both earned by a failing case:
+  //   (?!HR[AB]) — "Handelsregister HRA 4711" otherwise captures "HRA" as the
+  //     court, which is the register's own name, not a place.
+  //   (?!Amtsgericht…) — "Registergericht: Amtsgericht München" otherwise
+  //     captures "Amtsgericht München", because the word after the first
+  //     keyword is the second keyword.
+  const court =
+    /\b(?:Amtsgerichts?|Registergerichts?)\s*:?\s*(?!HR[AB]\b)(?!Amtsgericht|Registergericht)([A-ZÄÖÜ][\wÄÖÜäöüß.]*(?:[- ][A-ZÄÖÜ][\wÄÖÜäöüß.]*)?)/.exec(
+      around,
+    );
   return { value, court: court?.[1]?.trim() };
 }
 
 /** A UK company number: eight digits, or two letters and six digits for the devolved registers. */
 export function extractUkCompanyNumber(text: string): string | undefined {
+  // The separator class is punctuation and space ONLY. `\D` was tried and ate
+  // the two-letter prefix: "Company Registration Number: SC123456" came back as
+  // "123456", a Scottish company reported under an English number.
   const m =
-    /\b(?:compan(?:y|ies)\s+(?:reg(?:istration|istered)?\.?\s*)?(?:no\.?|number)|registered\s+in\s+England[^.]{0,40}?no\.?)\D{0,10}((?:[A-Z]{2})?\d{6,8})\b/i.exec(
+    /\b(?:compan(?:y|ies)\s+(?:reg(?:istration|istered)?\.?\s*)?(?:no\.?|number)|registered\s+in\s+England[^.]{0,40}?no\.?)[\s:.–—-]{0,10}((?:[A-Z]{2})?\d{6,8})\b/i.exec(
       text,
     );
   return m?.[1]?.toUpperCase();
@@ -126,7 +138,8 @@ export function extractSirenSiret(text: string): { kind: "siren" | "siret"; valu
 
 /** A Spanish CIF/NIF, from the words that introduce it. Distinct from the VAT form, which prefixes ES. */
 export function extractSpanishNif(text: string): string | undefined {
-  const m = /\b(?:CIF|NIF)\s*[:.]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])\b/i.exec(text);
+  // Spanish pages write it "CIF", "C.I.F." and "N.I.F." about equally often.
+  const m = /\b(?:C\.?I\.?F\.?|N\.?I\.?F\.?)\s*[:.]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])\b/i.exec(text);
   return m?.[1]?.toUpperCase();
 }
 

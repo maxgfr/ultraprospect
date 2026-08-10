@@ -13,17 +13,45 @@
 // to be watching."
 //
 // Adding a country is one import and one array entry.
+import { czAres } from "./cz-ares.js";
+import { euVies } from "./eu-vies.js";
+import { fiPrh } from "./fi-prh.js";
 import { frSirene } from "./fr-sirene.js";
+import { gbCompaniesHouse } from "./gb-companies-house.js";
+import { gleif } from "./gleif.js";
+import { noBrreg } from "./no-brreg.js";
+import { plKrs } from "./pl-krs.js";
+import { usEdgar } from "./us-edgar.js";
 import type { Availability, ConnectorContext, RegistryConnector, RegistryRecord } from "./types.js";
 
 /**
- * Every connector, in the order a report should list them.
+ * Every connector, in the order they should be TRIED.
  *
- * National registers first, then the cross-border authorities, because a
- * national register is always the better answer when it exists: VIES confirms
- * that a VAT number is live and who holds it, and stops there.
+ * Order is behaviour, not presentation: `connectorsFor` returns `confirm` in
+ * this order and `confirm` takes the first answer. National registers come
+ * first because they are authoritative for their own country and hold the whole
+ * economy; the cross-border authorities come last because each knows strictly
+ * less. VIES says a VAT number is live and, for about half the member states,
+ * nothing else. GLEIF knows every country and only the ~2.7 million entities
+ * that hold an LEI.
+ *
+ * Adding a country is one import and one entry. Nothing else in the tree needs
+ * to hear about it: the sweep lane, `confirm`, `doctor`, `manifest.licences`
+ * and the weekly canary all read this array.
  */
-export const CONNECTORS: readonly RegistryConnector[] = [frSirene];
+export const CONNECTORS: readonly RegistryConnector[] = [
+  // National registers, authoritative for their own country.
+  frSirene,
+  gbCompaniesHouse,
+  noBrreg,
+  fiPrh,
+  czAres,
+  plKrs,
+  usEdgar,
+  // Cross-border authorities. Broad reach, narrow answers.
+  euVies,
+  gleif,
+];
 
 export function connectorById(id: string): RegistryConnector | undefined {
   return CONNECTORS.find((c) => c.id === id);
@@ -140,4 +168,12 @@ export function employeeFloor(record: Pick<RegistryRecord, "connectorId" | "empl
 }
 
 export * from "./types.js";
+export { czAres } from "./cz-ares.js";
+export { euVies } from "./eu-vies.js";
+export { fiPrh } from "./fi-prh.js";
 export { frSirene } from "./fr-sirene.js";
+export { gbCompaniesHouse } from "./gb-companies-house.js";
+export { gleif } from "./gleif.js";
+export { noBrreg } from "./no-brreg.js";
+export { plKrs } from "./pl-krs.js";
+export { usEdgar } from "./us-edgar.js";

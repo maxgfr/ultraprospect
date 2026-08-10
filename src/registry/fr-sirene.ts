@@ -233,10 +233,17 @@ function latestFinances(raw: any): RegistryRecord["finances"] {
   return { year, revenue: entry.ca ?? undefined, netIncome: entry.resultat_net ?? undefined, currency: "EUR" };
 }
 
-/** The register's own words for the establishment's state, normalised. */
+/**
+ * The register's own words for a state, normalised.
+ *
+ * TWO VOCABULARIES, measured: a LEGAL UNIT is "A" (active) or "C" (cessée), an
+ * ESTABLISHMENT is "A" or "F" (fermé). Mapping only A and C reported every
+ * closed establishment as "unknown" — PEUGEOT SA's registered office comes back
+ * "F" — which reads as "we did not look" rather than as "it is shut".
+ */
 function statusOf(raw: string | undefined): RegistryRecord["status"] {
   if (raw === "A") return "active";
-  if (raw === "C") return "ceased";
+  if (raw === "C" || raw === "F") return "ceased";
   return "unknown";
 }
 

@@ -4341,7 +4341,7 @@ function latestFinances(raw) {
 }
 function statusOf(raw) {
   if (raw === "A") return "active";
-  if (raw === "C") return "ceased";
+  if (raw === "C" || raw === "F") return "ceased";
   return "unknown";
 }
 function expandRecord(entity) {
@@ -4644,8 +4644,1042 @@ var frSirene = {
   }
 };
 
+// src/registry/cz-ares.ts
+var BASE2 = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty";
+var CONNECTOR_ID2 = "cz-ares";
+var REQUEST_DELAY_MS2 = 400;
+async function call(method, path, body) {
+  const url = `${BASE2}${path}`;
+  await awaitHostSlot(url, REQUEST_DELAY_MS2);
+  const res = await httpJson(method, url, body, { timeoutMs: 25e3, retries: 1, userAgent: politeUa() });
+  return res.ok ? res.data : void 0;
+}
+function addressOf(raw) {
+  if (!raw) return {};
+  const psc = raw?.psc != null ? String(raw.psc) : void 0;
+  return {
+    raw: raw?.textovaAdresa ?? void 0,
+    libelleVoie: raw?.nazevUlice ?? raw?.nazevCastiObce ?? void 0,
+    numero: raw?.cisloDomovni != null ? String(raw.cisloDomovni) : void 0,
+    codePostal: psc,
+    commune: raw?.nazevObce ?? void 0,
+    // The state's own municipality code, the closest thing Czechia has to an
+    // INSEE code.
+    codeCommune: raw?.kodObce != null ? String(raw.kodObce) : void 0,
+    pays: raw?.nazevStatu ?? "\u010Cesk\xE1 republika"
+  };
+}
+function principalActivity(codes) {
+  if (!Array.isArray(codes)) return {};
+  for (const raw of codes) {
+    const code = typeof raw === "string" ? raw : void 0;
+    if (!code) continue;
+    const section2 = naceSection(code);
+    if (section2) return { code, section: section2 };
+  }
+  return { code: typeof codes[0] === "string" ? codes[0] : void 0 };
+}
+function toRecord(subject) {
+  const ico = subject?.ico;
+  if (!ico) return void 0;
+  const { code, section: section2 } = principalActivity(subject?.czNace2008);
+  const registrations = subject?.seznamRegistraci ?? {};
+  const live = registrations.stavZdrojeVr === "AKTIVNI" || registrations.stavZdrojeRes === "AKTIVNI";
+  const dead3 = registrations.stavZdrojeVr === "ZANIKLY" || registrations.stavZdrojeRes === "ZANIKLY";
+  return {
+    connectorId: CONNECTOR_ID2,
+    id: String(ico),
+    names: [subject?.obchodniJmeno].filter(Boolean),
+    legalName: subject?.obchodniJmeno ?? void 0,
+    officers: [],
+    address: addressOf(subject?.sidlo),
+    countryCode: "cz",
+    activityCode: code,
+    section: section2,
+    activityScheme: "nace",
+    legalForm: subject?.pravniForma ?? void 0,
+    dateCreated: subject?.datumVzniku ?? void 0,
+    dateClosed: subject?.datumZaniku ?? void 0,
+    status: dead3 ? "ceased" : live ? "active" : "unknown",
+    sourceUrl: `https://ares.gov.cz/ekonomicke-subjekty/${ico}`,
+    national: { ico: String(ico), dic: subject?.dic ?? void 0, czNace2008: subject?.czNace2008 ?? void 0 }
+  };
+}
+var czAres = {
+  id: CONNECTOR_ID2,
+  countries: ["cz"],
+  label: "Czechia \u2014 ARES (Ministry of Finance register of economic subjects)",
+  licence: "Czech company data: ARES, Ministerstvo financ\xED \u010CR, open data",
+  activityScheme: "nace",
+  activityPrefix: "cz-nace",
+  docsUrl: "https://ares.gov.cz/stranky/vyvojar-info",
+  availability() {
+    return { available: true };
+  },
+  async lookup(query) {
+    const name = query.names.find((n) => n?.trim());
+    if (!name) return [];
+    const limit = Math.min(20, query.limit ?? 5);
+    const body = { obchodniJmeno: name, start: 0, pocet: limit };
+    if (query.locality) body.sidlo = { nazevObce: query.locality };
+    const data = await call("POST", "/vyhledat", body);
+    return (data?.ekonomickeSubjekty ?? []).map(toRecord).filter((r) => Boolean(r));
+  },
+  async verifyId(id) {
+    const digits = id.value.replace(/\D/g, "");
+    if (!digits || digits.length > 8) return void 0;
+    if (id.kind !== "vat" && id.kind !== "ico" && id.kind !== "company-number") return void 0;
+    return toRecord(await call("GET", `/${digits.padStart(8, "0")}`));
+  },
+  async canary() {
+    const one = await call("GET", "/00177041");
+    const found = await call("POST", "/vyhledat", { obchodniJmeno: "\u0160koda Auto", start: 0, pocet: 2 });
+    const rec = toRecord(one);
+    return [
+      { name: "ARES still answers a GET by I\u010CO", ok: Boolean(one?.ico) },
+      {
+        name: "ARES still answers a POST name search with ekonomickeSubjekty[]",
+        ok: Array.isArray(found?.ekonomickeSubjekty) && found.ekonomickeSubjekty.length > 0
+      },
+      { name: "ARES still returns sidlo with nazevObce and psc", ok: Boolean(one?.sidlo?.nazevObce && one?.sidlo?.psc) },
+      {
+        name: "ARES czNace2008 still resolves to a NACE section",
+        ok: Boolean(rec?.section),
+        detail: "the array is ragged \u2014 5-digit, 3-digit and placeholder codes in one record"
+      }
+    ];
+  },
+  async probe() {
+    const rec = toRecord(await call("GET", "/00177041"));
+    return { ok: Boolean(rec), detail: rec ? `resolved ${rec.legalName}` : "no answer" };
+  }
+};
+
+// src/registry/eu-vies.ts
+var BASE3 = "https://ec.europa.eu/taxation_customs/vies/rest-api";
+var CONNECTOR_ID3 = "eu-vies";
+var REQUEST_DELAY_MS3 = 1e3;
+var VIES_COUNTRIES = [
+  "at",
+  "be",
+  "bg",
+  "cy",
+  "cz",
+  "de",
+  "dk",
+  "ee",
+  "es",
+  "fi",
+  "fr",
+  "gr",
+  "hr",
+  "hu",
+  "ie",
+  "it",
+  "lt",
+  "lu",
+  "lv",
+  "mt",
+  "nl",
+  "pl",
+  "pt",
+  "ro",
+  "se",
+  "si",
+  "sk"
+];
+function vatPrefix(countryCode) {
+  const cc = countryCode.toUpperCase();
+  return cc === "GR" ? "EL" : cc;
+}
+function disclosed(value) {
+  const s = typeof value === "string" ? value.trim() : "";
+  if (!s || s === "---") return void 0;
+  return s;
+}
+function parseViesAddress(raw, countryCode) {
+  const address = { raw, pays: countryCode.toUpperCase() };
+  if (!raw) return address;
+  const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return address;
+  address.libelleVoie = lines[0];
+  const tail = lines.slice(1).join(" ");
+  const m = /\b([A-Z]{0,2}-?\d{4,6})\s+(.+)$/.exec(tail);
+  if (m) {
+    address.codePostal = m[1];
+    address.commune = m[2];
+  } else if (tail) {
+    address.commune = tail;
+  }
+  return address;
+}
+async function checkVat(countryCode, number) {
+  const cc = vatPrefix(countryCode);
+  const digits = number.replace(/^[A-Z]{2}/i, "").replace(/[\s.-]/g, "");
+  if (!digits) return void 0;
+  const url = `${BASE3}/ms/${cc}/vat/${encodeURIComponent(digits)}`;
+  await awaitHostSlot(url, REQUEST_DELAY_MS3);
+  const res = await httpJson("GET", url, void 0, { timeoutMs: 2e4, retries: 1, userAgent: politeUa() });
+  if (!res.ok) return void 0;
+  const name = disclosed(res.data?.name);
+  const rawAddress = disclosed(res.data?.address);
+  return {
+    valid: res.data?.isValid === true,
+    identified: Boolean(name),
+    name,
+    address: rawAddress ? parseViesAddress(rawAddress, cc) : void 0,
+    countryCode: cc.toLowerCase(),
+    vatNumber: `${cc}${digits}`
+  };
+}
+var euVies = {
+  id: CONNECTOR_ID3,
+  countries: [...VIES_COUNTRIES],
+  label: "EU \u2014 VAT registration check via VIES (identity disclosed by some member states only)",
+  licence: "VAT registration status: VIES, European Commission (DG TAXUD)",
+  activityScheme: "none",
+  activityPrefix: "vat",
+  docsUrl: "https://ec.europa.eu/taxation_customs/vies/",
+  availability() {
+    return { available: true };
+  },
+  async verifyId(id, ctx) {
+    if (id.kind !== "vat") return void 0;
+    const answer = await checkVat(id.countryCode, id.value);
+    if (!answer) return void 0;
+    if (!answer.valid) {
+      ctx.onNote?.(`vies: ${id.value} is NOT a live VAT registration`);
+      return void 0;
+    }
+    if (!answer.identified) {
+      ctx.onNote?.(
+        `vies: ${answer.vatNumber} is a live VAT registration, but ${answer.countryCode.toUpperCase()} does not disclose the trader's name through VIES`
+      );
+      return void 0;
+    }
+    return {
+      connectorId: CONNECTOR_ID3,
+      id: answer.vatNumber,
+      names: [answer.name],
+      legalName: answer.name,
+      officers: [],
+      address: answer.address ?? {},
+      countryCode: answer.countryCode,
+      status: "active",
+      activityScheme: "none",
+      sourceUrl: "https://ec.europa.eu/taxation_customs/vies/",
+      national: { vatNumber: answer.vatNumber, viesDisclosesIdentity: true }
+    };
+  },
+  async canary() {
+    const checks = [];
+    const it = await checkVat("IT", "00488410010");
+    checks.push({
+      name: "VIES still discloses the trader name for at least one member state (IT)",
+      ok: Boolean(it?.valid && it.identified),
+      detail: it?.name ? `named "${it.name}"` : "no name returned \u2014 the connector can no longer confirm identity anywhere"
+    });
+    const de = await checkVat("DE", "811193231");
+    checks.push({
+      name: "VIES still REDACTS the trader name for DE",
+      ok: Boolean(de?.valid && !de.identified),
+      detail: de?.identified ? `DE now discloses ("${de.name}") \u2014 the German path can confirm identity through VIES` : "still '---', as measured"
+    });
+    const invalid = await checkVat("DE", "000000000");
+    checks.push({ name: "VIES still answers isValid:false rather than an error for an unknown number", ok: invalid?.valid === false });
+    return checks;
+  },
+  async probe() {
+    const answer = await checkVat("IT", "00488410010");
+    return { ok: Boolean(answer?.valid), detail: answer ? `isValid=${answer.valid}, identity ${answer.identified ? "disclosed" : "redacted"}` : "no answer" };
+  }
+};
+
+// src/registry/fi-prh.ts
+var BASE4 = "https://avoindata.prh.fi/opendata-ytj-api/v3";
+var CONNECTOR_ID4 = "fi-prh";
+var REQUEST_DELAY_MS4 = 400;
+async function get2(path) {
+  const url = `${BASE4}${path}`;
+  await awaitHostSlot(url, REQUEST_DELAY_MS4);
+  const res = await httpJson("GET", url, void 0, { timeoutMs: 25e3, retries: 1, userAgent: politeUa() });
+  return res.ok ? res.data : void 0;
+}
+function pickText(list2, language = "3") {
+  if (!Array.isArray(list2) || list2.length === 0) return void 0;
+  return list2.find((d) => d?.languageCode === language)?.description ?? list2[0]?.description ?? void 0;
+}
+function pickCity(list2) {
+  if (!Array.isArray(list2) || list2.length === 0) return void 0;
+  return list2.find((o) => o?.languageCode === "1")?.city ?? list2[0]?.city ?? void 0;
+}
+function addressOf2(list2) {
+  const street = list2?.find((a2) => a2?.type === 1);
+  const postal = list2?.find((a2) => a2?.type === 2);
+  const a = street ?? postal ?? list2?.[0];
+  if (!a) return {};
+  const line = [a?.street, a?.buildingNumber].filter(Boolean).join(" ");
+  const city = pickCity(a?.postOffices);
+  return {
+    raw: [line, a?.postCode, city].filter(Boolean).join(" ") || void 0,
+    libelleVoie: a?.street || void 0,
+    numero: a?.buildingNumber || void 0,
+    codePostal: a?.postCode ?? void 0,
+    commune: city,
+    codeCommune: a?.postOffices?.[0]?.municipalityCode ?? void 0,
+    pays: "Finland"
+  };
+}
+function toRecord2(company) {
+  const id = company?.businessId?.value;
+  if (!id) return void 0;
+  const all = company?.names ?? [];
+  const current2 = all.filter((n) => n?.name && !n.endDate);
+  const expired = all.filter((n) => n?.name && n.endDate).map((n) => n.name);
+  const legalName = current2.find((n) => n.type === "1")?.name ?? current2[0]?.name;
+  const tradingNames = current2.filter((n) => n.type === "2" || n.type === "3").map((n) => n.name);
+  const activityCode = company?.mainBusinessLine?.type ?? void 0;
+  const status = company?.endDate ? "ceased" : company?.tradeRegisterStatus === "1" ? "active" : "unknown";
+  return {
+    connectorId: CONNECTOR_ID4,
+    id: String(id),
+    // Current names first, expired ones last: the matcher takes the best score
+    // over the whole list, so an old shopfront name still matches without ever
+    // being printed as the company's identity.
+    names: [...tradingNames, legalName, ...expired].filter((n) => Boolean(n)),
+    legalName,
+    tradingNames,
+    officers: [],
+    address: addressOf2(company?.addresses),
+    countryCode: "fi",
+    activityCode,
+    section: activityCode ? naceSection(activityCode) : void 0,
+    activityScheme: "nace",
+    legalForm: pickText(company?.companyForms?.[0]?.descriptions) ?? company?.companyForms?.[0]?.type ?? void 0,
+    dateCreated: company?.registrationDate ?? company?.businessId?.registrationDate ?? void 0,
+    dateClosed: company?.endDate ?? void 0,
+    status,
+    sourceUrl: `https://tietopalvelu.ytj.fi/yritys/${id}`,
+    national: { businessId: id, euId: company?.euId?.value ?? void 0 }
+  };
+}
+var fiPrh = {
+  id: CONNECTOR_ID4,
+  countries: ["fi"],
+  label: "Finland \u2014 PRH / YTJ open data",
+  licence: "Finnish company data: PRH / YTJ open data, CC BY 4.0",
+  activityScheme: "nace",
+  activityPrefix: "tol",
+  docsUrl: "https://avoindata.prh.fi/ytj_en.html",
+  availability() {
+    return { available: true };
+  },
+  async lookup(query) {
+    const name = query.names.find((n) => n?.trim());
+    if (!name) return [];
+    const params = new URLSearchParams({ name });
+    if (query.postcode) params.set("postCode", query.postcode);
+    else if (query.locality) params.set("location", query.locality);
+    const data = await get2(`/companies?${params.toString()}`);
+    const limit = query.limit ?? 5;
+    return (data?.companies ?? []).slice(0, limit).map(toRecord2).filter((r) => Boolean(r));
+  },
+  async verifyId(id) {
+    let businessId;
+    if (id.kind === "vat") {
+      const digits = id.value.replace(/\D/g, "");
+      if (digits.length === 8) businessId = `${digits.slice(0, 7)}-${digits.slice(7)}`;
+    } else if (/^\d{7}-\d$/.test(id.value.trim())) {
+      businessId = id.value.trim();
+    }
+    if (!businessId) return void 0;
+    const data = await get2(`/companies?businessId=${encodeURIComponent(businessId)}`);
+    return toRecord2(data?.companies?.[0]);
+  },
+  async canary() {
+    const data = await get2("/companies?businessId=0112038-9");
+    const company = data?.companies?.[0];
+    const rec = toRecord2(company);
+    return [
+      { name: "PRH still answers a businessId lookup with companies[]", ok: Boolean(company?.businessId?.value) },
+      {
+        name: "PRH status is still NOT a liveness flag (a live company still reports status 2)",
+        ok: company?.status === "2" && !company?.endDate,
+        detail: "if status ever became a liveness flag, tradeRegisterStatus is no longer needed"
+      },
+      {
+        name: "PRH still returns addresses[].postOffices[].city with a numeric type",
+        ok: typeof company?.addresses?.[0]?.type === "number" && Boolean(company?.addresses?.[0]?.postOffices?.[0]?.city)
+      },
+      {
+        name: "PRH still returns names[] as a history with type and endDate",
+        ok: Array.isArray(company?.names) && company.names.some((n) => n?.type) && company.names.some((n) => n?.endDate),
+        detail: "reading this array without honouring endDate attaches a name the company dropped decades ago"
+      },
+      { name: "PRH still resolves a current legal name (type 1, no endDate)", ok: Boolean(rec?.legalName) }
+    ];
+  },
+  async probe() {
+    const data = await get2("/companies?businessId=0112038-9");
+    const rec = toRecord2(data?.companies?.[0]);
+    return { ok: Boolean(rec), detail: rec ? `resolved ${rec.legalName}` : "no answer" };
+  }
+};
+
+// src/registry/gb-companies-house.ts
+var BASE5 = "https://api.company-information.service.gov.uk";
+var CONNECTOR_ID5 = "gb-companies-house";
+var REQUEST_DELAY_MS5 = 600;
+var HOW_TO_GET_A_KEY = "Register at https://developer.company-information.service.gov.uk (email only, free, no payment), create an application, then pass --companies-house-key or set ULTRAPROSPECT_COMPANIES_HOUSE_KEY.";
+function keyFrom(ctx) {
+  const key = ctx.keys?.[CONNECTOR_ID5] ?? process.env.ULTRAPROSPECT_COMPANIES_HOUSE_KEY;
+  return key?.trim() || void 0;
+}
+async function get3(path, key) {
+  const url = `${BASE5}${path}`;
+  await awaitHostSlot(url, REQUEST_DELAY_MS5);
+  const res = await httpJson("GET", url, void 0, {
+    timeoutMs: 25e3,
+    retries: 1,
+    userAgent: politeUa(),
+    // The key is the Basic username and the password is empty. Not a bearer
+    // token, whatever the word "key" suggests.
+    headers: { authorization: `Basic ${Buffer.from(`${key}:`).toString("base64")}` }
+  });
+  return { ok: res.ok, status: res.status, data: res.data };
+}
+function addressOf3(raw) {
+  if (!raw) return {};
+  const street = [raw?.premises, raw?.address_line_1, raw?.address_line_2].filter(Boolean).join(" ");
+  return {
+    raw: [street, raw?.locality, raw?.postal_code].filter(Boolean).join(", ") || void 0,
+    libelleVoie: raw?.address_line_1 ?? void 0,
+    numero: raw?.premises ?? void 0,
+    codePostal: raw?.postal_code ?? void 0,
+    commune: raw?.locality ?? void 0,
+    pays: raw?.country ?? "United Kingdom"
+  };
+}
+function sectionOf(sicCodes) {
+  const first = Array.isArray(sicCodes) ? sicCodes.find((c) => typeof c === "string") : void 0;
+  if (typeof first !== "string") return {};
+  return { code: first, section: naceSection(first) };
+}
+function toRecord3(company) {
+  const number = company?.company_number;
+  if (!number) return void 0;
+  const previous = (company?.previous_company_names ?? []).map((p) => p?.name).filter(Boolean);
+  const { code, section: section2 } = sectionOf(company?.sic_codes);
+  const status = company?.company_status;
+  return {
+    connectorId: CONNECTOR_ID5,
+    id: String(number).toUpperCase(),
+    names: [company?.company_name, ...previous].filter(Boolean),
+    legalName: company?.company_name ?? void 0,
+    officers: [],
+    address: addressOf3(company?.registered_office_address),
+    countryCode: "gb",
+    activityCode: code,
+    section: section2,
+    activityScheme: "nace",
+    legalForm: company?.type ?? void 0,
+    dateCreated: company?.date_of_creation ?? void 0,
+    dateClosed: company?.date_of_cessation ?? void 0,
+    // "active" is the only status that means trading. "dissolved", "liquidation"
+    // and "administration" are all not-active and must not be flattened to it.
+    status: status === "active" ? "active" : status ? "ceased" : "unknown",
+    sourceUrl: `https://find-and-update.company-information.service.gov.uk/company/${number}`,
+    national: { companyNumber: String(number).toUpperCase(), companyStatus: status ?? void 0, sicCodes: company?.sic_codes ?? void 0 }
+  };
+}
+var gbCompaniesHouse = {
+  id: CONNECTOR_ID5,
+  countries: ["gb"],
+  label: "United Kingdom \u2014 Companies House (free key required)",
+  licence: "UK company data: Companies House, Open Government Licence v3.0",
+  activityScheme: "nace",
+  activityPrefix: "sic-uk",
+  docsUrl: "https://developer-specs.company-information.service.gov.uk/",
+  needsKey: { flag: "--companies-house-key", env: "ULTRAPROSPECT_COMPANIES_HOUSE_KEY", how: HOW_TO_GET_A_KEY },
+  availability(ctx) {
+    if (keyFrom(ctx)) return { available: true };
+    return { available: false, reason: "no Companies House key was supplied", how: HOW_TO_GET_A_KEY };
+  },
+  async lookup(query, ctx) {
+    const key = keyFrom(ctx);
+    const name = query.names.find((n) => n?.trim());
+    if (!key || !name) return [];
+    const limit = Math.min(20, query.limit ?? 5);
+    const params = new URLSearchParams({ company_name_includes: name, size: String(limit) });
+    if (query.locality) params.set("location", query.locality);
+    const advanced = await get3(`/advanced-search/companies?${params.toString()}`, key);
+    if (advanced.ok && Array.isArray(advanced.data?.items) && advanced.data.items.length) {
+      return advanced.data.items.map(toRecord3).filter((r) => Boolean(r));
+    }
+    if (advanced.status === 401 || advanced.status === 403) {
+      ctx.onNote?.(`companies-house: the key was rejected (HTTP ${advanced.status}). ${HOW_TO_GET_A_KEY}`);
+      return [];
+    }
+    const basic = await get3(`/search/companies?q=${encodeURIComponent(name)}&items_per_page=${limit}`, key);
+    const numbers = (basic.data?.items ?? []).map((i) => i?.company_number).filter(Boolean).slice(0, limit);
+    const out2 = [];
+    for (const number of numbers) {
+      const one = await get3(`/company/${encodeURIComponent(number)}`, key);
+      const rec = toRecord3(one.data);
+      if (rec) out2.push(rec);
+    }
+    return out2;
+  },
+  async verifyId(id, ctx) {
+    const key = keyFrom(ctx);
+    if (!key) return void 0;
+    if (id.kind !== "company-number" && id.kind !== "vat") return void 0;
+    if (id.kind === "vat") return void 0;
+    const number = id.value.replace(/\s+/g, "").toUpperCase();
+    if (!/^([A-Z]{2})?\d{6,8}$/.test(number)) return void 0;
+    const padded = /^\d+$/.test(number) ? number.padStart(8, "0") : number;
+    const res = await get3(`/company/${encodeURIComponent(padded)}`, key);
+    if (res.status === 401 || res.status === 403) {
+      ctx.onNote?.(`companies-house: the key was rejected (HTTP ${res.status}). ${HOW_TO_GET_A_KEY}`);
+      return void 0;
+    }
+    return toRecord3(res.data);
+  },
+  async canary(ctx) {
+    const key = keyFrom(ctx);
+    if (!key) {
+      return [
+        {
+          name: "companies-house: skipped, no key supplied",
+          ok: true,
+          inconclusive: true,
+          detail: HOW_TO_GET_A_KEY
+        }
+      ];
+    }
+    const res = await get3("/company/00000006", key);
+    const rec = toRecord3(res.data);
+    return [
+      { name: "Companies House still authenticates a key as the Basic username", ok: res.status !== 401, detail: `HTTP ${res.status}` },
+      { name: "Companies House still returns company_name and registered_office_address", ok: Boolean(rec?.legalName && rec?.address.codePostal) },
+      { name: "Companies House sic_codes still resolve to a NACE section", ok: Boolean(rec?.section || !res.data?.sic_codes?.length) }
+    ];
+  },
+  async probe(ctx) {
+    const key = keyFrom(ctx);
+    if (!key) return { ok: false, detail: `no key \u2014 ${HOW_TO_GET_A_KEY}` };
+    const res = await get3("/company/00000006", key);
+    return { ok: res.ok, detail: res.ok ? `resolved ${res.data?.company_name}` : `HTTP ${res.status}` };
+  }
+};
+
+// src/registry/gleif.ts
+var BASE6 = "https://api.gleif.org/api/v1";
+var CONNECTOR_ID6 = "gleif";
+var REQUEST_DELAY_MS6 = 400;
+async function get4(path) {
+  const url = `${BASE6}${path}`;
+  await awaitHostSlot(url, REQUEST_DELAY_MS6);
+  const res = await httpJson("GET", url, void 0, {
+    timeoutMs: 25e3,
+    retries: 1,
+    userAgent: politeUa(),
+    // GLEIF speaks JSON:API and answers `application/vnd.api+json`.
+    headers: { accept: "application/vnd.api+json" }
+  });
+  return res.ok ? res.data : void 0;
+}
+function addressOf4(raw) {
+  const lines = (raw?.addressLines ?? []).filter(Boolean);
+  return {
+    raw: [lines.join(", "), raw?.postalCode, raw?.city].filter(Boolean).join(" ") || void 0,
+    libelleVoie: lines[0],
+    codePostal: raw?.postalCode ?? void 0,
+    commune: raw?.city ?? void 0,
+    pays: raw?.country ?? void 0
+  };
+}
+function toRecord4(entry) {
+  const a = entry?.attributes;
+  const lei = a?.lei;
+  if (!lei) return void 0;
+  const legalName = a?.entity?.legalName?.name;
+  const otherNames = (a?.entity?.otherNames ?? []).map((n) => n?.name).filter(Boolean);
+  const country = (a?.entity?.legalAddress?.country ?? "").toLowerCase() || void 0;
+  return {
+    connectorId: CONNECTOR_ID6,
+    id: lei,
+    names: [...otherNames, legalName].filter(Boolean),
+    legalName,
+    tradingNames: otherNames,
+    officers: [],
+    address: addressOf4(a?.entity?.legalAddress ?? a?.entity?.headquartersAddress),
+    countryCode: country,
+    legalForm: a?.entity?.legalForm?.id ?? void 0,
+    // ACTIVE / INACTIVE is the ENTITY's status. A lapsed LEI registration
+    // (`registration.status`) says the entity stopped paying for its LEI, which
+    // is not the same as the company having closed — conflating them would
+    // report live companies as ceased.
+    status: a?.entity?.status === "ACTIVE" ? "active" : a?.entity?.status === "INACTIVE" ? "ceased" : "unknown",
+    activityScheme: "none",
+    sourceUrl: `https://search.gleif.org/#/record/${lei}`,
+    national: {
+      lei,
+      // The national register's own number for this entity — "HRB 158855" in
+      // Germany, a SIREN in France, a company number in the UK.
+      registeredAs: a?.entity?.registeredAs ?? void 0,
+      registrationAuthority: a?.entity?.registeredAt?.id ?? void 0,
+      leiRegistrationStatus: a?.registration?.status ?? void 0
+    }
+  };
+}
+function registeredAs(rec) {
+  const value = rec.national?.registeredAs;
+  return typeof value === "string" ? value.replace(/[\s.]/g, "").toUpperCase() : void 0;
+}
+async function queryRecords(params, limit) {
+  const qs = new URLSearchParams({ ...params, "page[size]": String(Math.min(50, Math.max(1, limit))) });
+  const data = await get4(`/lei-records?${qs.toString()}`);
+  return (data?.data ?? []).map(toRecord4).filter((r) => Boolean(r));
+}
+var gleif = {
+  id: CONNECTOR_ID6,
+  countries: ["*"],
+  label: "Worldwide \u2014 Global LEI Index (GLEIF). Covers entities that hold an LEI, not every company.",
+  licence: "Legal entity data: Global LEI Index, GLEIF, CC0 1.0",
+  activityScheme: "none",
+  activityPrefix: "lei",
+  docsUrl: "https://www.gleif.org/en/lei-data/gleif-api",
+  availability() {
+    return { available: true };
+  },
+  async lookup(query) {
+    const name = query.names.find((n) => n?.trim());
+    if (!name) return [];
+    const country = query.countryCode?.toUpperCase();
+    const filters = { "filter[entity.legalName]": name };
+    if (country) filters["filter[entity.legalAddress.country]"] = country;
+    const exact = await queryRecords(filters, query.limit ?? 5);
+    if (exact.length) return exact;
+    const loose = { "filter[fulltext]": name };
+    if (country) loose["filter[entity.legalAddress.country]"] = country;
+    return queryRecords(loose, query.limit ?? 5);
+  },
+  async verifyId(id) {
+    if (id.kind === "lei") {
+      const data = await get4(`/lei-records/${encodeURIComponent(id.value.toUpperCase())}`);
+      return toRecord4(data?.data);
+    }
+    const wanted = id.value.replace(/[\s.]/g, "").toUpperCase();
+    if (!wanted) return void 0;
+    const params = { "filter[fulltext]": id.value };
+    if (id.countryCode) params["filter[entity.legalAddress.country]"] = id.countryCode.toUpperCase();
+    const hits = await queryRecords(params, 10);
+    return hits.find((rec) => registeredAs(rec) === wanted);
+  },
+  async canary() {
+    const checks = [];
+    const byName = await queryRecords({ "filter[entity.legalName]": "Zalando SE", "filter[entity.legalAddress.country]": "DE" }, 2);
+    const first = byName[0];
+    checks.push({ name: "GLEIF still answers an exact legalName + country filter", ok: Boolean(first?.id) });
+    checks.push({
+      name: "GLEIF still returns entity.legalAddress with country and postalCode",
+      ok: Boolean(first?.address.pays && first?.address.codePostal)
+    });
+    checks.push({
+      name: "GLEIF still returns entity.registeredAs (the national register number)",
+      ok: Boolean(registeredAs(first ?? {})?.startsWith("HRB")),
+      detail: `registeredAs = ${String(first?.national?.registeredAs ?? "absent")} \u2014 the only keyless route from a German HRB number to a filed identity`
+    });
+    return checks;
+  },
+  async probe() {
+    const hits = await queryRecords({ "filter[entity.legalName]": "Zalando SE" }, 1);
+    return { ok: hits.length > 0, detail: hits.length ? `${hits.length} record(s)` : "no answer" };
+  }
+};
+
+// src/registry/no-brreg.ts
+var BASE7 = "https://data.brreg.no/enhetsregisteret/api";
+var CONNECTOR_ID7 = "no-brreg";
+var REQUEST_DELAY_MS7 = 300;
+async function get5(path) {
+  const url = `${BASE7}${path}`;
+  await awaitHostSlot(url, REQUEST_DELAY_MS7);
+  const res = await httpJson("GET", url, void 0, { timeoutMs: 2e4, retries: 1, userAgent: politeUa() });
+  return res.ok ? res.data : void 0;
+}
+function addressOf5(raw) {
+  const lines = (raw?.adresse ?? []).filter(Boolean);
+  return {
+    raw: [lines.join(", "), raw?.postnummer, raw?.poststed].filter(Boolean).join(" ") || void 0,
+    libelleVoie: lines[0],
+    codePostal: raw?.postnummer ?? void 0,
+    commune: raw?.poststed ?? void 0,
+    // Not an INSEE code, but the same kind of thing: the state's own code for
+    // the municipality, and the only precise locality key Norway publishes.
+    codeCommune: raw?.kommunenummer ?? void 0,
+    pays: raw?.land ?? "Norge"
+  };
+}
+function toRecord5(unit) {
+  const id = unit?.organisasjonsnummer;
+  if (!id) return void 0;
+  const name = unit?.navn;
+  const historic = (unit?.historiskeNavn ?? []).map((h) => h?.navn).filter(Boolean);
+  const activityCode = unit?.naeringskode1?.kode ?? void 0;
+  const address = addressOf5(unit?.beliggenhetsadresse ?? unit?.postadresse);
+  return {
+    connectorId: CONNECTOR_ID7,
+    id: String(id),
+    names: [name, ...historic].filter(Boolean),
+    legalName: name,
+    officers: [],
+    address,
+    countryCode: "no",
+    activityCode,
+    section: activityCode ? naceSection(activityCode) : void 0,
+    activityScheme: "nace",
+    employees: unit?.harRegistrertAntallAnsatte ? unit?.antallAnsatte ?? void 0 : void 0,
+    legalForm: unit?.organisasjonsform?.beskrivelse ?? unit?.organisasjonsform?.kode ?? void 0,
+    dateCreated: unit?.registreringsdatoEnhetsregisteret ?? void 0,
+    // `slettedato` is set when the unit has been struck off. Absent means live.
+    status: unit?.slettedato ? "ceased" : unit?.konkurs === true ? "ceased" : "active",
+    dateClosed: unit?.slettedato ?? void 0,
+    sourceUrl: `https://virksomhet.brreg.no/nb/oppslag/enheter/${id}`,
+    national: {
+      // Brreg publishes the company's own website. Nothing else in this tool
+      // gets that from a register, and `resolve` treats it as a declared claim
+      // to be corroborated like any other, not as a fact.
+      hjemmeside: unit?.hjemmeside ?? void 0,
+      naeringskoder: [unit?.naeringskode1, unit?.naeringskode2, unit?.naeringskode3].filter(Boolean),
+      registrertIMvaregisteret: unit?.registrertIMvaregisteret ?? void 0
+    }
+  };
+}
+var noBrreg = {
+  id: CONNECTOR_ID7,
+  countries: ["no"],
+  label: "Norway \u2014 Enhetsregisteret via data.brreg.no",
+  licence: "Norwegian company data: Enhetsregisteret, Br\xF8nn\xF8ysundregistrene, NLOD 2.0",
+  activityScheme: "nace",
+  activityPrefix: "nace-no",
+  docsUrl: "https://data.brreg.no/enhetsregisteret/api/dokumentasjon/",
+  availability() {
+    return { available: true };
+  },
+  async lookup(query) {
+    const name = query.names.find((n) => n?.trim());
+    if (!name) return [];
+    const params = new URLSearchParams({ navn: name, size: String(Math.min(20, query.limit ?? 5)) });
+    if (query.postcode) params.set("postadresse.postnummer", query.postcode);
+    const data = await get5(`/enheter?${params.toString()}`);
+    return (data?._embedded?.enheter ?? []).map(toRecord5).filter((r) => Boolean(r));
+  },
+  async verifyId(id) {
+    const digits = id.value.replace(/\D/g, "");
+    const orgnr = digits.length >= 9 ? digits.slice(0, 9) : void 0;
+    if (!orgnr) return void 0;
+    if (id.kind !== "vat" && id.kind !== "orgnr" && id.kind !== "company-number") return void 0;
+    return toRecord5(await get5(`/enheter/${orgnr}`));
+  },
+  async canary() {
+    const data = await get5("/enheter?navn=Equinor&size=1");
+    const unit = data?._embedded?.enheter?.[0];
+    const rec = toRecord5(unit);
+    return [
+      { name: "Brreg still answers a name search with _embedded.enheter", ok: Boolean(unit?.organisasjonsnummer) },
+      {
+        name: "Brreg still publishes an EXACT headcount (antallAnsatte)",
+        ok: typeof unit?.antallAnsatte === "number",
+        detail: "the only register here that gives a number rather than a band"
+      },
+      {
+        name: "Brreg still publishes the company's own website (hjemmeside)",
+        ok: typeof unit?.hjemmeside === "string" && unit.hjemmeside.length > 0,
+        detail: "if this goes, Norwegian websites have to be found by search like everywhere else"
+      },
+      { name: "Brreg naeringskode1 still resolves to a NACE section", ok: Boolean(rec?.section) }
+    ];
+  },
+  async probe() {
+    const data = await get5("/enheter/923609016");
+    return { ok: Boolean(data?.organisasjonsnummer), detail: data?.navn ? `resolved ${data.navn}` : "no answer" };
+  }
+};
+
+// src/registry/pl-krs.ts
+var BASE8 = "https://api-krs.ms.gov.pl/api/krs";
+var CONNECTOR_ID8 = "pl-krs";
+var REQUEST_DELAY_MS8 = 500;
+async function get6(krs, rejestr) {
+  const url = `${BASE8}/OdpisAktualny/${krs}?rejestr=${rejestr}&format=json`;
+  await awaitHostSlot(url, REQUEST_DELAY_MS8);
+  const res = await httpJson("GET", url, void 0, { timeoutMs: 25e3, retries: 1, userAgent: politeUa() });
+  return res.ok ? res.data : void 0;
+}
+function addressOf6(raw) {
+  const adres = raw?.adres;
+  if (!adres) return {};
+  return {
+    raw: [adres?.ulica, adres?.nrDomu, adres?.kodPocztowy, adres?.miejscowosc].filter(Boolean).join(" ") || void 0,
+    libelleVoie: adres?.ulica ?? void 0,
+    numero: adres?.nrDomu ?? void 0,
+    codePostal: adres?.kodPocztowy ?? void 0,
+    commune: adres?.miejscowosc ?? void 0,
+    pays: adres?.kraj ?? "POLSKA"
+  };
+}
+function toRecord6(payload) {
+  const odpis = payload?.odpis;
+  const krs = odpis?.naglowekA?.numerKRS;
+  if (!krs) return void 0;
+  const dzial1 = odpis?.dane?.dzial1;
+  const name = dzial1?.danePodmiotu?.nazwa;
+  if (!name) return void 0;
+  const siedziba = dzial1?.siedzibaIAdres;
+  const pkd = dzial1?.przedmiotDzialalnosci?.przedmiotPrzewazajacejDzialalnosci?.[0];
+  const activityCode = pkd ? [pkd?.dzial, pkd?.grupa, pkd?.podklasa].filter(Boolean).join(".") || void 0 : void 0;
+  return {
+    connectorId: CONNECTOR_ID8,
+    id: String(krs),
+    names: [name],
+    legalName: name,
+    officers: [],
+    address: addressOf6(siedziba),
+    countryCode: "pl",
+    activityCode,
+    section: activityCode ? activityCode.slice(0, 2).replace(/\D/g, "") : void 0,
+    activityScheme: "nace",
+    legalForm: dzial1?.danePodmiotu?.formaPrawna ?? void 0,
+    status: odpis?.naglowekA?.stanPozycji != null ? "active" : "unknown",
+    sourceUrl: `https://wyszukiwarka-krs.ms.gov.pl/podmiot/${krs}`,
+    national: {
+      krs: String(krs),
+      nip: dzial1?.danePodmiotu?.identyfikatory?.nip ?? void 0,
+      regon: dzial1?.danePodmiotu?.identyfikatory?.regon ?? void 0,
+      // A court register that publishes contact details is unusual, and these
+      // are open data — but they are still contact details, so they travel as
+      // register facts and are subject to `--no-people` like everything else.
+      email: siedziba?.adresPocztyElektronicznej ?? void 0,
+      website: siedziba?.adresStronyInternetowej ?? void 0
+    }
+  };
+}
+var plKrs = {
+  id: CONNECTOR_ID8,
+  countries: ["pl"],
+  label: "Poland \u2014 KRS (National Court Register). Lookup by KRS number only; the public API has no name search.",
+  licence: "Polish company data: Krajowy Rejestr S\u0105dowy, Ministerstwo Sprawiedliwo\u015Bci, open data",
+  activityScheme: "nace",
+  activityPrefix: "pkd",
+  docsUrl: "https://api-krs.ms.gov.pl/",
+  availability() {
+    return { available: true };
+  },
+  async verifyId(id) {
+    if (id.kind !== "krs" && id.kind !== "company-number") return void 0;
+    const digits = id.value.replace(/\D/g, "");
+    if (!digits || digits.length > 10) return void 0;
+    const krs = digits.padStart(10, "0");
+    return toRecord6(await get6(krs, "P")) ?? toRecord6(await get6(krs, "S"));
+  },
+  async canary() {
+    const payload = await get6("0000041581", "P");
+    const rec = toRecord6(payload);
+    return [
+      { name: "KRS still answers OdpisAktualny with odpis.naglowekA.numerKRS", ok: Boolean(payload?.odpis?.naglowekA?.numerKRS) },
+      { name: "KRS still nests the name under dane.dzial1.danePodmiotu.nazwa", ok: Boolean(rec?.legalName) },
+      { name: "KRS still returns siedzibaIAdres with a postal address", ok: Boolean(rec?.address.codePostal) }
+    ];
+  },
+  async probe() {
+    const rec = toRecord6(await get6("0000041581", "P"));
+    return { ok: Boolean(rec), detail: rec ? `resolved ${rec.legalName?.slice(0, 40)}` : "no answer" };
+  }
+};
+
+// src/classification/us-sic.ts
+var US_SIC_DIVISIONS = [
+  ["A", 1, 9],
+  ["B", 10, 14],
+  ["C", 15, 17],
+  ["D", 20, 39],
+  ["E", 40, 49],
+  ["F", 50, 51],
+  ["G", 52, 59],
+  ["H", 60, 67],
+  ["I", 70, 89],
+  ["J", 91, 97],
+  ["K", 99, 99]
+];
+var US_SIC_SECTIONS = US_SIC_DIVISIONS.map(([s]) => s);
+var US_SIC_LABELS = {
+  A: "Agriculture, forestry, fishing (US SIC)",
+  B: "Mining (US SIC)",
+  C: "Construction (US SIC)",
+  D: "Manufacturing (US SIC)",
+  E: "Transport, utilities, communications (US SIC)",
+  F: "Wholesale trade (US SIC)",
+  G: "Retail trade (US SIC)",
+  H: "Finance, insurance, real estate (US SIC)",
+  I: "Services (US SIC)",
+  J: "Public administration (US SIC)",
+  K: "Nonclassifiable (US SIC)"
+};
+function usSicDivision(code) {
+  const group = Number.parseInt(code.padStart(4, "0").slice(0, 2), 10);
+  if (!Number.isFinite(group)) return void 0;
+  return US_SIC_DIVISIONS.find(([, lo, hi]) => group >= lo && group <= hi)?.[0];
+}
+
+// src/registry/us-edgar.ts
+var DATA = "https://data.sec.gov";
+var WWW = "https://www.sec.gov";
+var CONNECTOR_ID9 = "us-edgar";
+var REQUEST_DELAY_MS9 = 500;
+function secUa() {
+  return process.env.ULTRAPROSPECT_SEC_CONTACT ? `ultraprospect ${process.env.ULTRAPROSPECT_SEC_CONTACT}` : "ultraprospect contact@ultraprospect.invalid";
+}
+async function get7(url) {
+  await awaitHostSlot(url, REQUEST_DELAY_MS9);
+  const res = await httpJson("GET", url, void 0, {
+    timeoutMs: 3e4,
+    retries: 1,
+    userAgent: secUa(),
+    headers: { "accept-encoding": "gzip, deflate" }
+  });
+  return res.ok ? res.data : void 0;
+}
+var tickerIndex;
+async function companyIndex() {
+  if (tickerIndex) return tickerIndex;
+  const data = await get7(`${WWW}/files/company_tickers.json`);
+  if (!data || typeof data !== "object") return [];
+  tickerIndex = Object.values(data).map((e) => ({ cik: String(e?.cik_str ?? "").padStart(10, "0"), name: String(e?.title ?? ""), ticker: String(e?.ticker ?? "") })).filter((e) => e.cik && e.name);
+  return tickerIndex;
+}
+function resetCompanyIndex() {
+  tickerIndex = void 0;
+}
+function addressOf7(raw) {
+  if (!raw) return {};
+  const street = [raw?.street1, raw?.street2].filter(Boolean).join(", ");
+  return {
+    raw: [street, raw?.city, raw?.stateOrCountry, raw?.zipCode].filter(Boolean).join(", ") || void 0,
+    libelleVoie: raw?.street1 ?? void 0,
+    codePostal: raw?.zipCode ?? void 0,
+    commune: raw?.city ?? void 0,
+    pays: raw?.stateOrCountry ?? "US"
+  };
+}
+function toRecord7(submissions) {
+  const cik = submissions?.cik;
+  if (!cik) return void 0;
+  const sic = submissions?.sic ? String(submissions.sic) : void 0;
+  const formerNames = (submissions?.formerNames ?? []).map((f) => f?.name).filter(Boolean);
+  const address = addressOf7(submissions?.addresses?.business ?? submissions?.addresses?.mailing);
+  return {
+    connectorId: CONNECTOR_ID9,
+    id: String(cik).padStart(10, "0"),
+    names: [submissions?.name, ...formerNames].filter(Boolean),
+    legalName: submissions?.name ?? void 0,
+    officers: [],
+    address,
+    countryCode: "us",
+    activityCode: sic,
+    section: sic ? usSicDivision(sic) : void 0,
+    // Deliberately not "nace": EDGAR's letters mean different things. See
+    // src/classification/us-sic.ts.
+    activityScheme: "us-sic",
+    legalForm: submissions?.entityType ?? void 0,
+    status: "unknown",
+    sourceUrl: `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${String(cik).padStart(10, "0")}`,
+    national: {
+      cik: String(cik).padStart(10, "0"),
+      tickers: submissions?.tickers ?? void 0,
+      sicDescription: submissions?.sicDescription ?? void 0,
+      ein: void 0,
+      stateOfIncorporation: submissions?.stateOfIncorporation ?? void 0
+    }
+  };
+}
+function usEdgarCoverageNote() {
+  return "us-edgar: the United States has no national company register. This connector reaches EDGAR's listed companies only \u2014 about 10 400 with a traded ticker. A company absent from it is not absent from the economy, and nothing here says it is.";
+}
+var usEdgar = {
+  id: CONNECTOR_ID9,
+  countries: ["us"],
+  label: "United States \u2014 SEC EDGAR, listed companies only (~10 400). There is no national US company register.",
+  licence: "US filer data: SEC EDGAR, public domain",
+  activityScheme: "us-sic",
+  activityPrefix: "sic",
+  docsUrl: "https://www.sec.gov/search-filings/edgar-application-programming-interfaces",
+  availability() {
+    return { available: true };
+  },
+  async lookup(query, ctx) {
+    const name = query.names.find((n) => n?.trim());
+    if (!name) return [];
+    const index = await companyIndex();
+    if (index.length === 0) return [];
+    const needle = name.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").trim();
+    if (needle.length < 3) return [];
+    const hits = index.filter((e) => e.name.toLowerCase().includes(needle)).slice(0, Math.min(10, query.limit ?? 5));
+    if (hits.length === 0) return [];
+    ctx?.onNote?.(usEdgarCoverageNote());
+    const out2 = [];
+    for (const hit of hits) {
+      const rec = toRecord7(await get7(`${DATA}/submissions/CIK${hit.cik}.json`));
+      if (rec) out2.push(rec);
+    }
+    return out2;
+  },
+  async verifyId(id) {
+    if (id.kind !== "cik") return void 0;
+    const cik = id.value.replace(/\D/g, "").padStart(10, "0");
+    if (cik === "0000000000") return void 0;
+    return toRecord7(await get7(`${DATA}/submissions/CIK${cik}.json`));
+  },
+  async canary() {
+    const checks = [];
+    const submissions = await get7(`${DATA}/submissions/CIK0000320193.json`);
+    checks.push({
+      name: "EDGAR still serves a bare `name email` User-Agent",
+      ok: Boolean(submissions?.cik),
+      detail: "a UA carrying a URL is answered 403 'Undeclared Automated Tool' \u2014 this connector must not use politeUa()"
+    });
+    checks.push({ name: "EDGAR submissions still carry sic and sicDescription", ok: Boolean(submissions?.sic && submissions?.sicDescription) });
+    checks.push({ name: "EDGAR submissions still carry addresses.business", ok: Boolean(submissions?.addresses?.business?.city) });
+    resetCompanyIndex();
+    const index = await companyIndex();
+    checks.push({
+      name: "EDGAR company_tickers.json still maps cik_str + title",
+      ok: index.length > 1e3,
+      detail: `${index.length} companies indexed \u2014 this is the only name->CIK route without a key`
+    });
+    return checks;
+  },
+  async probe() {
+    const submissions = await get7(`${DATA}/submissions/CIK0000320193.json`);
+    return { ok: Boolean(submissions?.cik), detail: submissions?.name ? `resolved ${submissions.name}` : "no answer (check the User-Agent)" };
+  }
+};
+
 // src/registry/index.ts
-var CONNECTORS = [frSirene];
+var CONNECTORS = [
+  // National registers, authoritative for their own country.
+  frSirene,
+  gbCompaniesHouse,
+  noBrreg,
+  fiPrh,
+  czAres,
+  plKrs,
+  usEdgar,
+  // Cross-border authorities. Broad reach, narrow answers.
+  euVies,
+  gleif
+];
 function connectorById(id) {
   return CONNECTORS.find((c) => c.id === id);
 }
@@ -5087,11 +6121,13 @@ function extractHandelsregister(text2) {
   if (!m) return void 0;
   const value = `HR${m[1].toUpperCase()} ${m[2]}`;
   const around = text2.slice(Math.max(0, m.index - 120), m.index + 160);
-  const court = /\b(?:Amtsgericht|Registergericht|Handelsregister\s+(?:des|beim)?)\s*:?\s*([A-ZÄÖÜ][\wÄÖÜäöüß.-]+(?:\s+[A-ZÄÖÜ][\wÄÖÜäöüß.-]+)?)/.exec(around);
+  const court = /\b(?:Amtsgerichts?|Registergerichts?)\s*:?\s*(?!HR[AB]\b)(?!Amtsgericht|Registergericht)([A-ZÄÖÜ][\wÄÖÜäöüß.]*(?:[- ][A-ZÄÖÜ][\wÄÖÜäöüß.]*)?)/.exec(
+    around
+  );
   return { value, court: court?.[1]?.trim() };
 }
 function extractUkCompanyNumber(text2) {
-  const m = /\b(?:compan(?:y|ies)\s+(?:reg(?:istration|istered)?\.?\s*)?(?:no\.?|number)|registered\s+in\s+England[^.]{0,40}?no\.?)\D{0,10}((?:[A-Z]{2})?\d{6,8})\b/i.exec(
+  const m = /\b(?:compan(?:y|ies)\s+(?:reg(?:istration|istered)?\.?\s*)?(?:no\.?|number)|registered\s+in\s+England[^.]{0,40}?no\.?)[\s:.–—-]{0,10}((?:[A-Z]{2})?\d{6,8})\b/i.exec(
     text2
   );
   return m?.[1]?.toUpperCase();
@@ -5104,7 +6140,7 @@ function extractSirenSiret(text2) {
   return void 0;
 }
 function extractSpanishNif(text2) {
-  const m = /\b(?:CIF|NIF)\s*[:.]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])\b/i.exec(text2);
+  const m = /\b(?:C\.?I\.?F\.?|N\.?I\.?F\.?)\s*[:.]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])\b/i.exec(text2);
   return m?.[1]?.toUpperCase();
 }
 function extractLegalIds(text2, countryCode, pageId) {
@@ -6240,40 +7276,6 @@ function ranked(places) {
 // src/dossier.ts
 import { existsSync as existsSync7, readFileSync as readFileSync6 } from "fs";
 import { join as join10 } from "path";
-
-// src/classification/us-sic.ts
-var US_SIC_DIVISIONS = [
-  ["A", 1, 9],
-  ["B", 10, 14],
-  ["C", 15, 17],
-  ["D", 20, 39],
-  ["E", 40, 49],
-  ["F", 50, 51],
-  ["G", 52, 59],
-  ["H", 60, 67],
-  ["I", 70, 89],
-  ["J", 91, 97],
-  ["K", 99, 99]
-];
-var US_SIC_SECTIONS = US_SIC_DIVISIONS.map(([s]) => s);
-var US_SIC_LABELS = {
-  A: "Agriculture, forestry, fishing (US SIC)",
-  B: "Mining (US SIC)",
-  C: "Construction (US SIC)",
-  D: "Manufacturing (US SIC)",
-  E: "Transport, utilities, communications (US SIC)",
-  F: "Wholesale trade (US SIC)",
-  G: "Retail trade (US SIC)",
-  H: "Finance, insurance, real estate (US SIC)",
-  I: "Services (US SIC)",
-  J: "Public administration (US SIC)",
-  K: "Nonclassifiable (US SIC)"
-};
-function usSicDivision(code) {
-  const group = Number.parseInt(code.padStart(4, "0").slice(0, 2), 10);
-  if (!Number.isFinite(group)) return void 0;
-  return US_SIC_DIVISIONS.find(([, lo, hi]) => group >= lo && group <= hi)?.[0];
-}
 
 // src/classification/index.ts
 var NACE_VOCABULARY = {
