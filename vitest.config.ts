@@ -31,8 +31,8 @@ export default defineConfig({
       // would be silent: the split ladder, the matcher, the name model.
       thresholds: {
         statements: 46,
-        branches: 41,
-        functions: 51,
+        branches: 43,
+        functions: 52,
         lines: 45,
       },
     },

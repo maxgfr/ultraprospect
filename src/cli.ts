@@ -17,6 +17,7 @@
 // Exit codes: 0 ok · 1 a gate failed or nothing was produced · 2 usage, or a
 // refusal to guess. Anything non-zero means stop and fix, never present anyway.
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { EXIT_FAILURE, EXIT_OK, EXIT_USAGE, UsageError, isInvokedDirectly, jsonLine, parseArgs, positionalText, setNoWrite } from "./engine.js";
 import { brandEngine } from "./engine.js";
 import { runDoctor } from "./doctor.js";
@@ -27,11 +28,15 @@ import { applyVerdicts, type MatchVerdict } from "./match.js";
 import { needsResolving, queriesFor, runResolve, type WebHit } from "./resolve.js";
 import { newPageStore } from "./pages.js";
 import { enrichable, runEnrich } from "./enrich.js";
+import { applyFit, ranked, scoreAll } from "./score.js";
+import { buildDossierPacket, dossierPathFor } from "./dossier.js";
+import { formatReport, runCheck } from "./check.js";
+import type { FitVerdict } from "./types.js";
 import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, writePlaces, writeRunManifest } from "./run.js";
 import { clampInt, parseBbox, parseDistanceM } from "./util.js";
 import { VERSION } from "./version.js";
 
-export const COMMANDS = ["where", "scan", "match", "resolve", "enrich", "doctor", "version"] as const;
+export const COMMANDS = ["where", "scan", "match", "resolve", "enrich", "score", "dossier", "check", "doctor", "version"] as const;
 
 export const VALUE_FLAGS = [
   "where",
@@ -60,6 +65,8 @@ export const VALUE_FLAGS = [
   "only",
   "max-pages",
   "concurrency",
+  "icp",
+  "id",
 ] as const;
 
 export const BOOL_FLAGS = ["json", "no-osm", "no-sirene", "include-ceased", "no-people", "queries", "engine-search", "stdout", "help", "version"] as const;
@@ -75,6 +82,9 @@ COMMANDS
   match --apply <file>   Fold the agent's adjudication of MATCH.todo.json back into places.json.
   resolve                Find each company's own website and prove it is theirs.
   enrich --tier 1|2      Read those websites: tier 1 on all of them, tier 2 on the ones you pick.
+  score                  Rank by measured signals; fold your ICP verdicts in with --apply.
+  dossier --id <id>      Print the grounding packet for one company, pages and all.
+  check                  The gate: citations resolve, claims are cited, contacts were observed.
   doctor                 Check node, network and the health of every upstream.
   version                Print the version.
 
@@ -112,6 +122,13 @@ ENRICHMENT (enrich)
   --only <ids>           Enrich just these place ids, comma-separated.
   --max-pages <n>        Ceiling on pages fetched per site in tier 2.
   --concurrency <n>      Sites in flight at once. Per-host pacing is separate and always on.
+
+RANKING (score)
+  --icp "<text>"         Who you are looking for. Carried into the packets; never scored by the engine.
+  --apply <file>         Your fit verdicts: [{id, fit, why, angle}]. "-" reads stdin.
+
+DOSSIER
+  --id <place id>        Which company's packet to print. Use --json for the list of ids.
 
 ADJUDICATION (match)
   --apply <file>         A JSON array of {osmId, siret|siren, merge, why}. "-" reads stdin.
@@ -424,6 +441,107 @@ async function cmdEnrich(values: Record<string, string>, bools: ReadonlySet<stri
   return outcome.enriched > 0 ? EXIT_OK : EXIT_FAILURE;
 }
 
+function readJsonArg(value: string, what: string): any {
+  const raw = value === "-" ? readFileSync(0, "utf8") : readFileSync(value, "utf8");
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    throw new UsageError(`${what} is not valid JSON: ${(e as Error).message}`);
+  }
+}
+
+async function cmdScore(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
+  if (!values.run) throw new UsageError("score needs --run <dir>");
+  const runDir = resolveRun(values.run);
+  const places = readPlaces(runDir);
+  scoreAll(places);
+
+  if (values.apply) {
+    const parsed = readJsonArg(values.apply, "--apply");
+    const verdicts: FitVerdict[] = Array.isArray(parsed) ? parsed : (parsed?.verdicts ?? []);
+    const result = applyFit(places, verdicts);
+    say(`score: folded ${result.applied} fit verdict(s)`);
+    if (result.unknown.length) {
+      say(`score: ${result.unknown.length} verdict(s) named an id this run does not have: ${result.unknown.slice(0, 5).join(", ")}`);
+      writePlaces(runDir, places);
+      return EXIT_FAILURE;
+    }
+  }
+
+  writePlaces(runDir, places);
+  const order = ranked(places);
+  if (bools.has("json")) {
+    out(
+      jsonLine(
+        order.map((p) => ({
+          id: p.id,
+          name: p.name,
+          total: p.score?.total ?? 0,
+          fit: p.score?.fit,
+          website: p.website?.url,
+          openRoles: p.signals?.openRoles ?? 0,
+        })),
+      ),
+    );
+  } else {
+    for (const p of order.slice(0, clampInt(values.limit, 1, 1000, 25))) {
+      out(`${String(p.score?.total ?? 0).padStart(4)}  ${(p.score?.fit ?? "-").padEnd(8)}  ${p.name.slice(0, 42).padEnd(42)}  ${p.website?.url ?? ""}`);
+    }
+  }
+  if (values.icp) {
+    say("");
+    say(`score: the engine does NOT score fit against "${values.icp}" — that judgement is yours.`);
+    say(`  Read the packets, then fold your verdicts back: --apply '[{"id":"…","fit":"strong","why":"…"}]'`);
+  }
+  say("");
+  say(`next: ultraprospect dossier --run ${runDir} --id <id>`);
+  return EXIT_OK;
+}
+
+async function cmdDossier(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
+  if (!values.run) throw new UsageError("dossier needs --run <dir>");
+  const runDir = resolveRun(values.run);
+  const places = readPlaces(runDir);
+
+  if (!values.id) {
+    // No id: list what can be written up, best first. Cheaper than making
+    // someone grep places.json for an id.
+    const order = ranked(places).filter((p) => p.pages.length > 0 || p.sirene);
+    if (bools.has("json")) out(jsonLine(order.map((p) => ({ id: p.id, name: p.name, pages: p.pages.length, total: p.score?.total ?? 0 }))));
+    else for (const p of order.slice(0, 40)) out(`${p.id}\t${p.pages.length} page(s)\t${p.name}`);
+    say("");
+    say(`next: ultraprospect dossier --run ${runDir} --id ${order[0]?.id ?? "<id>"}`);
+    return EXIT_OK;
+  }
+
+  const place = places.find((p) => p.id === values.id);
+  if (!place) throw new UsageError(`no place with id "${values.id}" in ${runDir}`);
+  const packet = buildDossierPacket(runDir, place, requireManifest(runDir));
+  out(packet.markdown);
+  say("");
+  say(`write your dossier to ${join(runDir, dossierPathFor(place))}`);
+  say(`next: ultraprospect check --run ${runDir}`);
+  return EXIT_OK;
+}
+
+async function cmdCheck(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
+  if (!values.run) throw new UsageError("check needs --run <dir>");
+  const runDir = resolveRun(values.run);
+  const report = runCheck({ runDir, places: readPlaces(runDir), manifest: requireManifest(runDir) });
+
+  if (bools.has("json")) out(jsonLine(report));
+  else out(formatReport(report));
+
+  if (!report.ok) {
+    say("");
+    say("check: the run did not pass. Fix the findings above — do not present the output.");
+    return EXIT_FAILURE;
+  }
+  say("");
+  say(`next: ultraprospect render --run ${runDir}`);
+  return EXIT_OK;
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   brandEngine();
   const parsed = parseArgs(argv, SPEC);
@@ -451,6 +569,12 @@ export async function main(argv: readonly string[]): Promise<number> {
       return cmdResolve(values, bools);
     case "enrich":
       return cmdEnrich(values, bools);
+    case "score":
+      return cmdScore(values, bools);
+    case "dossier":
+      return cmdDossier(values, bools);
+    case "check":
+      return cmdCheck(values, bools);
     case "doctor":
       return runDoctor({ json: bools.has("json"), out, say });
     case "version":

@@ -269,12 +269,26 @@ export function expandRecord(entity: any): SireneRecord[] {
     });
 }
 
-/** Filters the point endpoint silently drops, re-applied where they do work. */
+/**
+ * Filters the API cannot apply for us, re-applied here.
+ *
+ * TWO distinct reasons, and only one of them is about the endpoint:
+ *
+ *   1. `/near_point` silently drops filters it does not implement, so anything
+ *      that endpoint ignores has to be re-applied client-side.
+ *
+ *   2. `etat_administratif` filters the LEGAL UNIT on either endpoint — never
+ *      the establishment. An active company keeps its closed branches, and they
+ *      come back inside `matching_etablissements` with their own
+ *      `etat_administratif: "C"`. Left alone, a restaurant that shut in 2019
+ *      appears in the run as an open one at a real address: the register is not
+ *      wrong, the question was. So the establishment's OWN state is filtered
+ *      here regardless of which endpoint answered.
+ */
 function applyClientFilters(records: SireneRecord[], query: SireneQuery, endpoint: string): SireneRecord[] {
-  if (endpoint !== "near_point") return records;
   let out = records;
   if (query.etatAdministratif) out = out.filter((r) => r.etatAdministratif === query.etatAdministratif);
-  if (query.tranchesEffectif?.length) {
+  if (endpoint === "near_point" && query.tranchesEffectif?.length) {
     const wanted = new Set(query.tranchesEffectif);
     out = out.filter((r) => r.effectifTranche && wanted.has(r.effectifTranche));
   }

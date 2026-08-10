@@ -102,7 +102,7 @@ export async function fetchPage(
   // and the rename fails with ENOENT rather than with anything that names the
   // missing directory, so the mkdir belongs here, not in a caller's memory.
   if (!isNoWrite()) mkdirSync(join(runDir, dir), { recursive: true });
-  writeArtifact(join(runDir, extract), header + text + "\n");
+  writeArtifact(join(runDir, extract), header + text + markupEvidence(result.html) + "\n");
 
   return {
     record: {
@@ -120,6 +120,51 @@ export async function fetchPage(
     title: result.title,
     html: (result as { html?: string }).html,
   };
+}
+
+/**
+ * Contacts that live in the MARKUP, appended to the stored extract.
+ *
+ * A `mailto:` href and a `tel:` link are not in a page's visible text, so text
+ * extraction drops them — and then the citation gate, which re-opens the stored
+ * file to confirm that everything attributed to `[P3]` is actually in `[P3]`,
+ * correctly reported a real address as unfound. The gate was right and the
+ * artifact was incomplete.
+ *
+ * The rule this restores is the important one: **the cited artifact carries its
+ * own evidence**. Anything this tool claims to have read from a page must be
+ * re-readable in the file that page was stored as — by the gate, and by a human
+ * six weeks later who wants to know where an email came from. Loosening the
+ * gate to trust in-memory extraction instead would have removed the only thing
+ * standing between a prospect file and a fabricated address.
+ */
+function markupEvidence(html: string | undefined): string {
+  if (!html) return "";
+  const lines: string[] = [];
+  const add = (label: string, value: string) => {
+    const entry = `- ${label}: ${value}`;
+    if (!lines.includes(entry)) lines.push(entry);
+  };
+
+  for (const m of html.matchAll(/mailto:([^"'?>\s]+@[^"'?>\s]+)/gi)) add("mailto", decodeURIComponent(m[1]!));
+  for (const m of html.matchAll(/tel:([+0-9().\s-]{6,})/gi)) add("tel", m[1]!.trim());
+  for (const m of html.matchAll(/https?:\/\/(?:[a-z]{2,3}\.)?(?:www\.)?(?:facebook|instagram|linkedin|twitter|x|youtube|tiktok)\.com\/[^\s"'<>)]+/gi)) {
+    add("social", m[0].replace(/[)"'<>]+$/, ""));
+  }
+  if (lines.length === 0) return "";
+
+  return [
+    "",
+    "---",
+    "",
+    "## Contacts in the markup",
+    "",
+    "Read from this page's HTML rather than from its visible text — `mailto:` and",
+    "`tel:` hrefs and social links. Recorded here so that anything attributed to",
+    "this page can be re-read in this file, which is what the citation gate does.",
+    "",
+    ...lines,
+  ].join("\n");
 }
 
 /** The polite identity, exported so callers that bypass fetchPage stay consistent. */

@@ -61,6 +61,9 @@ gate. Read it rather than guessing a flag.
 | Answer the pairs the matcher would not decide | `match --run <dir> --apply verdicts.json` |
 | Find each company's website, and prove it is theirs | `resolve --run <dir> --queries` then `--web-results` |
 | Read those websites — what they do, who they hire | `enrich --run <dir> --tier 1`, then `--tier 2 --limit 20` |
+| Rank what you found | `score --run <dir>` |
+| Write up one company from its evidence | `dossier --run <dir> --id <id>` |
+| Prove the write-up is grounded before anyone reads it | `check --run <dir>` |
 | Find out why a run came back thin | `doctor` |
 
 ## Cheat sheet
@@ -77,6 +80,9 @@ ultraprospect resolve --run <dir> --queries                   # the queries for 
 ultraprospect resolve --run <dir> --web-results hits.json     # ingest your hits, fetch, corroborate
 ultraprospect enrich --run <dir> --tier 1                     # home + legal notice on every site
 ultraprospect enrich --run <dir> --tier 2 --limit 20          # a page per role + the ATS APIs
+ultraprospect score --run <dir>                               # rank by measured signals
+ultraprospect dossier --run <dir> --id <id>                   # the grounding packet, pages and all
+ultraprospect check --run <dir>                               # the gate. Exit 1 means do not present.
 ultraprospect scan --fixture <dir>                            # replay a recorded sweep, offline
 ```
 
@@ -128,7 +134,28 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    the ones you have a reason to care about, not on the whole town: a thousand
    places at eight pages each is six thousand requests and several hours.
 
-7. **Write from `places.json`.** Every field carries where it came from. A place
+7. **Rank, then judge.** `score` adds a measured total from things it counted —
+   site alive, recently touched, roles open, headcount band, revenue filed,
+   contactable. It does NOT score whether a company matches the brief, however
+   the `--icp` text is phrased. That is yours: read the packets, then fold
+   verdicts back with `score --apply '[{"id":"…","fit":"strong","why":"…"}]'`.
+   `fit` sits beside `total`; it never overwrites it, so the one column nobody
+   had to be trusted for stays intact.
+
+8. **Write each dossier from its packet.** `dossier --id <id>` prints the fact
+   sheet and the FULL TEXT of every page fetched for that company, each under
+   the id you must cite. End each factual sentence with `[P3]`; mark your own
+   inference `[M]`. Do not cite a page fetched for a different company — the
+   gate checks ownership, not just existence.
+
+9. **Run `check` before anyone reads the output.** Exit 1 means stop. It
+   re-opens every citation, demands a source or an `[M]` on every factual line,
+   and re-reads every email, phone and person against the page it claims to
+   come from. That last rule is the one that matters: an address assembled from
+   a naming convention is plausible, unfalsifiable at a glance, and will be
+   emailed. The gate makes it impossible rather than discouraged.
+
+10. **Write from `places.json`.** Every field carries where it came from. A place
    with `sources: ["osm","sirene"]` has both records attached; a place with one
    source has one, and the other half is not "missing data" you may fill in.
    `website.confidence` is `corroborated`, `unverified` or `declared` (a mapper
@@ -147,6 +174,8 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | `resolve` found almost nothing | It was run without `--web-results`. Only OSM's own tags were tried. Run `--queries` first and do the searching. |
 | `enrich` says "no place has a corroborated website" | `resolve` has not run, or corroborated nothing. Enrichment only ever reads sites we proved belong to the company. |
 | A company with a careers page shows `isHiring` unset | Deliberate. A board was detected but its openings could not be read, and "not hiring" would be a different claim. |
+| `check` says a contact is not on its page | Believe it. Either the value was constructed, or the page changed since it was read. Both mean it must not ship. |
+| `check` flags a line you consider obvious | It is a factual claim with no source. Cite the page, or mark it `[M]` and own it. |
 
 ## Do not
 
@@ -160,6 +189,8 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
   upstreams move, and a second run answers a different question.
 - Never treat a search result as a company's website. Rank is not evidence of
   ownership; only the fetched page corroborating itself is.
+- Never present a run whose `check` exits non-zero. There is no "with caveats".
+- Never turn the `--icp` text into a number. The engine refuses to; so should you.
 
 ## Scope notes
 
