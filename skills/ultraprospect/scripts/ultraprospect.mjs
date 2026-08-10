@@ -2686,7 +2686,7 @@ function readBody(req) {
 }
 
 // src/version.ts
-var VERSION = "1.4.1";
+var VERSION = "1.4.2";
 
 // src/engine.ts
 function brandEngine() {
