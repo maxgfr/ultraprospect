@@ -179,7 +179,7 @@ FILTERS (scan)
 WEBSITE DISCOVERY (resolve)
   --queries              Print the search queries to run, one per line, and stop.
   --web-results <file>   Hits from your own WebSearch: [{url,title,snippet,placeId?}]. "-" reads stdin.
-  --engine-search        Fall back to the keyless search engine when no hits were supplied.
+  --engine-search        Fall back to the keyless engines: every query, pooled and rank-fused.
   --limit <n>            Only resolve this many places.
 
 ENRICHMENT (enrich)
@@ -573,8 +573,9 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
   if (bools.has("queries")) {
     // The run's own town backfills a place that has no address of its own —
     // most OSM nodes have no addr:city, and a bare shop name is not a query.
-    const town = shortLabel(requireManifest(runDir).target.label);
-    const todo = buildResolveTodo(places, town);
+    const manifest = requireManifest(runDir);
+    const town = shortLabel(manifest.target.label);
+    const todo = buildResolveTodo(places, town, manifest.target.countryCode);
     const plan = limit ? todo.items.slice(0, limit) : todo.items;
     // Written as a worklist, not just printed: that is what makes the lane
     // fannable by `orchestrate`, and website discovery is the stage that
@@ -617,14 +618,17 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
     say("");
     say(`next: ultraprospect resolve --run ${runDir} --queries        # the queries to run`);
     say(`  then: ultraprospect resolve --run ${runDir} --web-results hits.json`);
-    say(`  or:   ultraprospect resolve --run ${runDir} --engine-search  # keyless fallback, much weaker`);
+    say(`  or:   ultraprospect resolve --run ${runDir} --engine-search  # keyless fallback, still weaker than your own WebSearch`);
     throw Object.assign(new Error("no search results supplied"), { exitCode: EXIT_USAGE, handled: true });
   }
 
   const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }) as any)));
+  const runManifest = requireManifest(runDir);
   const outcome = await runResolve(runDir, places, store, {
     webResults,
-    town: shortLabel(requireManifest(runDir).target.label),
+    town: shortLabel(runManifest.target.label),
+    countryCode: runManifest.target.countryCode,
+    lang: values.lang,
     limit,
     useEngineSearch: bools.has("engine-search"),
     onNote: (n) => say(`  ${n}`),
@@ -881,6 +885,7 @@ async function cmdOrchestrate(values: Record<string, string>, bools: ReadonlySet
   const result = emitOrchestration(runDir, engineAbs, {
     phase: values.phase,
     eco: bools.has("eco"),
+    countryCode: requireManifest(runDir).target.countryCode,
   });
 
   if (bools.has("list") || bools.has("json")) {

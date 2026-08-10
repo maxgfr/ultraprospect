@@ -12,13 +12,26 @@
 // address. A candidate that cannot is recorded as unverified, with the reason,
 // and the place keeps no website rather than a plausible one.
 //
-// Two lanes feed candidates, in this order:
+// THREE lanes feed candidates, in this order:
 //   1. The tag OSM already had — still only a claim, still corroborated.
 //   2. The agent's own WebSearch, pooled into a JSON file and passed with
 //      `--web-results`. The engine prints the queries to run; the agent runs
-//      them; the engine ingests the hits. Same shape as ultrasearch.
+//      them; the engine ingests the hits. Same shape as ultrasearch, and the
+//      main path — `resolve` refuses to run without it rather than quietly
+//      doing the weak half.
 //   3. webindex's keyless search, as a fallback when no hits were supplied.
-import { search } from "./engine.js";
+//      It used to run ONE query and take three results. It now runs every query
+//      this place has and fuses the lists with the engine's own Reciprocal Rank
+//      Fusion, which is what makes a domain that two distinct angles both
+//      surfaced beat one that a single angle ranked first.
+//
+// AND IT SEARCHES IN THE TERRITORY'S LANGUAGE. A run over Kreuzberg asking an
+// engine in American English gets an American engine's idea of a Berlin
+// bakery. The locale comes from the run's country, and the queries themselves
+// carry a per-country angle: the words a legal-notice page is called in that
+// language are often the only thing that surfaces a small company's own site.
+import { dedupeByUrl, rrf, search } from "./engine.js";
+import { legalNoticeTerms } from "./legal-notice.js";
 import { fetchPage, type PageStore } from "./pages.js";
 import type { PageRecord, Place } from "./types.js";
 import { foldAccents, normalizeName, tokenSet } from "./util.js";
@@ -31,67 +44,131 @@ import { foldAccents, normalizeName, tokenSet } from "./util.js";
  * by host rather than caught by the evidence check. Enriching from
  * societe.com would produce a dossier about a directory page.
  *
+ * SPLIT BY COUNTRY, because this list was ~90% French and silently stopped
+ * filtering anything the moment a run left France. A Berlin sweep would have
+ * enriched from gelbeseiten.de and produced a dossier about a phone book. The
+ * international block applies everywhere; the national blocks are added for the
+ * territory being swept.
+ *
  * Social profiles are separated rather than discarded: for a small trader a
  * Facebook page is often the only web presence there is, and it belongs in
  * `contacts.socials`, not in `website`.
  */
-const DIRECTORY_HOSTS = [
-  "pagesjaunes.fr",
-  "societe.com",
-  "verif.com",
-  "infogreffe.fr",
-  "annuaire-entreprises.data.gouv.fr",
-  "bodacc.fr",
-  "manageo.fr",
-  "kompass.com",
-  "europages.fr",
+const INTERNATIONAL_DIRECTORY_HOSTS = [
   "yelp.",
   "tripadvisor.",
-  "mappy.com",
-  "petitfute.com",
-  "justacote.com",
-  "cylex-france.fr",
-  "118712.fr",
-  "hoodspot.fr",
-  "dirigeants.bfmtv.com",
-  "pappers.fr",
-  "score3.fr",
-  "leboncoin.fr",
-  "amazon.",
-  "ebay.",
-  "doctolib.fr",
-  "ubereats.com",
-  "deliveroo.fr",
-  "thefork.",
-  "lafourchette.",
+  "kompass.com",
+  "europages.",
   "booking.com",
   "airbnb.",
   "indeed.com",
   "glassdoor.",
-  // Public-sector and sector directories, all seen ranking above a company's
-  // own site in real searches. education.gouv.fr's school annuaire is the one
-  // that actually displaced a school's website in a Saint-Mandé run.
-  "education.gouv.fr",
-  "ville-data.com",
-  "college-lycee.com",
-  "adresses-ecoles.fr",
-  "enseignement-prive.info",
-  "restaurantguru.com",
-  "restopolitan.com",
-  "restaurants-de-france.fr",
-  "uniiti.com",
-  "kazfeed.com",
-  "linternaute.com",
-  "journaldunet.com",
-  "figaro.fr",
+  "amazon.",
+  "ebay.",
+  "thefork.",
+  "opentable.",
+  "ubereats.com",
+  "wolt.com",
+  "deliveroo.",
+  "just-eat.",
+  "lieferando.",
+  "foursquare.com",
+  "trustpilot.com",
+  "crunchbase.com",
+  "bloomberg.com",
+  "dnb.com",
+  "opencorporates.com",
   "wikipedia.org",
+  "wikidata.org",
 ];
+
+const DIRECTORY_HOSTS_BY_COUNTRY: Record<string, string[]> = {
+  fr: [
+    "pagesjaunes.fr",
+    "societe.com",
+    "verif.com",
+    "infogreffe.fr",
+    "annuaire-entreprises.data.gouv.fr",
+    "bodacc.fr",
+    "manageo.fr",
+    "petitfute.com",
+    "justacote.com",
+    "cylex-france.fr",
+    "118712.fr",
+    "hoodspot.fr",
+    "dirigeants.bfmtv.com",
+    "pappers.fr",
+    "score3.fr",
+    "leboncoin.fr",
+    "doctolib.fr",
+    "mappy.com",
+    "lafourchette.",
+    // Public-sector and sector directories, all seen ranking above a company's
+    // own site in real searches. education.gouv.fr's school annuaire is the one
+    // that actually displaced a school's website in a Saint-Mandé run.
+    "education.gouv.fr",
+    "ville-data.com",
+    "college-lycee.com",
+    "adresses-ecoles.fr",
+    "enseignement-prive.info",
+    "restaurantguru.com",
+    "restopolitan.com",
+    "restaurants-de-france.fr",
+    "uniiti.com",
+    "kazfeed.com",
+    "linternaute.com",
+    "journaldunet.com",
+    "figaro.fr",
+  ],
+  de: [
+    "gelbeseiten.de",
+    "dasoertliche.de",
+    "11880.com",
+    "wlw.de",
+    "firmenwissen.de",
+    "northdata.de",
+    "unternehmensregister.de",
+    "meinestadt.de",
+    "goyellow.de",
+    "cylex.de",
+    "werkenntdenbesten.de",
+    "jameda.de",
+    "kununu.com",
+    "stepstone.de",
+  ],
+  es: ["paginasamarillas.es", "einforma.com", "axesor.es", "empresite.eleconomista.es", "infoempresa.com", "cylex.es", "11870.com", "infojobs.net"],
+  gb: ["yell.com", "companycheck.co.uk", "endole.co.uk", "checkatrade.com", "thomsonlocal.com", "cylex-uk.co.uk", "192.com", "reed.co.uk", "totaljobs.com"],
+  us: [
+    "yellowpages.com",
+    "bbb.org",
+    "manta.com",
+    "bizapedia.com",
+    "chamberofcommerce.com",
+    "mapquest.com",
+    "angi.com",
+    "thumbtack.com",
+    "zillow.com",
+    "ziprecruiter.com",
+  ],
+  it: ["paginegialle.it", "ufficiocamerale.it", "reportaziende.it", "misterimprese.it"],
+  nl: ["telefoonboek.nl", "detelefoongids.nl", "bedrijvenpagina.nl"],
+  no: ["gulesider.no", "proff.no", "1881.no"],
+  fi: ["fonecta.fi", "finder.fi"],
+  cz: ["firmy.cz", "zivefirmy.cz"],
+  pl: ["panoramafirm.pl", "aleo.com", "pkt.pl"],
+};
 
 const SOCIAL_HOSTS = ["facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "youtube.com", "tiktok.com", "pinterest.", "wa.me"];
 
 export type HostKind = "own" | "directory" | "social";
 
-export function classifyHost(url: string): HostKind {
+/** The hosts to exclude for a territory: the international core plus that country's own. */
+export function directoryHostsFor(countryCode: string | undefined): string[] {
+  const national = DIRECTORY_HOSTS_BY_COUNTRY[(countryCode ?? "").toLowerCase()] ?? [];
+  return [...INTERNATIONAL_DIRECTORY_HOSTS, ...national];
+}
+
+export function classifyHost(url: string, countryCode?: string): HostKind {
   let host: string;
   try {
     host = new URL(url).hostname.toLowerCase();
@@ -99,7 +176,7 @@ export function classifyHost(url: string): HostKind {
     return "directory";
   }
   if (SOCIAL_HOSTS.some((h) => host.includes(h))) return "social";
-  if (DIRECTORY_HOSTS.some((h) => host.includes(h))) return "directory";
+  if (directoryHostsFor(countryCode).some((h) => host.includes(h))) return "directory";
   return "own";
 }
 
@@ -116,7 +193,7 @@ export function classifyHost(url: string): HostKind {
  * a restaurant in Mexico. The run's own territory is the right answer and we
  * always know it: the place was found inside it, by construction.
  */
-export function queriesFor(place: Place, fallbackTown?: string): string[] {
+export function queriesFor(place: Place, fallbackTown?: string, countryCode?: string): string[] {
   const town = place.address.commune ?? place.address.codePostal ?? fallbackTown ?? "";
   const names = new Set<string>();
   if (place.osm?.name) names.add(place.osm.name);
@@ -132,7 +209,48 @@ export function queriesFor(place: Place, fallbackTown?: string): string[] {
   // the UK — so it comes off the record rather than out of a French constant.
   const legalId = place.registry?.establishmentId ?? place.registry?.id;
   if (legalId) queries.push(`"${legalId}"`);
+  // Where no register swept the territory there IS no number to quote, and the
+  // strongest remaining angle is the page the law makes mandatory: only a
+  // company's own site has an Impressum for that company.
+  const firstName = [...names][0];
+  if (!legalId && firstName) {
+    for (const term of legalNoticeTerms(countryCode)) queries.push(`${firstName} ${term}`);
+  }
   return [...new Set(queries)].slice(0, 3);
+}
+
+/**
+ * The BCP-47 tag the search engines should answer in.
+ *
+ * A run over Kreuzberg asking in American English gets an American engine's
+ * idea of a Berlin bakery, and the company's own German-language site is not on
+ * the first page. `--lang` wins when given; otherwise the territory's country
+ * decides, which is right far more often than a global default.
+ */
+export function searchLocaleFor(countryCode: string | undefined, lang?: string): string | undefined {
+  if (lang) return lang;
+  const cc = (countryCode ?? "").toLowerCase();
+  const byCountry: Record<string, string> = {
+    fr: "fr-FR",
+    de: "de-DE",
+    at: "de-AT",
+    ch: "de-CH",
+    es: "es-ES",
+    it: "it-IT",
+    nl: "nl-NL",
+    be: "nl-BE",
+    pt: "pt-PT",
+    pl: "pl-PL",
+    cz: "cs-CZ",
+    no: "nb-NO",
+    fi: "fi-FI",
+    se: "sv-SE",
+    dk: "da-DK",
+    gb: "en-GB",
+    ie: "en-IE",
+    us: "en-US",
+  };
+  return byCountry[cc];
 }
 
 /**
@@ -264,6 +382,10 @@ export interface ResolveOptions {
   webResults?: WebHit[];
   /** The run's territory, used when a place carries no address of its own. */
   town?: string;
+  /** The run's country. Decides the directory blocklist, the query angles and the search locale. */
+  countryCode?: string;
+  /** BCP-47 override for the search locale, from `--lang`. */
+  lang?: string;
   /** Only work on this many places. */
   limit?: number;
   /** Fall back to the engine's keyless search when no hits were supplied. */
@@ -285,11 +407,11 @@ export interface ResolveOutcome {
 }
 
 /** Places that still need a website, or whose website is only a mapper's claim. */
-export function buildResolveTodo(places: readonly Place[], town?: string): ResolveTodo {
+export function buildResolveTodo(places: readonly Place[], town?: string, countryCode?: string): ResolveTodo {
   return {
     version: 1,
     generatedAt: new Date().toISOString(),
-    items: needsResolving(places).map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town) })),
+    items: needsResolving(places).map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town, countryCode) })),
   };
 }
 
@@ -304,6 +426,44 @@ function candidateUrlsFor(place: Place, hits: readonly WebHit[]): string[] {
   // Keep at most three: each costs a fetch, and past the third the ranking is
   // noise anyway.
   return [...new Set(urls)].slice(0, 3);
+}
+
+/**
+ * The keyless fallback, pooled the way ultrasearch pools.
+ *
+ * It used to run ONE query and take three results, which is a fallback in name
+ * only: the queries this tool generates are deliberately DIFFERENT ANGLES on
+ * the same company — the shopfront name, the legal name, the registration
+ * number, the legal-notice page — and throwing away all but the first discards
+ * the diversity that makes them worth generating.
+ *
+ * Every query runs, and the ranked lists are fused with the engine's own
+ * Reciprocal Rank Fusion. RRF reads POSITION rather than score, which is what
+ * makes it correct here: a keyless engine's relevance number is not comparable
+ * across queries, but "this domain came third for the name AND second for the
+ * registration number" is exactly the signal that identifies a company's own
+ * site.
+ */
+async function keylessHits(queries: readonly string[], locale: string | undefined): Promise<WebHit[]> {
+  const lists: WebHit[][] = [];
+  for (const query of queries) {
+    try {
+      const res = await search(query, { limit: 5, lang: locale });
+      lists.push((res.hits ?? []).map((h: { url: string; title?: string; snippet?: string }) => ({ url: h.url, title: h.title, snippet: h.snippet })));
+    } catch {
+      // A keyless engine being unavailable is not this place's problem.
+    }
+  }
+  if (lists.length === 0) return [];
+
+  const byUrl = new Map<string, WebHit>();
+  for (const list of lists) for (const hit of list) if (!byUrl.has(hit.url)) byUrl.set(hit.url, hit);
+  const fused = rrf(lists, (h) => h.url);
+  const ranked = [...byUrl.values()].map((hit) => ({ ...hit, score: fused.get(hit.url) ?? 0 })).sort((a, b) => b.score - a.score);
+  // `dedupeByUrl` canonicalises before comparing, so `example.com/?utm_source=…`
+  // and `example.com/` collapse — which a plain Map keyed on the raw URL does
+  // not do, and which is most of the duplication a pooled search produces.
+  return dedupeByUrl(ranked).items.map(({ url, title, snippet }) => ({ url, title, snippet }));
 }
 
 /** Group the agent's pooled hits by place, matching on the query it answered. */
@@ -345,6 +505,9 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
   };
   const outcome: ResolveOutcome = { pages: new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unchanged: 0, socials: 0, notes };
 
+  const locale = searchLocaleFor(opts.countryCode, opts.lang);
+  if (opts.useEngineSearch && locale) note(`resolve: the keyless fallback will search in ${locale}`);
+
   const targets = needsResolving(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
   const grouped = groupHits(targets, opts.webResults ?? []);
   if (opts.webResults?.length) note(`resolve: ${opts.webResults.length} supplied web result(s) attributed to ${grouped.size} place(s)`);
@@ -357,15 +520,7 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
 
     let hits = grouped.get(place.id) ?? [];
     if (hits.length === 0 && opts.useEngineSearch) {
-      const query = queriesFor(place, opts.town)[0];
-      if (query) {
-        try {
-          const res = await search(query, { limit: 3 });
-          hits = (res.hits ?? []).map((h: { url: string; title?: string; snippet?: string }) => ({ url: h.url, title: h.title, snippet: h.snippet }));
-        } catch {
-          // A keyless engine being unavailable is not this place's problem.
-        }
-      }
+      hits = await keylessHits(queriesFor(place, opts.town, opts.countryCode), locale);
     }
 
     const candidates = candidateUrlsFor(place, hits);
@@ -376,7 +531,7 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
 
     let settled = false;
     for (const url of candidates) {
-      const kind = classifyHost(url);
+      const kind = classifyHost(url, opts.countryCode);
       if (kind === "social") {
         // Real signal, wrong field. A profile is not a website, and enriching
         // from one would produce a dossier about a social network's chrome.

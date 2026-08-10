@@ -1200,6 +1200,33 @@ function fnv1a64(s) {
   }
   return h;
 }
+function rrf(lists, keyOf, k = 60) {
+  const score = /* @__PURE__ */ new Map();
+  for (const list2 of lists) {
+    list2.forEach((item, idx) => {
+      const key = keyOf(item);
+      score.set(key, (score.get(key) ?? 0) + 1 / (k + idx + 1));
+    });
+  }
+  return score;
+}
+function dedupeByUrl(items) {
+  const best = /* @__PURE__ */ new Map();
+  const order = [];
+  let dropped = 0;
+  for (const it of items) {
+    const key = canonicalizeUrl(it.url);
+    const prev = best.get(key);
+    if (!prev) {
+      best.set(key, it);
+      order.push(key);
+    } else {
+      dropped++;
+      if (it.score > prev.score) best.set(key, it);
+    }
+  }
+  return { items: order.map((k) => best.get(k)), dropped };
+}
 var LANG_COUNTRY = {
   en: "us",
   pt: "br",
@@ -6202,6 +6229,32 @@ function extractLegalIds(text2, countryCode, pageId) {
 function extractLegalId(text2, countryCode) {
   return extractLegalIds(text2, countryCode)[0]?.value;
 }
+function legalNoticeTerms(countryCode) {
+  switch ((countryCode ?? "").toLowerCase()) {
+    case "de":
+    case "at":
+    case "ch":
+      return ["Impressum"];
+    case "es":
+      return ["aviso legal"];
+    case "fr":
+      return ["mentions l\xE9gales"];
+    case "it":
+      return ["note legali"];
+    case "nl":
+      return ["colofon"];
+    case "pt":
+      return ["aviso legal"];
+    case "pl":
+      return ["polityka prywatno\u015Bci"];
+    case "gb":
+    case "ie":
+    case "us":
+      return ["legal notice"];
+    default:
+      return [];
+  }
+}
 function legalIdCoverage(countryCode) {
   const cc = countryCode?.toLowerCase();
   if (cc && LEGAL_NOTICE_COUNTRIES.includes(cc)) {
@@ -6529,59 +6582,114 @@ function markupEvidence(html) {
 }
 
 // src/resolve.ts
-var DIRECTORY_HOSTS = [
-  "pagesjaunes.fr",
-  "societe.com",
-  "verif.com",
-  "infogreffe.fr",
-  "annuaire-entreprises.data.gouv.fr",
-  "bodacc.fr",
-  "manageo.fr",
-  "kompass.com",
-  "europages.fr",
+var INTERNATIONAL_DIRECTORY_HOSTS = [
   "yelp.",
   "tripadvisor.",
-  "mappy.com",
-  "petitfute.com",
-  "justacote.com",
-  "cylex-france.fr",
-  "118712.fr",
-  "hoodspot.fr",
-  "dirigeants.bfmtv.com",
-  "pappers.fr",
-  "score3.fr",
-  "leboncoin.fr",
-  "amazon.",
-  "ebay.",
-  "doctolib.fr",
-  "ubereats.com",
-  "deliveroo.fr",
-  "thefork.",
-  "lafourchette.",
+  "kompass.com",
+  "europages.",
   "booking.com",
   "airbnb.",
   "indeed.com",
   "glassdoor.",
-  // Public-sector and sector directories, all seen ranking above a company's
-  // own site in real searches. education.gouv.fr's school annuaire is the one
-  // that actually displaced a school's website in a Saint-Mandé run.
-  "education.gouv.fr",
-  "ville-data.com",
-  "college-lycee.com",
-  "adresses-ecoles.fr",
-  "enseignement-prive.info",
-  "restaurantguru.com",
-  "restopolitan.com",
-  "restaurants-de-france.fr",
-  "uniiti.com",
-  "kazfeed.com",
-  "linternaute.com",
-  "journaldunet.com",
-  "figaro.fr",
-  "wikipedia.org"
+  "amazon.",
+  "ebay.",
+  "thefork.",
+  "opentable.",
+  "ubereats.com",
+  "wolt.com",
+  "deliveroo.",
+  "just-eat.",
+  "lieferando.",
+  "foursquare.com",
+  "trustpilot.com",
+  "crunchbase.com",
+  "bloomberg.com",
+  "dnb.com",
+  "opencorporates.com",
+  "wikipedia.org",
+  "wikidata.org"
 ];
+var DIRECTORY_HOSTS_BY_COUNTRY = {
+  fr: [
+    "pagesjaunes.fr",
+    "societe.com",
+    "verif.com",
+    "infogreffe.fr",
+    "annuaire-entreprises.data.gouv.fr",
+    "bodacc.fr",
+    "manageo.fr",
+    "petitfute.com",
+    "justacote.com",
+    "cylex-france.fr",
+    "118712.fr",
+    "hoodspot.fr",
+    "dirigeants.bfmtv.com",
+    "pappers.fr",
+    "score3.fr",
+    "leboncoin.fr",
+    "doctolib.fr",
+    "mappy.com",
+    "lafourchette.",
+    // Public-sector and sector directories, all seen ranking above a company's
+    // own site in real searches. education.gouv.fr's school annuaire is the one
+    // that actually displaced a school's website in a Saint-Mandé run.
+    "education.gouv.fr",
+    "ville-data.com",
+    "college-lycee.com",
+    "adresses-ecoles.fr",
+    "enseignement-prive.info",
+    "restaurantguru.com",
+    "restopolitan.com",
+    "restaurants-de-france.fr",
+    "uniiti.com",
+    "kazfeed.com",
+    "linternaute.com",
+    "journaldunet.com",
+    "figaro.fr"
+  ],
+  de: [
+    "gelbeseiten.de",
+    "dasoertliche.de",
+    "11880.com",
+    "wlw.de",
+    "firmenwissen.de",
+    "northdata.de",
+    "unternehmensregister.de",
+    "meinestadt.de",
+    "goyellow.de",
+    "cylex.de",
+    "werkenntdenbesten.de",
+    "jameda.de",
+    "kununu.com",
+    "stepstone.de"
+  ],
+  es: ["paginasamarillas.es", "einforma.com", "axesor.es", "empresite.eleconomista.es", "infoempresa.com", "cylex.es", "11870.com", "infojobs.net"],
+  gb: ["yell.com", "companycheck.co.uk", "endole.co.uk", "checkatrade.com", "thomsonlocal.com", "cylex-uk.co.uk", "192.com", "reed.co.uk", "totaljobs.com"],
+  us: [
+    "yellowpages.com",
+    "bbb.org",
+    "manta.com",
+    "bizapedia.com",
+    "chamberofcommerce.com",
+    "mapquest.com",
+    "angi.com",
+    "thumbtack.com",
+    "zillow.com",
+    "ziprecruiter.com"
+  ],
+  it: ["paginegialle.it", "ufficiocamerale.it", "reportaziende.it", "misterimprese.it"],
+  nl: ["telefoonboek.nl", "detelefoongids.nl", "bedrijvenpagina.nl"],
+  no: ["gulesider.no", "proff.no", "1881.no"],
+  fi: ["fonecta.fi", "finder.fi"],
+  cz: ["firmy.cz", "zivefirmy.cz"],
+  pl: ["panoramafirm.pl", "aleo.com", "pkt.pl"]
+};
 var SOCIAL_HOSTS = ["facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "youtube.com", "tiktok.com", "pinterest.", "wa.me"];
-function classifyHost(url) {
+function directoryHostsFor(countryCode) {
+  const national = DIRECTORY_HOSTS_BY_COUNTRY[(countryCode ?? "").toLowerCase()] ?? [];
+  return [...INTERNATIONAL_DIRECTORY_HOSTS, ...national];
+}
+function classifyHost(url, countryCode) {
   let host;
   try {
     host = new URL(url).hostname.toLowerCase();
@@ -6589,10 +6697,10 @@ function classifyHost(url) {
     return "directory";
   }
   if (SOCIAL_HOSTS.some((h) => host.includes(h))) return "social";
-  if (DIRECTORY_HOSTS.some((h) => host.includes(h))) return "directory";
+  if (directoryHostsFor(countryCode).some((h) => host.includes(h))) return "directory";
   return "own";
 }
-function queriesFor(place, fallbackTown) {
+function queriesFor(place, fallbackTown, countryCode) {
   const town = place.address.commune ?? place.address.codePostal ?? fallbackTown ?? "";
   const names = /* @__PURE__ */ new Set();
   if (place.osm?.name) names.add(place.osm.name);
@@ -6603,7 +6711,36 @@ function queriesFor(place, fallbackTown) {
   }
   const legalId = place.registry?.establishmentId ?? place.registry?.id;
   if (legalId) queries.push(`"${legalId}"`);
+  const firstName = [...names][0];
+  if (!legalId && firstName) {
+    for (const term of legalNoticeTerms(countryCode)) queries.push(`${firstName} ${term}`);
+  }
   return [...new Set(queries)].slice(0, 3);
+}
+function searchLocaleFor(countryCode, lang) {
+  if (lang) return lang;
+  const cc = (countryCode ?? "").toLowerCase();
+  const byCountry = {
+    fr: "fr-FR",
+    de: "de-DE",
+    at: "de-AT",
+    ch: "de-CH",
+    es: "es-ES",
+    it: "it-IT",
+    nl: "nl-NL",
+    be: "nl-BE",
+    pt: "pt-PT",
+    pl: "pl-PL",
+    cz: "cs-CZ",
+    no: "nb-NO",
+    fi: "fi-FI",
+    se: "sv-SE",
+    dk: "da-DK",
+    gb: "en-GB",
+    ie: "en-IE",
+    us: "en-US"
+  };
+  return byCountry[cc];
 }
 function namesOf2(place) {
   const rec = place.registry;
@@ -6651,11 +6788,11 @@ ${pageText}`).toLowerCase();
   }
   return { ok: true, evidence };
 }
-function buildResolveTodo(places, town) {
+function buildResolveTodo(places, town, countryCode) {
   return {
     version: 1,
     generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    items: needsResolving(places).map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town) }))
+    items: needsResolving(places).map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town, countryCode) }))
   };
 }
 function needsResolving(places) {
@@ -6666,6 +6803,22 @@ function candidateUrlsFor(place, hits) {
   if (place.website?.url) urls.push(place.website.url);
   for (const h of hits) urls.push(h.url);
   return [...new Set(urls)].slice(0, 3);
+}
+async function keylessHits(queries, locale) {
+  const lists = [];
+  for (const query of queries) {
+    try {
+      const res = await search(query, { limit: 5, lang: locale });
+      lists.push((res.hits ?? []).map((h) => ({ url: h.url, title: h.title, snippet: h.snippet })));
+    } catch {
+    }
+  }
+  if (lists.length === 0) return [];
+  const byUrl = /* @__PURE__ */ new Map();
+  for (const list2 of lists) for (const hit of list2) if (!byUrl.has(hit.url)) byUrl.set(hit.url, hit);
+  const fused = rrf(lists, (h) => h.url);
+  const ranked2 = [...byUrl.values()].map((hit) => ({ ...hit, score: fused.get(hit.url) ?? 0 })).sort((a, b) => b.score - a.score);
+  return dedupeByUrl(ranked2).items.map(({ url, title, snippet }) => ({ url, title, snippet }));
 }
 function groupHits(places, hits) {
   const byPlace = /* @__PURE__ */ new Map();
@@ -6700,6 +6853,8 @@ async function runResolve(runDir, places, store, opts = {}) {
     opts.onNote?.(n);
   };
   const outcome = { pages: /* @__PURE__ */ new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unchanged: 0, socials: 0, notes };
+  const locale = searchLocaleFor(opts.countryCode, opts.lang);
+  if (opts.useEngineSearch && locale) note(`resolve: the keyless fallback will search in ${locale}`);
   const targets = needsResolving(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
   const grouped = groupHits(targets, opts.webResults ?? []);
   if (opts.webResults?.length) note(`resolve: ${opts.webResults.length} supplied web result(s) attributed to ${grouped.size} place(s)`);
@@ -6710,14 +6865,7 @@ async function runResolve(runDir, places, store, opts = {}) {
     opts.onProgress?.(done, targets.length, place.name);
     let hits = grouped.get(place.id) ?? [];
     if (hits.length === 0 && opts.useEngineSearch) {
-      const query = queriesFor(place, opts.town)[0];
-      if (query) {
-        try {
-          const res = await search(query, { limit: 3 });
-          hits = (res.hits ?? []).map((h) => ({ url: h.url, title: h.title, snippet: h.snippet }));
-        } catch {
-        }
-      }
+      hits = await keylessHits(queriesFor(place, opts.town, opts.countryCode), locale);
     }
     const candidates = candidateUrlsFor(place, hits);
     if (candidates.length === 0) {
@@ -6726,7 +6874,7 @@ async function runResolve(runDir, places, store, opts = {}) {
     }
     let settled = false;
     for (const url of candidates) {
-      const kind = classifyHost(url);
+      const kind = classifyHost(url, opts.countryCode);
       if (kind === "social") {
         if (!place.contacts.socials.some((s) => s.value === url)) {
           place.contacts.socials.push({ value: url, from: "web", lane: "web", note: "found while resolving the website" });
@@ -8609,6 +8757,7 @@ var PREAMBLE = [
   ""
 ];
 function emitOrchestration(runDir, engineAbs, opts = {}) {
+  const countryCode = opts.countryCode;
   return orchestrateRun(
     runDir,
     engineAbs,
@@ -8618,7 +8767,7 @@ function emitOrchestration(runDir, engineAbs, opts = {}) {
     // role. Including the extension here produces adjudicator.md.md, which the
     // workflow then cannot find.
     (run, engine, phases) => ({
-      searcher: searcherContract(run, engine),
+      searcher: searcherContract(run, engine, countryCode),
       adjudicator: adjudicatorContract(
         run,
         engine,
@@ -8629,7 +8778,9 @@ function emitOrchestration(runDir, engineAbs, opts = {}) {
     { ...opts, runbookPreamble: PREAMBLE }
   );
 }
-function searcherContract(run, engineAbs) {
+function searcherContract(run, engineAbs, countryCode) {
+  const locale = searchLocaleFor(countryCode);
+  const terms = legalNoticeTerms(countryCode);
   return `# Searcher
 
 You find the websites. **This is the stage the whole run rests on** \u2014 everything
@@ -8644,14 +8795,24 @@ two or three \`queries\` already phrased for it.
 ## Do
 
 **Run your own WebSearch, once per query.** Different queries are different
-angles, not rephrasings: the shopfront name, the legal name, and the SIREN in
-quotes, which is the highest-precision query there is.
+angles, not rephrasings: the shopfront name, the legal name, the registration
+number in quotes \u2014 the highest-precision query there is${terms.length ? `, and "\xABname\xBB ${terms[0]}"` : ""}.
+${terms.length ? `
+**\`${terms[0]}\` is the angle that matters here.** ${countryCode?.toUpperCase()} law requires a company
+to publish its registration on its own site, so that page exists only on the
+company's own domain \u2014 which is exactly the domain a bare-name search buries
+under directories.
+` : ""}${locale ? `
+**Search in ${locale}.** This territory is not English-speaking, and an
+English-language search returns an English-language engine's idea of it: the
+company's own site is often not on the first page at all.
+` : ""}
 
 Pool EVERY result \u2014 duplicates, directories, obvious noise, all of it. You are
 finding candidates, not deciding which is right: the engine fetches each one and
-keeps it only if the page carries the company's name, address or SIREN.
-Filtering here would throw away the evidence it needs, and directory hosts are
-excluded by the engine anyway.
+keeps it only if the page carries the company's name, address or registration
+number. Filtering here would throw away the evidence it needs, and directory
+hosts are excluded by the engine anyway.
 
 **Tag every hit with the \`placeId\` it came from.** An untagged pool is
 attributed by name token, which works and is lossier. Never guess a placeId onto
@@ -8864,7 +9025,7 @@ FILTERS (scan)
 WEBSITE DISCOVERY (resolve)
   --queries              Print the search queries to run, one per line, and stop.
   --web-results <file>   Hits from your own WebSearch: [{url,title,snippet,placeId?}]. "-" reads stdin.
-  --engine-search        Fall back to the keyless search engine when no hits were supplied.
+  --engine-search        Fall back to the keyless engines: every query, pooled and rank-fused.
   --limit <n>            Only resolve this many places.
 
 ENRICHMENT (enrich)
@@ -9184,8 +9345,9 @@ async function cmdResolve(values, bools) {
   const limit = values.limit ? clampInt(values.limit, 1, 1e5, 50) : void 0;
   const targets = needsResolving(places).slice(0, limit ?? Number.POSITIVE_INFINITY);
   if (bools.has("queries")) {
-    const town = shortLabel(requireManifest(runDir).target.label);
-    const todo = buildResolveTodo(places, town);
+    const manifest2 = requireManifest(runDir);
+    const town = shortLabel(manifest2.target.label);
+    const todo = buildResolveTodo(places, town, manifest2.target.countryCode);
     const plan = limit ? todo.items.slice(0, limit) : todo.items;
     writeJson(runDir, "RESOLVE.todo.json", { ...todo, items: plan });
     if (bools.has("json")) out(jsonLine(plan));
@@ -9216,13 +9378,16 @@ async function cmdResolve(values, bools) {
     say("");
     say(`next: ultraprospect resolve --run ${runDir} --queries        # the queries to run`);
     say(`  then: ultraprospect resolve --run ${runDir} --web-results hits.json`);
-    say(`  or:   ultraprospect resolve --run ${runDir} --engine-search  # keyless fallback, much weaker`);
+    say(`  or:   ultraprospect resolve --run ${runDir} --engine-search  # keyless fallback, still weaker than your own WebSearch`);
     throw Object.assign(new Error("no search results supplied"), { exitCode: EXIT_USAGE, handled: true });
   }
   const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }))));
+  const runManifest = requireManifest(runDir);
   const outcome = await runResolve(runDir, places, store, {
     webResults,
-    town: shortLabel(requireManifest(runDir).target.label),
+    town: shortLabel(runManifest.target.label),
+    countryCode: runManifest.target.countryCode,
+    lang: values.lang,
     limit,
     useEngineSearch: bools.has("engine-search"),
     onNote: (n) => say(`  ${n}`),
@@ -9444,7 +9609,8 @@ async function cmdOrchestrate(values, bools) {
   const engineAbs = fileURLToPath2(new URL(import.meta.url));
   const result = emitOrchestration(runDir, engineAbs, {
     phase: values.phase,
-    eco: bools.has("eco")
+    eco: bools.has("eco"),
+    countryCode: requireManifest(runDir).target.countryCode
   });
   if (bools.has("list") || bools.has("json")) {
     out(

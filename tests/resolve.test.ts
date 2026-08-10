@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyHost, corroborate, groupHits, needsResolving, queriesFor } from "../src/resolve.js";
+import { classifyHost, corroborate, groupHits, needsResolving, queriesFor, searchLocaleFor } from "../src/resolve.js";
 import type { Place } from "../src/types.js";
 import { rec } from "./factories.js";
 
@@ -19,17 +19,40 @@ function place(over: Partial<Place> = {}): Place {
 
 describe("classifyHost", () => {
   it("calls a company domain its own", () => {
-    expect(classifyHost("https://lesofficiers.fr/")).toBe("own");
+    expect(classifyHost("https://lesofficiers.fr/", "fr")).toBe("own");
+  });
+
+  it("excludes each country's own directories, which a French-only list never did", () => {
+    // A Berlin sweep would otherwise have enriched from gelbeseiten.de and
+    // produced a dossier about a phone book.
+    expect(classifyHost("https://www.gelbeseiten.de/gsbiz/123", "de")).toBe("directory");
+    expect(classifyHost("https://www.paginasamarillas.es/x", "es")).toBe("directory");
+    expect(classifyHost("https://www.yell.com/biz/x", "gb")).toBe("directory");
+    expect(classifyHost("https://www.yellowpages.com/x", "us")).toBe("directory");
+  });
+
+  it("excludes the international directories in every country", () => {
+    for (const cc of ["fr", "de", "us", undefined]) {
+      expect(classifyHost("https://www.tripadvisor.com/Restaurant_Review-x", cc), String(cc)).toBe("directory");
+      expect(classifyHost("https://www.yelp.com/biz/x", cc), String(cc)).toBe("directory");
+    }
   });
 
   it("excludes directories, which corroborate beautifully and are not the company", () => {
     // A pagesjaunes listing carries the name, the address AND the phone number,
     // so the evidence check would happily accept it. It has to be excluded by
     // host, or the enrichment stage writes a dossier about a directory page.
-    expect(classifyHost("https://www.pagesjaunes.fr/pros/12345")).toBe("directory");
-    expect(classifyHost("https://www.societe.com/societe/x-123.html")).toBe("directory");
-    expect(classifyHost("https://annuaire-entreprises.data.gouv.fr/entreprise/x")).toBe("directory");
-    expect(classifyHost("https://www.doctolib.fr/dentiste/paris/x")).toBe("directory");
+    //
+    // National directories are only excluded for their own country now: the
+    // list was ~90% French and silently stopped filtering anything the moment a
+    // run left France.
+    expect(classifyHost("https://www.pagesjaunes.fr/pros/12345", "fr")).toBe("directory");
+    expect(classifyHost("https://www.societe.com/societe/x-123.html", "fr")).toBe("directory");
+    expect(classifyHost("https://annuaire-entreprises.data.gouv.fr/entreprise/x", "fr")).toBe("directory");
+    expect(classifyHost("https://www.doctolib.fr/dentiste/paris/x", "fr")).toBe("directory");
+    // …and NOT excluded outside France, where the host is not a directory for
+    // the territory being swept.
+    expect(classifyHost("https://www.doctolib.fr/dentiste/paris/x", "de")).toBe("own");
   });
 
   it("separates social profiles rather than discarding them", () => {
@@ -150,5 +173,57 @@ describe("needsResolving", () => {
     const declared = place({ id: "2", website: { url: "https://x", confidence: "declared", evidence: ["osm"] } });
     const proven = place({ id: "3", website: { url: "https://y", confidence: "corroborated", evidence: ["P1"] } });
     expect(needsResolving([none, declared, proven]).map((p) => p.id)).toEqual(["1", "2"]);
+  });
+});
+
+describe("searchLocaleFor", () => {
+  it("searches in the territory's language, not the machine's", () => {
+    // A run over Kreuzberg asking a search engine in American English gets an
+    // American engine's idea of a Berlin bakery, and the company's own
+    // German-language site is nowhere on the first page.
+    expect(searchLocaleFor("de")).toBe("de-DE");
+    expect(searchLocaleFor("fr")).toBe("fr-FR");
+    expect(searchLocaleFor("gb")).toBe("en-GB");
+    expect(searchLocaleFor("us")).toBe("en-US");
+  });
+
+  it("lets --lang override the country", () => {
+    expect(searchLocaleFor("de", "en-GB")).toBe("en-GB");
+  });
+
+  it("says nothing rather than guessing for a country it has no locale for", () => {
+    expect(searchLocaleFor("jp")).toBeUndefined();
+    expect(searchLocaleFor(undefined)).toBeUndefined();
+  });
+});
+
+describe("queriesFor, per country", () => {
+  function german(): Place {
+    return place({
+      id: "osm:n9",
+      name: "Bäckerei Siebert",
+      osm: { id: "n9", osmType: "node", osmId: 9, name: "Bäckerei Siebert", lat: 52.53, lon: 13.42, tags: {} },
+      address: { commune: "Berlin" },
+      registry: undefined,
+    });
+  }
+
+  it("adds the legal-notice angle in the territory's language when no registration number exists", () => {
+    // Outside France there is no swept register, so no number to quote. The
+    // page the law makes mandatory is the strongest angle left: only a
+    // company's own site has an Impressum for that company.
+    expect(queriesFor(german(), "Berlin", "de")).toContain("Bäckerei Siebert Impressum");
+    expect(queriesFor(german(), "Madrid", "es")).toContain("Bäckerei Siebert aviso legal");
+  });
+
+  it("prefers the registration number when there is one, and drops the legal-notice angle", () => {
+    const french = place({ registry: rec({ id: "302474648", establishmentId: "30247464801175" }) });
+    const queries = queriesFor(french, "Vincennes", "fr");
+    expect(queries).toContain('"30247464801175"');
+    expect(queries.some((q) => q.includes("mentions"))).toBe(false);
+  });
+
+  it("adds nothing for a country with no modelled legal-notice obligation", () => {
+    expect(queriesFor(german(), "Tokyo", "jp").some((q) => q.includes("Impressum"))).toBe(false);
   });
 });

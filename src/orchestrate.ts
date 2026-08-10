@@ -19,6 +19,8 @@
 // Subagents never write to the run. They return a fragment; the orchestrator
 // folds it with `match --apply` or by saving the dossier. One writer, always.
 import { orchestrateRun, type OrchestrateOptions, type OrchestrateResult, type PhaseDefinition, type PhaseInfo } from "./engine.js";
+import { legalNoticeTerms } from "./legal-notice.js";
+import { searchLocaleFor } from "./resolve.js";
 import type { MatchTodo, Place } from "./types.js";
 
 const RESOLVE_SCHEMA = {
@@ -163,7 +165,13 @@ const PREAMBLE = [
   "",
 ];
 
-export function emitOrchestration(runDir: string, engineAbs: string, opts: OrchestrateOptions = {}): OrchestrateResult {
+export interface OrchestrateInput extends OrchestrateOptions {
+  /** The run's country. The searcher's contract is written in its language and law. */
+  countryCode?: string;
+}
+
+export function emitOrchestration(runDir: string, engineAbs: string, opts: OrchestrateInput = {}): OrchestrateResult {
+  const countryCode = opts.countryCode;
   return orchestrateRun(
     runDir,
     engineAbs,
@@ -173,7 +181,7 @@ export function emitOrchestration(runDir: string, engineAbs: string, opts: Orche
     // role. Including the extension here produces adjudicator.md.md, which the
     // workflow then cannot find.
     (run, engine, phases: PhaseInfo[]) => ({
-      searcher: searcherContract(run, engine),
+      searcher: searcherContract(run, engine, countryCode),
       adjudicator: adjudicatorContract(
         run,
         engine,
@@ -185,7 +193,9 @@ export function emitOrchestration(runDir: string, engineAbs: string, opts: Orche
   );
 }
 
-function searcherContract(run: string, engineAbs: string): string {
+function searcherContract(run: string, engineAbs: string, countryCode?: string): string {
+  const locale = searchLocaleFor(countryCode);
+  const terms = legalNoticeTerms(countryCode);
   return `# Searcher
 
 You find the websites. **This is the stage the whole run rests on** — everything
@@ -200,14 +210,32 @@ two or three \`queries\` already phrased for it.
 ## Do
 
 **Run your own WebSearch, once per query.** Different queries are different
-angles, not rephrasings: the shopfront name, the legal name, and the SIREN in
-quotes, which is the highest-precision query there is.
+angles, not rephrasings: the shopfront name, the legal name, the registration
+number in quotes — the highest-precision query there is${terms.length ? `, and "«name» ${terms[0]}"` : ""}.
+${
+  terms.length
+    ? `
+**\`${terms[0]}\` is the angle that matters here.** ${countryCode?.toUpperCase()} law requires a company
+to publish its registration on its own site, so that page exists only on the
+company's own domain — which is exactly the domain a bare-name search buries
+under directories.
+`
+    : ""
+}${
+  locale
+    ? `
+**Search in ${locale}.** This territory is not English-speaking, and an
+English-language search returns an English-language engine's idea of it: the
+company's own site is often not on the first page at all.
+`
+    : ""
+}
 
 Pool EVERY result — duplicates, directories, obvious noise, all of it. You are
 finding candidates, not deciding which is right: the engine fetches each one and
-keeps it only if the page carries the company's name, address or SIREN.
-Filtering here would throw away the evidence it needs, and directory hosts are
-excluded by the engine anyway.
+keeps it only if the page carries the company's name, address or registration
+number. Filtering here would throw away the evidence it needs, and directory
+hosts are excluded by the engine anyway.
 
 **Tag every hit with the \`placeId\` it came from.** An untagged pool is
 attributed by name token, which works and is lossier. Never guess a placeId onto

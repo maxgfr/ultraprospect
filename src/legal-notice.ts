@@ -216,6 +216,41 @@ export function extractLegalId(text: string, countryCode?: string): string | und
 }
 
 /**
+ * What a legal-notice page is CALLED, in the language of the territory.
+ *
+ * Used as a search angle rather than as a path guess (`enrich` has the paths).
+ * It earns its place because a small company's own site often ranks below every
+ * directory for its bare name, and "«Name» Impressum" is the query that pulls
+ * the company's own domain to the top — the page only its own site has.
+ */
+export function legalNoticeTerms(countryCode: string | undefined): string[] {
+  switch ((countryCode ?? "").toLowerCase()) {
+    case "de":
+    case "at":
+    case "ch":
+      return ["Impressum"];
+    case "es":
+      return ["aviso legal"];
+    case "fr":
+      return ["mentions légales"];
+    case "it":
+      return ["note legali"];
+    case "nl":
+      return ["colofon"];
+    case "pt":
+      return ["aviso legal"];
+    case "pl":
+      return ["polityka prywatności"];
+    case "gb":
+    case "ie":
+    case "us":
+      return ["legal notice"];
+    default:
+      return [];
+  }
+}
+
+/**
  * Whether this country's law puts a checkable identifier on company websites.
  *
  * `confirm` prints this. A US run that found no legal identifiers has not
