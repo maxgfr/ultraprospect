@@ -1949,7 +1949,7 @@ var MAX_BODY_BYTES = 4 * 1024 * 1024;
 var DRAIN_LIMIT = MAX_BODY_BYTES * 8;
 
 // src/version.ts
-var VERSION = "1.1.0";
+var VERSION = "1.2.0";
 
 // src/engine.ts
 function brandEngine() {
