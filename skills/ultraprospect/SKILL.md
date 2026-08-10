@@ -3,7 +3,7 @@ name: ultraprospect
 description: "Use when the user wants every company in a PLACE — a town, a street, a radius — turned into a qualified, sourced prospect list rather than a page of search results. A deterministic zero-dep engine (node scripts/ultraprospect.mjs, no keys, no install) sweeps OpenStreetMap worldwide and the French register (SIRENE/RNE) for the same territory, fuses the two into one entity per company, and hands YOU the judgment it refuses to make: which near-miss pairs are the same business, what a company does, whether it fits the brief. It REFUSES an ambiguous place name, REFUSES to merge an uncertain pair, and DECLARES a partial sweep truncated rather than passing it off as a whole territory. Triggers: 'find every company in X', 'list the businesses on this street', 'who is based in <town>', 'build a prospect list for <area>', 'quelles entreprises à <ville>', 'prospection sur <zone>'. Not for researching one named company, and not for a codebase."
 license: MIT
 metadata:
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # ultraprospect — a territory, turned into prospects you can cite
