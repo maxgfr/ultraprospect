@@ -1,6 +1,6 @@
 {
   "name": "ultraprospect",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Turn a place into a qualified prospect list — keyless discovery from OpenStreetMap and the French company register, matched into one entity, enriched two tiers deep from each company's own website, and written up as citation-checked dossiers. A skills.sh agent skill.",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
