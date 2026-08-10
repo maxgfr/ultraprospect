@@ -34,7 +34,12 @@ jobs:
       - name: Upstream canaries (report-only)
         id: canaries
         continue-on-error: true
-        run: pnpm run eval:network | tee "$RUNNER_TEMP/eval-network.txt"
+        # pipefail, or the pipe hands back tee's exit code and the canary can
+        # NEVER report a failure — which is how one silently red canary sat in a
+        # green run.
+        run: |
+          set -o pipefail
+          pnpm run eval:network | tee "$RUNNER_TEMP/eval-network.txt"
 
       - name: The NAF catalogue still matches the register
         continue-on-error: true

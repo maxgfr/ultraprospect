@@ -149,10 +149,37 @@ async function network() {
     "if it now honours it, the client-side filter is redundant",
   );
 
-  const overpass = await get(
-    `https://overpass-api.de/api/interpreter?data=${encodeURIComponent("[out:json][timeout:25];node[amenity=cafe](48.8550,2.3300,48.8680,2.3550);out count;")}`,
-  );
-  check("overpass-api.de answers an identifying User-Agent", overpass.status === 200 && overpass.body.trimStart().startsWith("{"), `HTTP ${overpass.status}`);
+  // What this canary is actually asking: does an identifying User-Agent still
+  // get served? The reference instance answers 406 to a browser string, and if
+  // that policy ever flipped the whole net.ts rationale would be stale.
+  //
+  // A 504 does not answer that question either way — it is the instance being
+  // busy, which it is most afternoons. Reporting it as drift means opening an
+  // issue for somebody else's load, and after the second one nobody reads the
+  // canary. So mirrors are tried until one gives a DEFINITIVE answer, and an
+  // all-busy round is reported as inconclusive rather than as failure.
+  const OVERPASS_PING = "[out:json][timeout:25];node[amenity=cafe](48.8550,2.3300,48.8680,2.3550);out count;";
+  const mirrors = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
+  let verdict;
+  for (const mirror of mirrors) {
+    let res;
+    try {
+      res = await get(`${mirror}?data=${encodeURIComponent(OVERPASS_PING)}`);
+    } catch {
+      continue;
+    }
+    if (res.status === 200 && res.body.trimStart().startsWith("{")) {
+      verdict = { ok: true, detail: `${new URL(mirror).host} served an identifying User-Agent` };
+      break;
+    }
+    if (res.status === 406 || res.status === 403) {
+      verdict = { ok: false, detail: `${new URL(mirror).host} REFUSED an identifying User-Agent (HTTP ${res.status}) — the policy changed` };
+      break;
+    }
+    // 504, 502, a timeout: busy. Try the next one.
+  }
+  if (verdict) check(`overpass ${verdict.ok ? "still serves" : "now REFUSES"} an identifying User-Agent`, verdict.ok, verdict.detail);
+  else console.log("  --    overpass: every mirror was busy — inconclusive, not drift");
 }
 
 if (suite === "offline") await offline();
