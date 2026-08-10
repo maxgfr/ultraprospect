@@ -177,11 +177,11 @@ function scanRatios(t) {
   }
   return { control: control / t.length, replacement: replacement / t.length };
 }
-function assessPdfText(text) {
-  return assessExtractedText(text, "no text layer (scanned or image-only PDF?)");
+function assessPdfText(text2) {
+  return assessExtractedText(text2, "no text layer (scanned or image-only PDF?)");
 }
-function assessExtractedText(text, emptyReason) {
-  const t = text.trim();
+function assessExtractedText(text2, emptyReason) {
+  const t = text2.trim();
   if (!t) return { ok: false, reason: emptyReason };
   const { control, replacement } = scanRatios(t);
   if (control > CONTROL_RATIO_MAX) {
@@ -311,23 +311,23 @@ async function extractPdf(bytes, opts = {}) {
       lastReason = `scanned PDF, and this run's OCR budget is spent (raise ${envName("OCR_MAX")})`;
       continue;
     }
-    let text;
+    let text2;
     try {
-      if (id === "pdf-inspector") text = await viaPdfInspector(bytes);
-      else if (id === "anydoc") text = await viaAnydoc(bytes);
-      else if (id === "pdftotext") text = await viaPdftotext(bytes);
-      else if (id === "firecrawl") text = opts.firecrawl ? await opts.firecrawl() : void 0;
-      else if (id === "ocr") text = await ocrPdf(bytes);
-      else text = pdfToText(bytes);
+      if (id === "pdf-inspector") text2 = await viaPdfInspector(bytes);
+      else if (id === "anydoc") text2 = await viaAnydoc(bytes);
+      else if (id === "pdftotext") text2 = await viaPdftotext(bytes);
+      else if (id === "firecrawl") text2 = opts.firecrawl ? await opts.firecrawl() : void 0;
+      else if (id === "ocr") text2 = await ocrPdf(bytes);
+      else text2 = pdfToText(bytes);
     } catch {
-      text = void 0;
+      text2 = void 0;
     }
-    if (text === void 0) {
+    if (text2 === void 0) {
       if (id !== "firecrawl") dead.add(id);
       continue;
     }
-    const verdict = assessPdfText(text);
-    if (verdict.ok) return { text: text.trim(), via: id };
+    const verdict = assessPdfText(text2);
+    if (verdict.ok) return { text: text2.trim(), via: id };
     lastReason = verdict.reason;
   }
   return { text: "", reason: lastReason ?? "no PDF extractor available" };
@@ -407,19 +407,19 @@ async function extractDocument(bytes, fmt, opts = {}) {
   let lastReason;
   for (const id of enabledDocExtractors(opts.engines)) {
     if (dead2.has(id)) continue;
-    let text;
+    let text2;
     try {
-      if (id === "anydoc") text = await viaAnydoc2(bytes, fmt.format);
-      else text = opts.firecrawl ? await opts.firecrawl() : void 0;
+      if (id === "anydoc") text2 = await viaAnydoc2(bytes, fmt.format);
+      else text2 = opts.firecrawl ? await opts.firecrawl() : void 0;
     } catch {
-      text = void 0;
+      text2 = void 0;
     }
-    if (text === void 0) {
+    if (text2 === void 0) {
       if (id !== "firecrawl") dead2.add(id);
       continue;
     }
-    const verdict = assessExtractedText(text, "the converter produced no text");
-    if (verdict.ok) return { text: text.trim(), via: id };
+    const verdict = assessExtractedText(text2, "the converter produced no text");
+    if (verdict.ok) return { text: text2.trim(), via: id };
     lastReason = verdict.reason;
   }
   return { text: "", reason: lastReason ?? "no document converter available" };
@@ -804,13 +804,13 @@ async function httpJson(method, url, body, opts = {}) {
         headers,
         body: body === void 0 ? void 0 : JSON.stringify(body)
       });
-      const text = await res.text();
-      countFetch(Buffer.byteLength(text), false);
+      const text2 = await res.text();
+      countFetch(Buffer.byteLength(text2), false);
       let data;
       try {
-        data = text ? JSON.parse(text) : void 0;
+        data = text2 ? JSON.parse(text2) : void 0;
       } catch {
-        data = text;
+        data = text2;
       }
       const result = { ok: res.ok, status: res.status, data };
       if (RETRY_STATUS.has(res.status) && attempt < attempts - 1) {
@@ -1105,12 +1105,12 @@ async function fetchAndExtract(url, opts = {}) {
   }
   const isHtml = /html/i.test(res.contentType) || /^\s*</.test(res.body);
   const stripped = isHtml ? htmlToText(extractMainHtml(res.body)) : res.body;
-  const text = isHtml && opts.stripConsent ? stripConsentBoilerplate(stripped).text : stripped;
+  const text2 = isHtml && opts.stripConsent ? stripConsentBoilerplate(stripped).text : stripped;
   const title = isHtml ? htmlTitle(res.body) : void 0;
   const canonical = isHtml ? htmlCanonicalUrl(res.body) : void 0;
   const metaDescription = isHtml ? metaDescriptionOf(res.body) : void 0;
   return {
-    text,
+    text: text2,
     title,
     canonical,
     metaDescription,
@@ -1134,9 +1134,9 @@ var CONSENT_PATTERNS = [
   /advertising partners/i,
   /legitimate interest/i
 ];
-function stripConsentBoilerplate(text) {
+function stripConsentBoilerplate(text2) {
   let dropped = 0;
-  const kept = text.split("\n").filter((line) => {
+  const kept = text2.split("\n").filter((line) => {
     const hits = CONSENT_PATTERNS.reduce((n, re) => n + (re.test(line) ? 1 : 0), 0);
     const isBanner = hits >= 2 || hits === 1 && line.trim().length < 120;
     if (isBanner) dropped++;
@@ -1234,6 +1234,171 @@ function acceptLanguageHeader(lang, region) {
   return `${l}-${R},${l};q=0.9,en;q=0.5`;
 }
 var STDOUT_CAP = 24 * 1024 * 1024;
+var EMPTY = { rules: [], sitemaps: [], absent: true };
+function parseRobots(body, userAgent) {
+  const ua = userAgent.toLowerCase();
+  const groups = /* @__PURE__ */ new Map();
+  const delays = /* @__PURE__ */ new Map();
+  const sitemaps = [];
+  let current2 = [];
+  let inHeader = false;
+  for (const raw of body.split(/\r?\n/)) {
+    const line = raw.replace(/#.*$/, "").trim();
+    if (!line) continue;
+    const sep2 = line.indexOf(":");
+    if (sep2 === -1) continue;
+    const field = line.slice(0, sep2).trim().toLowerCase();
+    const value = line.slice(sep2 + 1).trim();
+    if (field === "sitemap") {
+      if (value) sitemaps.push(value);
+      continue;
+    }
+    if (field === "user-agent") {
+      if (!inHeader) current2 = [];
+      current2.push(value.toLowerCase());
+      inHeader = true;
+      for (const g of current2) if (!groups.has(g)) groups.set(g, []);
+      continue;
+    }
+    inHeader = false;
+    if (!current2.length) continue;
+    if (field === "allow" || field === "disallow") {
+      for (const g of current2) groups.get(g).push({ allow: field === "allow", path: value });
+    } else if (field === "crawl-delay") {
+      const n = Number(value);
+      if (Number.isFinite(n) && n >= 0) for (const g of current2) delays.set(g, n * 1e3);
+    }
+  }
+  let chosen;
+  for (const g of groups.keys()) {
+    if (g === "*") continue;
+    if (ua.includes(g) && (!chosen || g.length > chosen.length)) chosen = g;
+  }
+  chosen ??= groups.has("*") ? "*" : void 0;
+  if (chosen === void 0) return { rules: [], sitemaps, absent: false };
+  const rules = [...groups.get(chosen)].sort((a, b) => b.path.length - a.path.length || (a.allow === b.allow ? 0 : a.allow ? -1 : 1));
+  const crawlDelayMs = delays.get(chosen);
+  return { rules, sitemaps, absent: false, ...crawlDelayMs !== void 0 ? { crawlDelayMs } : {} };
+}
+function ruleMatches(pattern, path) {
+  if (pattern === "") return false;
+  const anchored = pattern.endsWith("$");
+  const body = anchored ? pattern.slice(0, -1) : pattern;
+  if (!body.includes("*")) return anchored ? path === body : path.startsWith(body);
+  const re = new RegExp(`^${body.split("*").map(escapeRe).join(".*")}${anchored ? "$" : ""}`);
+  return re.test(path);
+}
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function isAllowed(robots, url) {
+  if (robots.absent || !robots.rules.length) return true;
+  let path;
+  try {
+    const u = new URL(url);
+    path = u.pathname + u.search;
+  } catch {
+    return true;
+  }
+  for (const rule of robots.rules) if (ruleMatches(rule.path, path)) return rule.allow;
+  return true;
+}
+var cache = /* @__PURE__ */ new Map();
+async function fetchRobots(url) {
+  if (envFlag("NO_ROBOTS")) return EMPTY;
+  let origin;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return EMPTY;
+  }
+  let p = cache.get(origin);
+  if (!p) {
+    p = (async () => {
+      const r = await httpGet(`${origin}/robots.txt`, { accept: "text/plain", timeoutMs: 5e3, maxBytes: 512 * 1024 });
+      if (!r.ok || !r.body.trim()) return EMPTY;
+      return parseRobots(r.body, env("ROBOTS_UA") ?? brand().name);
+    })();
+    cache.set(origin, p);
+  }
+  return p;
+}
+function extractJsonLd(html) {
+  const out2 = [];
+  const re = /<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while (m = re.exec(html)) {
+    const raw = m[1].replace(/^\s*<!--/, "").replace(/-->\s*$/, "").trim();
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && Array.isArray(parsed["@graph"])) {
+        out2.push(...parsed["@graph"]);
+      } else if (Array.isArray(parsed)) {
+        out2.push(...parsed);
+      } else {
+        out2.push(parsed);
+      }
+    } catch {
+    }
+  }
+  return out2;
+}
+function tagText(block, ...names) {
+  for (const name of names) {
+    const m = new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)<\\/${name}>`, "i").exec(block);
+    if (!m) continue;
+    const raw = m[1];
+    const inner = /<!\[CDATA\[([\s\S]*?)\]\]>/.exec(raw)?.[1] ?? raw;
+    const text2 = decodeEntities(inner.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+    if (text2) return text2;
+  }
+  return void 0;
+}
+function parseSitemap(xml) {
+  const out2 = { urls: [], sitemaps: [] };
+  const isIndex = /<sitemapindex\b/i.test(xml);
+  for (const m of xml.matchAll(/<(sitemap|url)\b[\s\S]*?<\/\1>/gi)) {
+    const block = m[0];
+    const loc = tagText(block, "loc");
+    if (!loc) continue;
+    if (isIndex || m[1].toLowerCase() === "sitemap") {
+      out2.sitemaps.push(loc);
+    } else {
+      const lastmod = tagText(block, "lastmod");
+      out2.urls.push({ loc, ...lastmod ? { lastmod } : {} });
+    }
+  }
+  return out2;
+}
+async function fetchSitemap(url, opts = {}) {
+  const out2 = { urls: [], sitemaps: [] };
+  let origin;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return out2;
+  }
+  const queue = [...opts.sitemaps ?? [], `${origin}/sitemap.xml`];
+  const seen = /* @__PURE__ */ new Set();
+  let fetched = 0;
+  const max = Math.max(1, opts.max ?? 3);
+  while (queue.length && fetched < max) {
+    const next = queue.shift();
+    if (seen.has(next)) continue;
+    seen.add(next);
+    const r = await httpGet(next, { accept: "application/xml,text/xml,*/*", timeoutMs: 1e4 });
+    fetched++;
+    if (!r.ok || !r.body.trim()) continue;
+    const parsed = parseSitemap(r.body);
+    out2.urls.push(...parsed.urls);
+    for (const s of parsed.sitemaps) {
+      if (!out2.sitemaps.includes(s)) out2.sitemaps.push(s);
+      queue.push(s);
+    }
+  }
+  return out2;
+}
 var KEYLESS_ENGINES = ["ddg", "ddglite", "mojeek"];
 function isKeylessEngine(v) {
   return KEYLESS_ENGINES.includes(v);
@@ -1605,9 +1770,9 @@ function readCache(url, acceptLanguage = "", extractor = "native") {
   try {
     const entry = JSON.parse(readFileSync3(meta, "utf8"));
     if (typeof entry.cachedAt !== "number") return void 0;
-    const text = existsSync4(body) ? readFileSync3(body, "utf8") : entry.text;
-    if (!text?.trim()) return void 0;
-    return { ...entry, text };
+    const text2 = existsSync4(body) ? readFileSync3(body, "utf8") : entry.text;
+    if (!text2?.trim()) return void 0;
+    return { ...entry, text: text2 };
   } catch {
     return void 0;
   }
@@ -1617,8 +1782,8 @@ function writeCache(url, res, now, acceptLanguage = "", extractor = "native") {
   try {
     mkdirSync4(cacheDir(), { recursive: true });
     const { meta, body } = entryPaths(url, acceptLanguage, extractor);
-    const { text, ...rest } = res;
-    writeFileSync4(body, text ?? "");
+    const { text: text2, ...rest } = res;
+    writeFileSync4(body, text2 ?? "");
     writeFileSync4(meta, JSON.stringify({ ...rest, cachedAt: now }));
   } catch {
   }
@@ -1950,6 +2115,17 @@ function bboxAround(lat, lon, radiusM) {
 function firstText(...values) {
   for (const v of values) if (typeof v === "string" && v.trim()) return v.trim();
   return void 0;
+}
+function uniqueBy(items, key) {
+  const seen = /* @__PURE__ */ new Set();
+  const out2 = [];
+  for (const item of items) {
+    const k = key(item);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out2.push(item);
+  }
+  return out2;
 }
 function clampInt(value, min, max, fallback) {
   const n = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
@@ -3834,8 +4010,8 @@ async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
   } catch {
     return void 0;
   }
-  const text = (result.text ?? "").trim();
-  if (text.length < 120) return void 0;
+  const text2 = (result.text ?? "").trim();
+  if (text2.length < 120) return void 0;
   const id = `P${store.next++}`;
   const dir = pageDirFor(placeId);
   const extract = join6(dir, `${id}.md`);
@@ -3853,7 +4029,7 @@ async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
     ""
   ].join("\n");
   if (!isNoWrite()) mkdirSync5(join6(runDir, dir), { recursive: true });
-  writeArtifact(join6(runDir, extract), header + text + "\n");
+  writeArtifact(join6(runDir, extract), header + text2 + "\n");
   return {
     record: {
       id,
@@ -3863,10 +4039,10 @@ async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
       fetchedAt,
       extractor: result.extractor,
       status: result.status,
-      chars: text.length,
+      chars: text2.length,
       extract
     },
-    text,
+    text: text2,
     title: result.title,
     html: result.html
   };
@@ -4065,8 +4241,463 @@ async function runResolve(runDir, places, store, opts = {}) {
   return outcome;
 }
 
+// src/ats.ts
+var BOARD_PATTERNS = [
+  { provider: "greenhouse", re: /(?:boards|job-boards|boards-api)\.greenhouse\.io\/(?:embed\/job_board\?for=)?([a-z0-9_-]+)/gi },
+  { provider: "lever", re: /jobs\.(?:eu\.)?lever\.co\/([a-z0-9_-]+)/gi },
+  { provider: "ashby", re: /jobs\.ashbyhq\.com\/([a-z0-9_.-]+)/gi },
+  { provider: "recruitee", re: /https?:\/\/([a-z0-9-]+)\.recruitee\.com/gi },
+  { provider: "teamtailor", re: /https?:\/\/([a-z0-9-]+)\.teamtailor\.com/gi },
+  { provider: "workable", re: /apply\.workable\.com\/([a-z0-9-]+)/gi },
+  { provider: "welcometothejungle", re: /welcometothejungle\.com\/[a-z]{2}\/companies\/([a-z0-9-]+)/gi }
+];
+var NOT_A_TOKEN = /* @__PURE__ */ new Set(["embed", "www", "api", "jobs", "boards", "app", "help", "blog", "about", "static", "assets", "js", "css"]);
+function detectBoards(html, sourceUrl) {
+  const found = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const { provider, re } of BOARD_PATTERNS) {
+    re.lastIndex = 0;
+    for (const m of html.matchAll(re)) {
+      const token = m[1];
+      if (!token || NOT_A_TOKEN.has(token.toLowerCase())) continue;
+      const key = `${provider}:${token}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      found.push({ provider, token, sourceUrl });
+    }
+  }
+  return found;
+}
+async function getJson(url) {
+  try {
+    const res = await httpJson("GET", url, void 0, { timeoutMs: 2e4, retries: 1 });
+    return res.ok ? res.data : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function text(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : void 0;
+}
+async function fetchBoard(board) {
+  const via = board.provider;
+  switch (board.provider) {
+    case "greenhouse": {
+      const data = await getJson(`https://boards-api.greenhouse.io/v1/boards/${board.token}/jobs`);
+      return (data?.jobs ?? []).map((j) => ({
+        title: text(j.title) ?? "(untitled)",
+        url: text(j.absolute_url),
+        location: text(j.location?.name),
+        postedAt: text(j.updated_at),
+        via
+      }));
+    }
+    case "lever": {
+      const data = await getJson(`https://api.lever.co/v0/postings/${board.token}?mode=json`);
+      return (Array.isArray(data) ? data : []).map((j) => ({
+        title: text(j.text) ?? "(untitled)",
+        url: text(j.hostedUrl) ?? text(j.applyUrl),
+        location: text(j.categories?.location),
+        department: text(j.categories?.team) ?? text(j.categories?.department),
+        employmentType: text(j.categories?.commitment),
+        postedAt: j.createdAt ? new Date(j.createdAt).toISOString() : void 0,
+        via
+      }));
+    }
+    case "ashby": {
+      const data = await getJson(`https://api.ashbyhq.com/posting-api/job-board/${board.token}`);
+      return (data?.jobs ?? []).map((j) => ({
+        title: text(j.title) ?? "(untitled)",
+        url: text(j.jobUrl) ?? text(j.applyUrl),
+        location: text(j.location),
+        department: text(j.department) ?? text(j.team),
+        employmentType: text(j.employmentType),
+        postedAt: text(j.publishedAt),
+        via
+      }));
+    }
+    case "recruitee": {
+      const data = await getJson(`https://${board.token}.recruitee.com/api/offers/`);
+      return (data?.offers ?? []).map((j) => ({
+        title: text(j.title) ?? "(untitled)",
+        url: text(j.careers_url) ?? text(j.careers_apply_url),
+        location: text(j.location) ?? text(j.city),
+        department: text(j.department),
+        employmentType: text(j.employment_type_code),
+        postedAt: text(j.published_at),
+        via
+      }));
+    }
+    case "workable": {
+      const data = await getJson(`https://apply.workable.com/api/v1/widget/accounts/${board.token}?details=true`);
+      return (data?.jobs ?? []).map((j) => ({
+        title: text(j.title) ?? "(untitled)",
+        url: text(j.url) ?? text(j.application_url),
+        location: [text(j.city), text(j.country)].filter(Boolean).join(", ") || void 0,
+        department: text(j.department),
+        employmentType: text(j.type),
+        postedAt: text(j.published_on),
+        via
+      }));
+    }
+    case "teamtailor": {
+      const data = await getJson(`https://${board.token}.teamtailor.com/jobs.json`);
+      return (data?.jobs ?? data ?? []).map?.((j) => ({
+        title: text(j.title) ?? "(untitled)",
+        url: text(j.careersite_job_url) ?? text(j.url),
+        location: text(j.location),
+        department: text(j.department),
+        via
+      })) ?? [];
+    }
+    default:
+      return [];
+  }
+}
+async function fetchAllBoards(boards) {
+  const out2 = [];
+  for (const board of boards) out2.push(...await fetchBoard(board));
+  const seen = /* @__PURE__ */ new Set();
+  return out2.filter((j) => {
+    const key = `${j.title}|${j.location ?? ""}`.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// src/signals.ts
+var ROLE_PATTERNS = [
+  { role: "careers", re: /(?:^|\/)(?:careers?|jobs?|emplois?|recrutement|nous-rejoindre|rejoignez|join-us|hiring|carriere|carrières?)(?:\/|$|\.)/i },
+  { role: "pricing", re: /(?:^|\/)(?:pricing|tarifs?|prix|nos-tarifs|abonnements?|plans?|devis)(?:\/|$|\.)/i },
+  { role: "about", re: /(?:^|\/)(?:about|about-us|a-propos|à-propos|qui-sommes-nous|notre-histoire|entreprise|company)(?:\/|$|\.)/i },
+  { role: "team", re: /(?:^|\/)(?:team|equipe|équipe|notre-equipe|people|staff|collaborateurs|direction)(?:\/|$|\.)/i },
+  { role: "contact", re: /(?:^|\/)(?:contact|contactez-nous|nous-contacter|contact-us)(?:\/|$|\.)/i },
+  {
+    role: "legal",
+    re: /(?:^|\/)(?:mentions-legales|mentions-légales|legal|legal-notice|impressum|cgv|cgu|conditions-generales|privacy|confidentialite)(?:\/|$|\.)/i
+  },
+  { role: "services", re: /(?:^|\/)(?:services?|prestations?|expertises?|solutions?|savoir-faire|metiers?|métiers?)(?:\/|$|\.)/i },
+  { role: "products", re: /(?:^|\/)(?:products?|produits?|boutique|shop|catalogue|collections?)(?:\/|$|\.)/i },
+  { role: "cases", re: /(?:^|\/)(?:case-stud(?:y|ies)|references?|réalisations?|realisations|portfolio|clients?|temoignages?|témoignages?)(?:\/|$|\.)/i },
+  { role: "news", re: /(?:^|\/)(?:news|blog|actualites?|actualités?|articles?|presse|press)(?:\/|$|\.)/i }
+];
+function roleOf(url) {
+  let path;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    path = url;
+  }
+  if (path === "/" || path === "") return "home";
+  for (const { role, re } of ROLE_PATTERNS) if (re.test(path)) return role;
+  return "other";
+}
+var CMS_FINGERPRINTS = [
+  ["WordPress", /wp-content|wp-includes|name="generator"[^>]*WordPress/i],
+  ["Shopify", /cdn\.shopify\.com|Shopify\.theme/i],
+  ["Wix", /static\.wixstatic\.com|X-Wix-/i],
+  ["Squarespace", /squarespace\.com|static1\.squarespace/i],
+  ["Webflow", /assets(?:-global)?\.website-files\.com|generator"[^>]*Webflow/i],
+  ["Drupal", /generator"[^>]*Drupal|sites\/all\/(?:themes|modules)/i],
+  ["Joomla", /generator"[^>]*Joomla/i],
+  ["PrestaShop", /generator"[^>]*PrestaShop|\/themes\/[^"']*\/assets\/js\/theme/i],
+  ["Magento", /Magento_|mage\/cookies/i],
+  ["HubSpot CMS", /hs-scripts\.com|hubspotusercontent/i],
+  ["Framer", /framerusercontent\.com/i],
+  ["Odoo", /generator"[^>]*Odoo|web\/static\/src/i],
+  ["Next.js", /\/_next\/static\//i],
+  ["Nuxt", /\/_nuxt\//i]
+];
+var ANALYTICS_FINGERPRINTS = [
+  ["Google Analytics", /googletagmanager\.com\/gtag|google-analytics\.com|gtag\('config'/i],
+  ["Google Tag Manager", /googletagmanager\.com\/gtm\.js/i],
+  ["Matomo", /matomo\.js|piwik\.js/i],
+  ["Plausible", /plausible\.io\/js/i],
+  ["Fathom", /cdn\.usefathom\.com/i],
+  ["Hotjar", /static\.hotjar\.com/i],
+  ["Meta Pixel", /connect\.facebook\.net\/[^"']*\/fbevents\.js/i],
+  ["LinkedIn Insight", /snap\.licdn\.com/i],
+  ["HubSpot", /js\.hs-scripts\.com/i],
+  ["Intercom", /widget\.intercom\.io/i],
+  ["Crisp", /client\.crisp\.chat/i],
+  ["Axeptio", /axeptio\.imgix\.net|axept\.io/i]
+];
+var ECOMMERCE_FINGERPRINTS = /add-to-cart|ajouter-au-panier|data-product-id|woocommerce|shopify|prestashop|panier|checkout|stripe\.com\/v3|paypal\.com\/sdk/i;
+function fingerprints(html, table) {
+  return table.filter(([, re]) => re.test(html)).map(([name]) => name);
+}
+function extractEmails(text2, html, pageId) {
+  const out2 = /* @__PURE__ */ new Map();
+  for (const m of html.matchAll(/mailto:([^"'?>\s]+@[^"'?>\s]+)/gi)) {
+    const value = decodeURIComponent(m[1]).toLowerCase();
+    if (isPlausibleEmail(value)) out2.set(value, { value, from: pageId, lane: "web", note: "mailto link" });
+  }
+  for (const m of text2.matchAll(/[\w.+-]+@[\w-]+\.[\w.-]{2,}/g)) {
+    const value = m[0].toLowerCase().replace(/[.,;:]$/, "");
+    if (isPlausibleEmail(value) && !out2.has(value)) out2.set(value, { value, from: pageId, lane: "web", note: "in the page text" });
+  }
+  return [...out2.values()];
+}
+function isPlausibleEmail(value) {
+  if (!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(value)) return false;
+  if (/\.(png|jpe?g|gif|svg|webp|css|js|woff2?)$/i.test(value)) return false;
+  if (/^(?:example|test|no-?reply|your|email|nom|prenom)@/i.test(value)) return false;
+  return true;
+}
+function extractPhones(html, pageId) {
+  const out2 = /* @__PURE__ */ new Map();
+  for (const m of html.matchAll(/tel:([+0-9().\s-]{6,})/gi)) {
+    const raw = m[1].replace(/[\s.()-]/g, "");
+    if (raw.replace(/\D/g, "").length < 8) continue;
+    out2.set(raw, { value: raw, from: pageId, lane: "web", note: "tel: link" });
+  }
+  return [...out2.values()];
+}
+var NOT_A_PROFILE = /\/(?:sharer|share|intent|embed|watch|shorts|login|signup|policies|privacy|legal|about|developers?|plugins?|tr\?id=)\b|\?(?:u|text|url)=/i;
+function extractSocials(html, pageId) {
+  const out2 = /* @__PURE__ */ new Map();
+  const re = /https?:\/\/(?:[a-z]{2,3}\.)?(?:www\.)?(facebook\.com|instagram\.com|linkedin\.com|twitter\.com|x\.com|youtube\.com|tiktok\.com)\/[^\s"'<>)]+/gi;
+  for (const m of html.matchAll(re)) {
+    const value = m[0].replace(/[)"'<>]+$/, "");
+    if (NOT_A_PROFILE.test(value)) continue;
+    try {
+      if (new URL(value).pathname.replace(/\/+$/, "").length < 2) continue;
+    } catch {
+      continue;
+    }
+    out2.set(value, { value, from: pageId, lane: "web", note: `${m[1]} link` });
+  }
+  return [...out2.values()];
+}
+function extractLegalId(text2) {
+  const vat = /\bFR\s?[0-9A-Z]{2}\s?(\d{3})\s?(\d{3})\s?(\d{3})\b/i.exec(text2);
+  if (vat) return vat[0].replace(/\s+/g, "").toUpperCase();
+  const siret = /\b(?:SIRET)\D{0,12}(\d[\d\s.]{12,17}\d)\b/i.exec(text2);
+  if (siret) return siret[1].replace(/\D/g, "");
+  const siren = /\b(?:SIREN|RCS[^\d]{0,30})\D{0,6}(\d[\d\s.]{7,12}\d)\b/i.exec(text2);
+  if (siren) return siren[1].replace(/\D/g, "");
+  return void 0;
+}
+function extractLanguages(html) {
+  const langs = /* @__PURE__ */ new Set();
+  const htmlLang = /<html[^>]*\slang=["']([a-z]{2})/i.exec(html);
+  if (htmlLang) langs.add(htmlLang[1].toLowerCase());
+  for (const m of html.matchAll(/hreflang=["']([a-z]{2})/gi)) langs.add(m[1].toLowerCase());
+  return [...langs];
+}
+function buildSignals(input) {
+  const html = input.pages.map((p) => p.html ?? "").join("\n");
+  const roles = new Set(input.pages.map((p) => p.record.role));
+  const techFromJsonLd = /* @__PURE__ */ new Set();
+  for (const page of input.pages) {
+    if (!page.html) continue;
+    for (const node of extractJsonLd(page.html)) {
+      const type = node?.["@type"];
+      if (typeof type === "string") techFromJsonLd.add(`schema:${type}`);
+    }
+  }
+  return {
+    hasWebsite: input.pages.length > 0,
+    siteReachable: input.siteReachable,
+    pageCount: input.pages.length,
+    lastContentAt: input.lastContentAt,
+    sitemapUrls: input.sitemapUrls,
+    // Hiring is asserted only when postings were actually read. A detected
+    // board with no readable API leaves this undefined rather than false: "not
+    // hiring" and "we could not look" are different facts.
+    isHiring: input.atsProviders.length === 0 && !roles.has("careers") ? false : input.jobs.length > 0 || void 0,
+    openRoles: input.jobs.length,
+    atsProviders: [...input.atsProviders],
+    cms: fingerprints(html, CMS_FINGERPRINTS)[0],
+    analytics: fingerprints(html, ANALYTICS_FINGERPRINTS),
+    techStack: [.../* @__PURE__ */ new Set([...fingerprints(html, CMS_FINGERPRINTS).slice(1), ...techFromJsonLd])],
+    hasPricingPage: roles.has("pricing"),
+    hasEcommerce: ECOMMERCE_FINGERPRINTS.test(html),
+    languages: extractLanguages(html),
+    socialProfiles: [...new Set(input.pages.flatMap((p) => extractSocials(p.html ?? "", p.record.id).map((s) => s.value)))],
+    legalIdOnSite: input.pages.map((p) => extractLegalId(p.text)).find(Boolean)
+  };
+}
+function sameOriginLinks(html, base) {
+  let origin;
+  try {
+    origin = new URL(base).origin;
+  } catch {
+    return [];
+  }
+  const out2 = /* @__PURE__ */ new Set();
+  for (const m of html.matchAll(/<a\b[^>]*\shref=["']([^"']+)["']/gi)) {
+    const href = m[1].trim();
+    if (!href || href.startsWith("#") || /^(?:mailto|tel|javascript|data):/i.test(href)) continue;
+    try {
+      const url = new URL(href, base);
+      if (url.origin !== origin) continue;
+      url.hash = "";
+      out2.add(url.href);
+    } catch {
+    }
+  }
+  return [...out2];
+}
+
+// src/enrich.ts
+var TIER1_ROLES = ["home", "legal"];
+var TIER2_ROLES = ["about", "services", "products", "pricing", "careers", "team", "contact", "cases", "news"];
+var LEGAL_GUESSES = ["/mentions-legales", "/mentions-legales/", "/legal", "/impressum", "/cgv", "/legal-notice"];
+function enrichable(places) {
+  return places.filter((p) => p.website?.confidence === "corroborated");
+}
+async function readSitemap(homeUrl) {
+  try {
+    const sitemap = await fetchSitemap(homeUrl, { max: 3 });
+    const entries = sitemap?.urls ?? [];
+    const lastmods = entries.map((u) => u.lastmod).filter((d) => Boolean(d));
+    return {
+      urls: entries.map((u) => u.loc),
+      // The newest lastmod is a freshness signal, not a guarantee: plenty of
+      // generators stamp every page with the build date. Its ABSENCE is not
+      // staleness either, which is why the caller reports it as a date rather
+      // than as "active" or "dormant".
+      lastContentAt: lastmods.sort().at(-1),
+      count: entries.length
+    };
+  } catch {
+    return { urls: [], count: 0 };
+  }
+}
+function pickByRole(urls, roles) {
+  const wanted = new Set(roles);
+  const best = /* @__PURE__ */ new Map();
+  const depth = (u) => {
+    try {
+      return new URL(u).pathname.split("/").filter(Boolean).length;
+    } catch {
+      return 99;
+    }
+  };
+  for (const url of urls) {
+    const role = roleOf(url);
+    if (!wanted.has(role)) continue;
+    const current2 = best.get(role);
+    if (!current2 || depth(url) < depth(current2)) best.set(role, url);
+  }
+  return best;
+}
+async function enrichOne(runDir, place, store, opts) {
+  const home = place.website.url;
+  const fetched = [];
+  const boards = [];
+  const robots = await fetchRobots(home).catch(() => void 0);
+  const allowed = (url) => robots ? isAllowed(robots, url) : true;
+  const sitemap = await readSitemap(home);
+  const homePage = await fetchPage2(runDir, place.id, home, "home", store, { keepHtml: true });
+  if (!homePage) return { pages: [], jobs: 0, reachable: false };
+  fetched.push(homePage);
+  const homeLinks = sameOriginLinks(homePage.html ?? "", homePage.record.url);
+  const inventory = [.../* @__PURE__ */ new Set([...sitemap.urls, ...homeLinks])];
+  const roles = opts.tier === 1 ? TIER1_ROLES.filter((r) => r !== "home") : TIER2_ROLES;
+  const picked = pickByRole(inventory, roles);
+  if (opts.tier === 1 && !picked.has("legal")) {
+    for (const guess of LEGAL_GUESSES) {
+      try {
+        const url = new URL(guess, home).href;
+        if (inventory.includes(url) || !allowed(url)) continue;
+        picked.set("legal", url);
+        break;
+      } catch {
+      }
+    }
+  }
+  const budget = opts.tier === 1 ? 2 : opts.maxPages ?? TIER2_ROLES.length;
+  let spent2 = 0;
+  for (const [role, url] of picked) {
+    if (spent2 >= budget) break;
+    if (!allowed(url)) continue;
+    const page = await fetchPage2(runDir, place.id, url, role, store, { keepHtml: true });
+    spent2++;
+    if (page) {
+      fetched.push(page);
+      boards.push(...detectBoards(page.html ?? "", page.record.url));
+    }
+  }
+  boards.push(...detectBoards(homePage.html ?? "", homePage.record.url));
+  const uniqueBoards = uniqueBy(boards, (b) => `${b.provider}:${b.token}`);
+  const jobs = opts.tier === 2 ? await fetchAllBoards(uniqueBoards) : [];
+  for (const page of fetched) {
+    place.contacts.emails.push(...extractEmails(page.text, page.html ?? "", page.record.id));
+    place.contacts.phones.push(...extractPhones(page.html ?? "", page.record.id));
+    place.contacts.socials.push(...extractSocials(page.html ?? "", page.record.id));
+  }
+  place.contacts.emails = uniqueBy(place.contacts.emails, (e) => e.value);
+  place.contacts.phones = uniqueBy(place.contacts.phones, (p) => p.value);
+  place.contacts.socials = uniqueBy(place.contacts.socials, (s) => s.value);
+  place.jobs = jobs;
+  place.pages = [.../* @__PURE__ */ new Set([...place.pages, ...fetched.map((f) => f.record.id)])];
+  place.signals = buildSignals({
+    pages: fetched.map((f) => ({ record: f.record, text: f.text, html: f.html })),
+    jobs,
+    atsProviders: uniqueBoards.map((b) => b.provider),
+    sitemapUrls: sitemap.count || void 0,
+    lastContentAt: sitemap.lastContentAt,
+    siteReachable: true
+  });
+  return { pages: fetched.map((f) => f.record), jobs: jobs.length, reachable: true };
+}
+async function runEnrich(runDir, places, store, opts) {
+  const notes = [];
+  const note = (n) => {
+    notes.push(n);
+    opts.onNote?.(n);
+  };
+  let targets = enrichable(places);
+  if (opts.only?.length) {
+    const wanted = new Set(opts.only);
+    targets = targets.filter((p) => wanted.has(p.id));
+  } else if (opts.tier === 2) {
+    targets = [...targets].sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0));
+  }
+  if (opts.limit) targets = targets.slice(0, opts.limit);
+  const outcome = { enriched: 0, skipped: places.length - targets.length, unreachable: 0, pagesFetched: 0, jobsFound: 0, notes };
+  if (targets.length === 0) {
+    note("enrich: no place has a corroborated website yet \u2014 run `resolve` first");
+    return outcome;
+  }
+  note(`enrich: tier ${opts.tier} over ${targets.length} site(s)`);
+  let done = 0;
+  await mapLimit(targets, opts.concurrency ?? 4, async (place) => {
+    const result = await enrichOne(runDir, place, store, opts).catch(() => ({ pages: [], jobs: 0, reachable: false }));
+    done++;
+    opts.onProgress?.(done, targets.length, place.name);
+    if (!result.reachable) {
+      outcome.unreachable++;
+      place.signals = {
+        ...place.signals ?? {
+          hasWebsite: true,
+          pageCount: 0,
+          openRoles: 0,
+          atsProviders: [],
+          analytics: [],
+          techStack: [],
+          hasPricingPage: false,
+          hasEcommerce: false,
+          languages: [],
+          socialProfiles: []
+        },
+        siteReachable: false
+      };
+      return;
+    }
+    outcome.enriched++;
+    outcome.pagesFetched += result.pages.length;
+    outcome.jobsFound += result.jobs;
+  });
+  note(`enrich: ${outcome.enriched} site(s) read, ${outcome.pagesFetched} page(s) stored, ${outcome.jobsFound} opening(s), ${outcome.unreachable} unreachable`);
+  return outcome;
+}
+
 // src/cli.ts
-var COMMANDS = ["where", "scan", "match", "resolve", "doctor", "version"];
+var COMMANDS = ["where", "scan", "match", "resolve", "enrich", "doctor", "version"];
 var VALUE_FLAGS = [
   "where",
   "lat",
@@ -4089,7 +4720,11 @@ var VALUE_FLAGS = [
   "fixture",
   "record",
   "web-results",
-  "limit"
+  "limit",
+  "tier",
+  "only",
+  "max-pages",
+  "concurrency"
 ];
 var BOOL_FLAGS = ["json", "no-osm", "no-sirene", "include-ceased", "no-people", "queries", "engine-search", "stdout", "help", "version"];
 var HELP = `ultraprospect ${VERSION} \u2014 turn a place into a qualified prospect list
@@ -4102,6 +4737,7 @@ COMMANDS
   scan                   Discover every company in the area, from OSM and the French register.
   match --apply <file>   Fold the agent's adjudication of MATCH.todo.json back into places.json.
   resolve                Find each company's own website and prove it is theirs.
+  enrich --tier 1|2      Read those websites: tier 1 on all of them, tier 2 on the ones you pick.
   doctor                 Check node, network and the health of every upstream.
   version                Print the version.
 
@@ -4133,6 +4769,12 @@ WEBSITE DISCOVERY (resolve)
   --web-results <file>   Hits from your own WebSearch: [{url,title,snippet,placeId?}]. "-" reads stdin.
   --engine-search        Fall back to the keyless search engine when no hits were supplied.
   --limit <n>            Only resolve this many places.
+
+ENRICHMENT (enrich)
+  --tier <1|2>           1: home + legal notice on every site. 2: a page per role + the ATS APIs.
+  --only <ids>           Enrich just these place ids, comma-separated.
+  --max-pages <n>        Ceiling on pages fetched per site in tier 2.
+  --concurrency <n>      Sites in flight at once. Per-host pacing is separate and always on.
 
 ADJUDICATION (match)
   --apply <file>         A JSON array of {osmId, siret|siren, merge, why}. "-" reads stdin.
@@ -4365,6 +5007,41 @@ async function cmdResolve(values, bools) {
   say(`next: ultraprospect enrich --run ${runDir} --tier 1`);
   return outcome.corroborated > 0 || outcome.unchanged === 0 ? EXIT_OK : EXIT_FAILURE;
 }
+async function cmdEnrich(values, bools) {
+  if (!values.run) throw new UsageError("enrich needs --run <dir>");
+  const tier = values.tier ? clampInt(values.tier, 1, 2, 1) : 1;
+  const runDir = resolveRun(values.run);
+  const places = readPlaces(runDir);
+  if (enrichable(places).length === 0) {
+    say("enrich: no place has a corroborated website yet.");
+    say(`next: ultraprospect resolve --run ${runDir} --queries`);
+    return EXIT_FAILURE;
+  }
+  const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }))));
+  const outcome = await runEnrich(runDir, places, store, {
+    tier,
+    limit: values.limit ? clampInt(values.limit, 1, 1e5, 20) : void 0,
+    only: list(values.only),
+    maxPages: values["max-pages"] ? clampInt(values["max-pages"], 1, 40, 9) : void 0,
+    concurrency: values.concurrency ? clampInt(values.concurrency, 1, 12, 4) : void 0,
+    onNote: (n) => say(`  ${n}`),
+    onProgress: (done, total, name) => {
+      if (done % 5 === 0 || done === total) say(`  enrich: ${done}/${total} \u2014 ${name}`);
+    }
+  });
+  writePlaces(runDir, places);
+  const manifest = requireManifest(runDir);
+  if (tier === 1) manifest.counts.enrichedTier1 = outcome.enriched;
+  else manifest.counts.enrichedTier2 = outcome.enriched;
+  manifest.notes.push(...outcome.notes);
+  writeRunManifest(runDir, manifest);
+  if (bools.has("json")) out(jsonLine({ run: runDir, tier, ...outcome, notes: void 0 }));
+  say("");
+  say(
+    tier === 1 ? `next: ultraprospect enrich --run ${runDir} --tier 2 --limit 20` : `next: ultraprospect score --run ${runDir} --icp "<who you are looking for>"`
+  );
+  return outcome.enriched > 0 ? EXIT_OK : EXIT_FAILURE;
+}
 async function main(argv) {
   brandEngine();
   const parsed = parseArgs(argv, SPEC);
@@ -4378,16 +5055,18 @@ async function main(argv) {
   }
   const { command, values, bools } = parsed;
   if (bools.has("stdout") || process.env.ULTRAPROSPECT_NO_WRITE === "1") setNoWrite(true);
-  const text = positionalText(parsed);
+  const text2 = positionalText(parsed);
   switch (command) {
     case "where":
-      return cmdWhere(values, bools, text);
+      return cmdWhere(values, bools, text2);
     case "scan":
-      return cmdScan(values, bools, text);
+      return cmdScan(values, bools, text2);
     case "match":
       return cmdMatch(values, bools);
     case "resolve":
       return cmdResolve(values, bools);
+    case "enrich":
+      return cmdEnrich(values, bools);
     case "doctor":
       return runDoctor({ json: bools.has("json"), out, say });
     case "version":

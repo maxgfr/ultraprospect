@@ -26,11 +26,12 @@ import { loadFixture, recordFixture } from "./fixture.js";
 import { applyVerdicts, type MatchVerdict } from "./match.js";
 import { needsResolving, queriesFor, runResolve, type WebHit } from "./resolve.js";
 import { newPageStore } from "./pages.js";
+import { enrichable, runEnrich } from "./enrich.js";
 import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, writePlaces, writeRunManifest } from "./run.js";
 import { clampInt, parseBbox, parseDistanceM } from "./util.js";
 import { VERSION } from "./version.js";
 
-export const COMMANDS = ["where", "scan", "match", "resolve", "doctor", "version"] as const;
+export const COMMANDS = ["where", "scan", "match", "resolve", "enrich", "doctor", "version"] as const;
 
 export const VALUE_FLAGS = [
   "where",
@@ -55,6 +56,10 @@ export const VALUE_FLAGS = [
   "record",
   "web-results",
   "limit",
+  "tier",
+  "only",
+  "max-pages",
+  "concurrency",
 ] as const;
 
 export const BOOL_FLAGS = ["json", "no-osm", "no-sirene", "include-ceased", "no-people", "queries", "engine-search", "stdout", "help", "version"] as const;
@@ -69,6 +74,7 @@ COMMANDS
   scan                   Discover every company in the area, from OSM and the French register.
   match --apply <file>   Fold the agent's adjudication of MATCH.todo.json back into places.json.
   resolve                Find each company's own website and prove it is theirs.
+  enrich --tier 1|2      Read those websites: tier 1 on all of them, tier 2 on the ones you pick.
   doctor                 Check node, network and the health of every upstream.
   version                Print the version.
 
@@ -100,6 +106,12 @@ WEBSITE DISCOVERY (resolve)
   --web-results <file>   Hits from your own WebSearch: [{url,title,snippet,placeId?}]. "-" reads stdin.
   --engine-search        Fall back to the keyless search engine when no hits were supplied.
   --limit <n>            Only resolve this many places.
+
+ENRICHMENT (enrich)
+  --tier <1|2>           1: home + legal notice on every site. 2: a page per role + the ATS APIs.
+  --only <ids>           Enrich just these place ids, comma-separated.
+  --max-pages <n>        Ceiling on pages fetched per site in tier 2.
+  --concurrency <n>      Sites in flight at once. Per-host pacing is separate and always on.
 
 ADJUDICATION (match)
   --apply <file>         A JSON array of {osmId, siret|siren, merge, why}. "-" reads stdin.
@@ -370,6 +382,48 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
   return outcome.corroborated > 0 || outcome.unchanged === 0 ? EXIT_OK : EXIT_FAILURE;
 }
 
+async function cmdEnrich(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
+  if (!values.run) throw new UsageError("enrich needs --run <dir>");
+  const tier = values.tier ? clampInt(values.tier, 1, 2, 1) : 1;
+  const runDir = resolveRun(values.run);
+  const places = readPlaces(runDir);
+
+  if (enrichable(places).length === 0) {
+    say("enrich: no place has a corroborated website yet.");
+    say(`next: ultraprospect resolve --run ${runDir} --queries`);
+    return EXIT_FAILURE;
+  }
+
+  const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }) as any)));
+  const outcome = await runEnrich(runDir, places, store, {
+    tier: tier as 1 | 2,
+    limit: values.limit ? clampInt(values.limit, 1, 100_000, 20) : undefined,
+    only: list(values.only),
+    maxPages: values["max-pages"] ? clampInt(values["max-pages"], 1, 40, 9) : undefined,
+    concurrency: values.concurrency ? clampInt(values.concurrency, 1, 12, 4) : undefined,
+    onNote: (n) => say(`  ${n}`),
+    onProgress: (done, total, name) => {
+      if (done % 5 === 0 || done === total) say(`  enrich: ${done}/${total} — ${name}`);
+    },
+  });
+
+  writePlaces(runDir, places);
+  const manifest = requireManifest(runDir);
+  if (tier === 1) manifest.counts.enrichedTier1 = outcome.enriched;
+  else manifest.counts.enrichedTier2 = outcome.enriched;
+  manifest.notes.push(...outcome.notes);
+  writeRunManifest(runDir, manifest);
+
+  if (bools.has("json")) out(jsonLine({ run: runDir, tier, ...outcome, notes: undefined }));
+  say("");
+  say(
+    tier === 1
+      ? `next: ultraprospect enrich --run ${runDir} --tier 2 --limit 20`
+      : `next: ultraprospect score --run ${runDir} --icp "<who you are looking for>"`,
+  );
+  return outcome.enriched > 0 ? EXIT_OK : EXIT_FAILURE;
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   brandEngine();
   const parsed = parseArgs(argv, SPEC);
@@ -395,6 +449,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return cmdMatch(values, bools);
     case "resolve":
       return cmdResolve(values, bools);
+    case "enrich":
+      return cmdEnrich(values, bools);
     case "doctor":
       return runDoctor({ json: bools.has("json"), out, say });
     case "version":

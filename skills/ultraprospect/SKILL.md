@@ -26,14 +26,17 @@ is a guess dressed as a fact, and every count it reports is one it measured.
 >    say so in the first sentence of whatever you write, and name the lane. A
 >    partial sweep presented as a whole territory is the one failure nobody
 >    downstream can detect.
-> 3. **Never invent a contact.** Every email, phone number and person must
+> 3. **Absence is a finding.** `isHiring: false` means we looked where hiring
+>    would be and found none; `isHiring` absent means a board exists that we
+>    could not read. Report the second as unknown, never as "not hiring".
+> 4. **Never invent a contact.** Every email, phone number and person must
 >    appear verbatim in a fetched page or an open-data record. Do not
 >    reconstruct `prenom.nom@domaine` from a pattern — a plausible address is
 >    worse than none.
-> 4. **Adjudicate, don't rubber-stamp.** `MATCH.todo.json` exists because the
+> 5. **Adjudicate, don't rubber-stamp.** `MATCH.todo.json` exists because the
 >    matcher refused to decide. Read the evidence in each pair and answer it;
 >    approving the file wholesale throws away the reason it was written.
-> 5. **The attribution travels with the data.** OSM is ODbL: any list you hand
+> 6. **The attribution travels with the data.** OSM is ODbL: any list you hand
 >    over carries the notice the manifest gives you.
 
 ## Running the engine
@@ -57,6 +60,7 @@ gate. Read it rather than guessing a flag.
 | Same, narrowed to an industry or a company size | `scan --where "<place>" --section J,M --min-effectif 10` |
 | Answer the pairs the matcher would not decide | `match --run <dir> --apply verdicts.json` |
 | Find each company's website, and prove it is theirs | `resolve --run <dir> --queries` then `--web-results` |
+| Read those websites — what they do, who they hire | `enrich --run <dir> --tier 1`, then `--tier 2 --limit 20` |
 | Find out why a run came back thin | `doctor` |
 
 ## Cheat sheet
@@ -71,6 +75,8 @@ ultraprospect scan --where "Berlin" --no-sirene               # outside France, 
 ultraprospect match --run <dir> --apply verdicts.json         # fold your adjudication back in
 ultraprospect resolve --run <dir> --queries                   # the queries for YOU to search
 ultraprospect resolve --run <dir> --web-results hits.json     # ingest your hits, fetch, corroborate
+ultraprospect enrich --run <dir> --tier 1                     # home + legal notice on every site
+ultraprospect enrich --run <dir> --tier 2 --limit 20          # a page per role + the ATS APIs
 ultraprospect scan --fixture <dir>                            # replay a recorded sweep, offline
 ```
 
@@ -112,7 +118,17 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    address, or the distinctive part of its name. A domain that ranked first and
    corroborates nothing is recorded as `unverified`, never as the website.
 
-6. **Write from `places.json`.** Every field carries where it came from. A place
+6. **Enrich in two tiers, and spend the second one deliberately.** Tier 1 reads
+   the homepage and the legal notice on every corroborated site: four requests,
+   and it answers whether the site is alive, what it says it does, whether the
+   company runs a hiring pipeline, and whether its SIREN is published there.
+   Tier 2 is the expensive one — a page per role (about, services, products,
+   pricing, careers, team, contact, cases, news) plus the openings read
+   straight out of the ATS API rather than out of a JavaScript shell. Run it on
+   the ones you have a reason to care about, not on the whole town: a thousand
+   places at eight pages each is six thousand requests and several hours.
+
+7. **Write from `places.json`.** Every field carries where it came from. A place
    with `sources: ["osm","sirene"]` has both records attached; a place with one
    source has one, and the other half is not "missing data" you may fill in.
    `website.confidence` is `corroborated`, `unverified` or `declared` (a mapper
@@ -129,6 +145,8 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | A merged place looks like two companies | Adjudication was skipped or answered too generously. Check `matchConfidence` and the raw lanes in `osm.json` / `sirene.json`. |
 | Thousands of dormant one-person companies | Add `--min-effectif`; ceased companies are already excluded unless `--include-ceased`. |
 | `resolve` found almost nothing | It was run without `--web-results`. Only OSM's own tags were tried. Run `--queries` first and do the searching. |
+| `enrich` says "no place has a corroborated website" | `resolve` has not run, or corroborated nothing. Enrichment only ever reads sites we proved belong to the company. |
+| A company with a careers page shows `isHiring` unset | Deliberate. A board was detected but its openings could not be read, and "not hiring" would be a different claim. |
 
 ## Do not
 
