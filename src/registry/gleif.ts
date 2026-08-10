@@ -140,8 +140,16 @@ export const gleif: RegistryConnector = {
     }
     // A national register number — a German HRB, most usefully. GLEIF indexes it
     // as `entity.registeredAs`, but the filter is not exposed, so the entity is
-    // found by full text and the number is then checked EXACTLY. A fuzzy hit
-    // whose registeredAs does not match is somebody else's company.
+    // found by full text and the number is then checked EXACTLY.
+    //
+    // AN EXACT MATCH HERE IS STILL NOT PROOF OF IDENTITY, and the caller must
+    // name-check the answer. German register numbers are unique per court, not
+    // nationally: looking up "HRA 4792" from a Berlin bar's Impressum returns
+    // "UGE Klein Dammerow Eins GmbH & Co. KG", a different company holding the
+    // same number at a different Amtsgericht. That happened on the first real
+    // Berlin run. GLEIF publishes the court as an opaque registration-authority
+    // code, which cannot be compared with the court name an Impressum prints
+    // without shipping GLEIF's authority list, so the name check is the guard.
     const wanted = id.value.replace(/[\s.]/g, "").toUpperCase();
     if (!wanted) return undefined;
     const params: Record<string, string> = { "filter[fulltext]": id.value };
@@ -181,4 +189,3 @@ export const gleif: RegistryConnector = {
 export function gleifCoverageNote(): string {
   return "gleif: an LEI is held by entities that trade in financial markets — roughly 2.7 million worldwide. A street of independent shops will match almost none of them.";
 }
-

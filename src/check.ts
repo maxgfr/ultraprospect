@@ -35,7 +35,7 @@ export interface CheckReport {
   ok: boolean;
   errors: Finding[];
   warnings: Finding[];
-  counts: { dossiers: number; citations: number; contacts: number; places: number };
+  counts: { dossiers: number; citations: number; contacts: number; legalIds: number; places: number };
 }
 
 /**
@@ -155,6 +155,60 @@ export function runCheck(input: CheckInput): CheckReport {
     }
   }
 
+  // ---- Rule 4: a legal identifier must still be readable on the page it cites --
+  //
+  // `confirm` turns a registration number read off a company's own site into a
+  // register identity, and that is the strongest evidence in a non-French run.
+  // It is also the easiest to get silently wrong: a regex that drifts, a page
+  // that changed, an identifier copied from the wrong company's Impressum. The
+  // number must be findable in the stored extract, exactly as the run claims to
+  // have read it, or the identity it produced rests on nothing.
+  let legalIds = 0;
+  for (const place of places) {
+    for (const id of place.legalIds ?? []) {
+      legalIds++;
+      if (!id.from) {
+        // No page id at all. Nothing to re-read, so nothing to trust.
+        err(
+          "legal-id-unsourced",
+          `${place.id} · ${id.kind} ${id.value}`,
+          "carries no page id, so it cannot be re-read. A registration nobody can check is not evidence.",
+        );
+        continue;
+      }
+      const text = pageText.get(id.from);
+      if (!text) {
+        err("legal-id-unsourced", `${place.id} · ${id.kind} ${id.value}`, `claims to come from ${id.from}, which is not a stored page in this run.`);
+        continue;
+      }
+      // Compared with separators stripped from both sides: a page writes
+      // "DE 811 907 980" and the record holds "DE811907980", and neither
+      // spelling is wrong.
+      const haystack = text.replace(/[\s.\-–—]/g, "").toLowerCase();
+      if (!haystack.includes(id.value.replace(/[\s.\-–—]/g, "").toLowerCase())) {
+        err(
+          "legal-id-not-on-page",
+          `${place.id} · ${id.kind} ${id.value}`,
+          `does not appear in ${id.from}. Either it was misread, or the page changed since — both mean the identity built on it must not ship.`,
+        );
+      }
+    }
+  }
+
+  // A register identity that claims to come from a published number, with no
+  // such number recorded, cannot be audited at all.
+  for (const place of places) {
+    const ev = place.registryEvidence;
+    if (ev?.how !== "verified-id") continue;
+    if (!ev.legalId || !(place.legalIds ?? []).some((id) => id.value === ev.legalId)) {
+      err(
+        "registry-evidence-unbacked",
+        `${place.id}`,
+        `says its register record was confirmed from a published identifier, but the run holds no such identifier for it.`,
+      );
+    }
+  }
+
   // ---- Dossiers ---------------------------------------------------------------
   const dossierDir = join(runDir, "dossiers");
   const files = existsSync(dossierDir) ? readdirSync(dossierDir).filter((f) => f.endsWith(".md")) : [];
@@ -258,7 +312,7 @@ export function runCheck(input: CheckInput): CheckReport {
     ok: errors.length === 0,
     errors,
     warnings,
-    counts: { dossiers: files.length, citations, contacts, places: places.length },
+    counts: { dossiers: files.length, citations, contacts, legalIds, places: places.length },
   };
 }
 
@@ -271,7 +325,7 @@ export function formatReport(report: CheckReport): string {
   }
   lines.push("");
   lines.push(
-    `  ${report.counts.places} place(s) · ${report.counts.dossiers} dossier(s) · ${report.counts.citations} citation(s) · ${report.counts.contacts} contact(s) checked`,
+    `  ${report.counts.places} place(s) · ${report.counts.dossiers} dossier(s) · ${report.counts.citations} citation(s) · ${report.counts.contacts} contact(s) · ${report.counts.legalIds} registration(s) checked`,
   );
   lines.push(report.ok ? "  check: ok" : `  check: ${report.errors.length} error(s)`);
   return lines.join("\n");

@@ -198,6 +198,35 @@ export interface Place {
    * because a swept record and a confirmed one are not equally strong.
    */
   registry?: RegistryRecord;
+  /**
+   * Legal identifiers this company published on its own site, and what an
+   * authority said about each.
+   *
+   * Separate from `registry` because the two are different claims. A German
+   * Impressum's VAT number can be confirmed LIVE by VIES while Germany
+   * declines to say who holds it — that is a real, useful, citable fact, and it
+   * is not an identity. Folding it into `registry` would let a validity check
+   * masquerade as a register record; dropping it would throw away the only
+   * thing an authority was willing to confirm.
+   */
+  legalIds?: Array<{
+    /** "vat" | "hrb" | "siren" | "company-number" | "nif" … */
+    kind: string;
+    value: string;
+    /** Page id (`P4`) it was read from, so `check` can re-read it. */
+    from?: string;
+    /**
+     * verified — an authority confirmed it AND named the holder.
+     * attested — an authority confirmed the identifier is live but disclosed no
+     *   identity. Germany and Spain answer this way through VIES.
+     * unverified — read off the page; no authority was able to answer.
+     */
+    status: "verified" | "attested" | "unverified";
+    /** Which connector answered, when one did. */
+    authority?: string;
+    /** Free text: the German registry court, the reason nothing was disclosed. */
+    note?: string;
+  }>;
   /** How the register record got attached, and what backs it. */
   registryEvidence?: {
     mode: RegistryMode;

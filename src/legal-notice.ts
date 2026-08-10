@@ -67,16 +67,37 @@ const VAT_PATTERNS: Record<string, RegExp> = {
   sk: /SK\d{10}/i,
 };
 
-/** A VAT number found anywhere in the text, for any member state. */
+/**
+ * A VAT number found anywhere in the text, for any member state.
+ *
+ * Separators are stripped before matching, because sites write "DE 811 907 980"
+ * as often as "DE811907980". That alone produced a whole class of false
+ * positives, found on the first real Berlin run: "Tel 030 440 244" compacts to
+ * "Tel030440244", and `EL\d{9}` reads the "el" of "Tel" as Greece's VAT prefix.
+ * A print shop in Prenzlauer Berg acquired two Greek VAT numbers, both of them
+ * its own phone number.
+ *
+ * So the compaction keeps a map back to the original offsets, and a match is
+ * accepted only when its prefix was not preceded by a letter in the ORIGINAL
+ * text. That is the boundary compaction destroys, and the one that matters.
+ */
 export function extractVatNumbers(text: string): Array<{ countryCode: string; value: string }> {
   const out: Array<{ countryCode: string; value: string }> = [];
   const seen = new Set<string>();
-  // Spaces and dots are stripped first: sites write "DE 811 907 980" as often as
-  // not, and a pattern that tolerated arbitrary separators would also match
-  // across sentence boundaries.
-  const compact = text.replace(/[\s. -]+/g, "");
+
+  let compact = "";
+  const origin: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "." || ch === "-") continue;
+    compact += ch;
+    origin.push(i);
+  }
+
   for (const [cc, re] of Object.entries(VAT_PATTERNS)) {
     for (const m of compact.matchAll(new RegExp(re.source, "gi"))) {
+      const before = text[(origin[m.index ?? 0] ?? 0) - 1];
+      if (before && /[A-Za-z]/.test(before)) continue;
       const value = m[0].toUpperCase();
       if (seen.has(value)) continue;
       seen.add(value);

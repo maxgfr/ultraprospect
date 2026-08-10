@@ -22,6 +22,20 @@ describe("extractVatNumbers", () => {
     expect(extractVatNumbers("NL004495445B01")).toContainEqual({ countryCode: "nl", value: "NL004495445B01" });
   });
 
+  it("does not read a phone number as a Greek VAT number", () => {
+    // Found on the first real Berlin run. Stripping separators turns
+    // "Tel 030 440 244" into "Tel030440244", where `EL\d{9}` matches the "el"
+    // of "Tel": a Prenzlauer Berg print shop acquired two Greek VAT numbers,
+    // both of them its own phone number.
+    expect(extractVatNumbers("Solid Earth GmbH, Tel 030 440 244, Fax 030 440 377")).toEqual([]);
+    // …without losing a real Greek one, whose prefix is not glued to a word.
+    expect(extractVatNumbers("ΑΦΜ EL030440244")).toContainEqual({ countryCode: "el", value: "EL030440244" });
+  });
+
+  it("does not read a number glued to a word as a VAT number", () => {
+    expect(extractVatNumbers("ordersDE123456789 shipped")).toEqual([]);
+  });
+
   it("finds a foreign subsidiary's number alongside the local one", () => {
     // A German group's Impressum legitimately carries an Austrian number. Which
     // one matters is decided later, by the country of the record.

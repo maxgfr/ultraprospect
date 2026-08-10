@@ -2,7 +2,7 @@
 
 // src/cli.ts
 import { readFileSync as readFileSync8 } from "fs";
-import { join as join12 } from "path";
+import { join as join13 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 
 // src/vendor/webindex-engine.mjs
@@ -4813,6 +4813,10 @@ function parseViesAddress(raw, countryCode) {
   }
   return address;
 }
+function viesVerdict(data) {
+  if (data?.isValid === true) return "valid";
+  return data?.userError === "INVALID" ? "invalid" : "inconclusive";
+}
 async function checkVat(countryCode, number) {
   const cc = vatPrefix(countryCode);
   const digits = number.replace(/^[A-Z]{2}/i, "").replace(/[\s.-]/g, "");
@@ -4823,13 +4827,16 @@ async function checkVat(countryCode, number) {
   if (!res.ok) return void 0;
   const name = disclosed(res.data?.name);
   const rawAddress = disclosed(res.data?.address);
+  const userError = typeof res.data?.userError === "string" ? res.data.userError : void 0;
+  const verdict = viesVerdict(res.data);
   return {
-    valid: res.data?.isValid === true,
+    verdict,
     identified: Boolean(name),
     name,
     address: rawAddress ? parseViesAddress(rawAddress, cc) : void 0,
     countryCode: cc.toLowerCase(),
-    vatNumber: `${cc}${digits}`
+    vatNumber: `${cc}${digits}`,
+    userError
   };
 }
 var euVies = {
@@ -4847,8 +4854,16 @@ var euVies = {
     if (id.kind !== "vat") return void 0;
     const answer = await checkVat(id.countryCode, id.value);
     if (!answer) return void 0;
-    if (!answer.valid) {
-      ctx.onNote?.(`vies: ${id.value} is NOT a live VAT registration`);
+    if (answer.verdict === "inconclusive") {
+      ctx.onNote?.(
+        `vies: ${answer.vatNumber} could not be checked \u2014 ${answer.userError ?? "no answer"}. That is this member state's system, not a fact about the number.`
+      );
+      return void 0;
+    }
+    if (answer.verdict === "invalid") {
+      ctx.onNote?.(
+        `vies: ${answer.vatNumber} is not registered for intra-community trade. VIES only knows numbers enabled for intra-EU transactions, so this is not evidence that the number is wrong.`
+      );
       return void 0;
     }
     if (!answer.identified) {
@@ -4876,22 +4891,27 @@ var euVies = {
     const it = await checkVat("IT", "00488410010");
     checks.push({
       name: "VIES still discloses the trader name for at least one member state (IT)",
-      ok: Boolean(it?.valid && it.identified),
+      ok: it?.verdict === "valid" && it.identified,
       detail: it?.name ? `named "${it.name}"` : "no name returned \u2014 the connector can no longer confirm identity anywhere"
     });
     const de = await checkVat("DE", "811193231");
     checks.push({
       name: "VIES still REDACTS the trader name for DE",
-      ok: Boolean(de?.valid && !de.identified),
+      ok: de?.verdict === "valid" && !de.identified,
       detail: de?.identified ? `DE now discloses ("${de.name}") \u2014 the German path can confirm identity through VIES` : "still '---', as measured"
     });
     const invalid = await checkVat("DE", "000000000");
-    checks.push({ name: "VIES still answers isValid:false rather than an error for an unknown number", ok: invalid?.valid === false });
+    checks.push({
+      name: "VIES still distinguishes INVALID from a member state being unavailable",
+      ok: invalid?.verdict === "invalid",
+      detail: `userError=${invalid?.userError ?? "none"} \u2014 an MS_UNAVAILABLE read as "invalid" reports somebody else's outage as a fact about a company`,
+      inconclusive: invalid?.verdict === "inconclusive"
+    });
     return checks;
   },
   async probe() {
     const answer = await checkVat("IT", "00488410010");
-    return { ok: Boolean(answer?.valid), detail: answer ? `isValid=${answer.valid}, identity ${answer.identified ? "disclosed" : "redacted"}` : "no answer" };
+    return { ok: answer?.verdict === "valid", detail: answer ? `${answer.verdict}, identity ${answer.identified ? "disclosed" : "redacted"}` : "no answer" };
   }
 };
 
@@ -6105,9 +6125,18 @@ var VAT_PATTERNS = {
 function extractVatNumbers(text2) {
   const out2 = [];
   const seen = /* @__PURE__ */ new Set();
-  const compact = text2.replace(/[\s. -]+/g, "");
+  let compact = "";
+  const origin = [];
+  for (let i = 0; i < text2.length; i++) {
+    const ch = text2[i];
+    if (ch === " " || ch === "	" || ch === "\n" || ch === "\r" || ch === "." || ch === "-") continue;
+    compact += ch;
+    origin.push(i);
+  }
   for (const [cc, re] of Object.entries(VAT_PATTERNS)) {
     for (const m of compact.matchAll(new RegExp(re.source, "gi"))) {
+      const before = text2[(origin[m.index ?? 0] ?? 0) - 1];
+      if (before && /[A-Za-z]/.test(before)) continue;
       const value = m[0].toUpperCase();
       if (seen.has(value)) continue;
       seen.add(value);
@@ -6188,8 +6217,10 @@ function legalIdCoverage(countryCode) {
 }
 
 // src/confirm.ts
+import { join as join9 } from "path";
 function needsConfirming(places) {
-  return places.filter((p) => !p.registry && Boolean(p.name?.trim()));
+  const targets = places.filter((p) => !p.registry && Boolean(p.name?.trim()));
+  return [...targets].sort((a, b) => (b.pages.length > 0 ? 1 : 0) - (a.pages.length > 0 ? 1 : 0));
 }
 function localityOf(place, fallback) {
   return place.address.commune ?? place.address.codePostal ?? fallback;
@@ -6231,16 +6262,18 @@ function toCandidate3(place, rec, score, matchedName) {
   };
 }
 async function verify(id, connectors, ctx) {
+  const asked = [];
   for (const connector of connectors) {
     if (!connector.verifyId) continue;
     if (!connector.countries.includes("*") && !connector.countries.includes(id.countryCode)) continue;
+    asked.push(connector.id);
     try {
-      const rec = await connector.verifyId(id, ctx);
-      if (rec) return rec;
+      const record = await connector.verifyId(id, ctx);
+      if (record) return { record, asked };
     } catch {
     }
   }
-  return void 0;
+  return { asked };
 }
 async function runConfirm(runDir, places, opts = {}) {
   const notes = [];
@@ -6263,6 +6296,7 @@ async function runConfirm(runDir, places, opts = {}) {
     matched: 0,
     undecided: [],
     notFound: 0,
+    attested: 0,
     notes,
     coverage: {
       lane: "registry",
@@ -6281,6 +6315,13 @@ async function runConfirm(runDir, places, opts = {}) {
   note(`confirm: ${coverage.note}`);
   const targets = needsConfirming(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
   outcome.coverage.requested = targets.length;
+  const withPages = targets.filter((p) => p.pages.length > 0).length;
+  const speculative = targets.length - withPages;
+  if (speculative > 50) {
+    note(
+      `confirm: ${withPages} place(s) have a fetched page and can be confirmed from the number their own site publishes. The other ${speculative} can only be looked up by name \u2014 one request each against ${selection.confirm.map((c) => c.id).join(", ")}. Use --limit ${Math.max(withPages, 50)} to stop after the conclusive ones.`
+    );
+  }
   const usedConnectors = /* @__PURE__ */ new Set();
   let idsFound = 0;
   let done = 0;
@@ -6288,23 +6329,52 @@ async function runConfirm(runDir, places, opts = {}) {
     done++;
     opts.onProgress?.(done, targets.length, place.name);
     let attached;
-    for (const pageRel of place.pages) {
+    const found = [];
+    for (const pageId of place.pages) {
       if (attached) break;
-      const text2 = readPageText(runDir, pageRel);
+      const text2 = readPageText(runDir, join9("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${pageId}.md`));
       if (!text2) continue;
-      const pageId = pageIdOf(pageRel);
       for (const id of extractLegalIds(text2, opts.countryCode, pageId)) {
         idsFound++;
-        const rec = await verify(id, selection.confirm, ctx);
-        if (!rec) continue;
+        const { record: rec, asked } = await verify(id, selection.confirm, ctx);
+        if (!rec) {
+          found.push({
+            kind: id.kind,
+            value: id.value,
+            from: id.from,
+            status: "unverified",
+            authority: asked.join(",") || void 0,
+            note: asked.length ? `asked ${asked.join(", ")}; none named a holder${id.context ? ` (court: ${id.context})` : ""}` : "no authority here can check this kind of identifier"
+          });
+          continue;
+        }
         const { score } = scoreLookup(place, rec);
         if (score < 0.3 && !sharesToken(place, rec)) {
           note(`confirm: ${place.name} published ${id.value}, but the register returned "${rec.names[0]}" \u2014 not attached`);
+          found.push({
+            kind: id.kind,
+            value: id.value,
+            from: id.from,
+            status: "unverified",
+            authority: rec.connectorId,
+            note: `${rec.connectorId} named "${rec.names[0]}", which is not this company`
+          });
           continue;
         }
+        found.push({ kind: id.kind, value: id.value, from: id.from, status: "verified", authority: rec.connectorId, note: id.context });
         attached = { rec, how: "verified-id", from: id.from, legalId: id.value };
         break;
       }
+    }
+    if (found.length) {
+      const byValue = /* @__PURE__ */ new Map();
+      for (const f of found) {
+        const key = `${f.kind}:${f.value}`;
+        const existing = byValue.get(key);
+        if (!existing || existing.status === "unverified" && f.status !== "unverified") byValue.set(key, f);
+      }
+      place.legalIds = [...byValue.values()];
+      outcome.attested += place.legalIds.filter((f) => f.status !== "verified").length;
     }
     if (!attached) {
       const query = {
@@ -6357,13 +6427,10 @@ async function runConfirm(runDir, places, opts = {}) {
       `confirm: not one of ${targets.length} site(s) published a registration number, though ${opts.countryCode} requires it. Either the legal pages were not fetched (run \`enrich --tier 1\` first) or they were not reachable.`
     );
   }
-  note(`confirm: ${outcome.verified} verified, ${outcome.matched} matched by name, ${outcome.undecided.length} undecided, ${outcome.notFound} not found`);
+  note(
+    `confirm: ${outcome.verified} verified, ${outcome.matched} matched by name, ${outcome.undecided.length} undecided, ${outcome.notFound} not found, ${outcome.attested} identifier(s) read but not resolved to an identity`
+  );
   return outcome;
-}
-function pageIdOf(pageRel) {
-  const file = pageRel.split("/").pop() ?? "";
-  const m = /^(P\d+)/.exec(file);
-  return m?.[1] ?? void 0;
 }
 function sharesToken(place, rec) {
   const mine = new Set([...tokenSet(normalizeName(place.name))].filter((t) => t.length >= 4));
@@ -6376,9 +6443,9 @@ function sharesToken(place, rec) {
 
 // src/pages.ts
 import { mkdirSync as mkdirSync5 } from "fs";
-import { join as join9 } from "path";
+import { join as join10 } from "path";
 function pageDirFor(placeId) {
-  return join9("pages", placeId.replace(/[^a-zA-Z0-9._-]/g, "_"));
+  return join10("pages", placeId.replace(/[^a-zA-Z0-9._-]/g, "_"));
 }
 var MIN_READABLE_CHARS = 120;
 function newPageStore(existing = []) {
@@ -6398,7 +6465,7 @@ async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
   }
   const id = `P${store.next++}`;
   const dir = pageDirFor(placeId);
-  const extract = join9(dir, `${id}.md`);
+  const extract = join10(dir, `${id}.md`);
   const fetchedAt = (/* @__PURE__ */ new Date()).toISOString();
   const header2 = [
     `# ${id} \u2014 ${result.title ?? url}`,
@@ -6412,8 +6479,8 @@ async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
     "---",
     ""
   ].join("\n");
-  if (!isNoWrite()) mkdirSync5(join9(runDir, dir), { recursive: true });
-  writeArtifact(join9(runDir, extract), header2 + text2 + markupEvidence(result.html) + "\n");
+  if (!isNoWrite()) mkdirSync5(join10(runDir, dir), { recursive: true });
+  writeArtifact(join10(runDir, extract), header2 + text2 + markupEvidence(result.html) + "\n");
   return {
     ok: true,
     page: {
@@ -7275,7 +7342,7 @@ function ranked(places) {
 
 // src/dossier.ts
 import { existsSync as existsSync7, readFileSync as readFileSync6 } from "fs";
-import { join as join10 } from "path";
+import { join as join11 } from "path";
 
 // src/classification/index.ts
 var NACE_VOCABULARY = {
@@ -7310,7 +7377,7 @@ function vocabularyOf(scheme) {
 
 // src/dossier.ts
 function dossierPathFor(place) {
-  return join10("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
+  return join11("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
 }
 function streetLine(a) {
   const type = a.typeVoie?.trim();
@@ -7482,8 +7549,8 @@ function buildDossierPacket(runDir, place, manifest) {
   parts.push(`## Pages (${place.pages.length})`);
   parts.push("");
   for (const id of place.pages) {
-    const rel = join10("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${id}.md`);
-    const abs = join10(runDir, rel);
+    const rel = join11("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${id}.md`);
+    const abs = join11(runDir, rel);
     if (!existsSync7(abs)) {
       parts.push(`### ${id} \u2014 MISSING (${rel})`);
       parts.push("");
@@ -7501,7 +7568,7 @@ function buildDossierPacket(runDir, place, manifest) {
 
 // src/check.ts
 import { existsSync as existsSync8, readFileSync as readFileSync7, readdirSync as readdirSync4 } from "fs";
-import { basename, join as join11 } from "path";
+import { basename, join as join12 } from "path";
 var citationRe = () => /\[P(\d+)\]/g;
 var MODEL_MARK = /\[M\]/;
 function isStructural(line) {
@@ -7530,9 +7597,9 @@ function runCheck(input) {
   const pageText = /* @__PURE__ */ new Map();
   const pageOwner = /* @__PURE__ */ new Map();
   for (const place of places) {
-    const dir = join11(runDir, "pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"));
+    const dir = join12(runDir, "pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"));
     for (const id of place.pages) {
-      const file = join11(dir, `${id}.md`);
+      const file = join12(dir, `${id}.md`);
       pageOwner.set(id, place.id);
       if (existsSync8(file)) pageText.set(id, readFileSync7(file, "utf8"));
     }
@@ -7565,12 +7632,50 @@ function runCheck(input) {
       }
     }
   }
-  const dossierDir = join11(runDir, "dossiers");
+  let legalIds = 0;
+  for (const place of places) {
+    for (const id of place.legalIds ?? []) {
+      legalIds++;
+      if (!id.from) {
+        err(
+          "legal-id-unsourced",
+          `${place.id} \xB7 ${id.kind} ${id.value}`,
+          "carries no page id, so it cannot be re-read. A registration nobody can check is not evidence."
+        );
+        continue;
+      }
+      const text2 = pageText.get(id.from);
+      if (!text2) {
+        err("legal-id-unsourced", `${place.id} \xB7 ${id.kind} ${id.value}`, `claims to come from ${id.from}, which is not a stored page in this run.`);
+        continue;
+      }
+      const haystack = text2.replace(/[\s.\-–—]/g, "").toLowerCase();
+      if (!haystack.includes(id.value.replace(/[\s.\-–—]/g, "").toLowerCase())) {
+        err(
+          "legal-id-not-on-page",
+          `${place.id} \xB7 ${id.kind} ${id.value}`,
+          `does not appear in ${id.from}. Either it was misread, or the page changed since \u2014 both mean the identity built on it must not ship.`
+        );
+      }
+    }
+  }
+  for (const place of places) {
+    const ev = place.registryEvidence;
+    if (ev?.how !== "verified-id") continue;
+    if (!ev.legalId || !(place.legalIds ?? []).some((id) => id.value === ev.legalId)) {
+      err(
+        "registry-evidence-unbacked",
+        `${place.id}`,
+        `says its register record was confirmed from a published identifier, but the run holds no such identifier for it.`
+      );
+    }
+  }
+  const dossierDir = join12(runDir, "dossiers");
   const files = existsSync8(dossierDir) ? readdirSync4(dossierDir).filter((f) => f.endsWith(".md")) : [];
   const byDossierName = new Map(places.map((p) => [`${p.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`, p]));
   let citations = 0;
   for (const file of files) {
-    const rel = join11("dossiers", file);
+    const rel = join12("dossiers", file);
     const place = byDossierName.get(basename(file));
     if (!place) {
       err(
@@ -7580,7 +7685,7 @@ function runCheck(input) {
       );
       continue;
     }
-    const text2 = readFileSync7(join11(dossierDir, file), "utf8");
+    const text2 = readFileSync7(join12(dossierDir, file), "utf8");
     const owned = new Set(place.pages);
     for (const m of text2.matchAll(citationRe())) {
       citations++;
@@ -7648,7 +7753,7 @@ function runCheck(input) {
     ok: errors.length === 0,
     errors,
     warnings,
-    counts: { dossiers: files.length, citations, contacts, places: places.length }
+    counts: { dossiers: files.length, citations, contacts, legalIds, places: places.length }
   };
 }
 function formatReport(report) {
@@ -7659,7 +7764,7 @@ function formatReport(report) {
   }
   lines.push("");
   lines.push(
-    `  ${report.counts.places} place(s) \xB7 ${report.counts.dossiers} dossier(s) \xB7 ${report.counts.citations} citation(s) \xB7 ${report.counts.contacts} contact(s) checked`
+    `  ${report.counts.places} place(s) \xB7 ${report.counts.dossiers} dossier(s) \xB7 ${report.counts.citations} citation(s) \xB7 ${report.counts.contacts} contact(s) \xB7 ${report.counts.legalIds} registration(s) checked`
   );
   lines.push(report.ok ? "  check: ok" : `  check: ${report.errors.length} error(s)`);
   return lines.join("\n");
@@ -8864,7 +8969,7 @@ async function cmdConfirm(values, bools) {
   writePlaces(runDir, places);
   writeJson(runDir, "registry.json", mergeRegistryRecords(runDir, outcome.records));
   if (outcome.undecided.length) {
-    const existing = readJsonSafe(join12(runDir, "MATCH.todo.json"))?.pairs ?? [];
+    const existing = readJsonSafe(join13(runDir, "MATCH.todo.json"))?.pairs ?? [];
     writeJson(runDir, "MATCH.todo.json", buildMatchTodo([...existing, ...outcome.undecided]));
   }
   manifest.lanes = [...manifest.lanes.filter((l) => l.lane !== "registry" || l.mode === "sweep"), outcome.coverage];
@@ -8876,11 +8981,21 @@ async function cmdConfirm(values, bools) {
   manifest.notes.push(...outcome.notes);
   writeRunManifest(runDir, manifest);
   if (bools.has("json")) {
-    out(jsonLine({ run: runDir, verified: outcome.verified, matched: outcome.matched, undecided: outcome.undecided.length, notFound: outcome.notFound }));
+    out(
+      jsonLine({
+        run: runDir,
+        verified: outcome.verified,
+        matched: outcome.matched,
+        attested: outcome.attested,
+        undecided: outcome.undecided.length,
+        notFound: outcome.notFound
+      })
+    );
   }
   say("");
   say(`  verified by a published number   ${outcome.verified}`);
   say(`  matched by a name lookup         ${outcome.matched}`);
+  say(`  number read, holder not named    ${outcome.attested}`);
   say(`  undecided (in MATCH.todo.json)   ${outcome.undecided.length}`);
   say(`  no register record found         ${outcome.notFound}`);
   say("");
@@ -8900,7 +9015,7 @@ function connectorKeys(values) {
   return keys;
 }
 function mergeRegistryRecords(runDir, fresh) {
-  const existing = readJsonSafe(join12(runDir, "registry.json")) ?? [];
+  const existing = readJsonSafe(join13(runDir, "registry.json")) ?? [];
   const byKey = /* @__PURE__ */ new Map();
   for (const rec of [...existing, ...fresh]) byKey.set(`${rec.connectorId}:${rec.establishmentId ?? rec.id}`, rec);
   return [...byKey.values()];
@@ -9077,7 +9192,7 @@ async function cmdResolve(values, bools) {
     else for (const item of plan) for (const q of item.queries) out(q);
     say("");
     say(`resolve: ${plan.length} place(s) need a website, ${plan.reduce((n, p) => n + p.queries.length, 0)} quer(y|ies) to run.`);
-    say(`  worklist: ${join12(runDir, "RESOLVE.todo.json")}`);
+    say(`  worklist: ${join13(runDir, "RESOLVE.todo.json")}`);
     say("  Run your own WebSearch once per query. Pool EVERY hit into ONE JSON array,");
     say('  duplicates and all: [{"url": "\u2026", "title": "\u2026", "snippet": "\u2026", "placeId": "\u2026"}]');
     say(`next: ultraprospect resolve --run ${runDir} --web-results <file>`);
@@ -9232,7 +9347,7 @@ async function cmdDossier(values, bools) {
   const packet = buildDossierPacket(runDir, place, requireManifest(runDir));
   out(packet.markdown);
   say("");
-  say(`write your dossier to ${join12(runDir, dossierPathFor(place))}`);
+  say(`write your dossier to ${join13(runDir, dossierPathFor(place))}`);
   say(`next: ultraprospect check --run ${runDir}`);
   return EXIT_OK;
 }
@@ -9261,16 +9376,16 @@ async function cmdRender(values, bools) {
     minScore: values["min-score"] ? clampInt(values["min-score"], 0, 1e4, 0) : void 0,
     minFit: values["min-fit"] ?? void 0
   });
-  for (const file of outcome.files) writeArtifact(join12(runDir, file.path), file.content);
-  if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join12(runDir, f.path)) }));
-  else for (const file of outcome.files) out(join12(runDir, file.path));
+  for (const file of outcome.files) writeArtifact(join13(runDir, file.path), file.content);
+  if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join13(runDir, f.path)) }));
+  else for (const file of outcome.files) out(join13(runDir, file.path));
   say("");
   if (manifest.truncated) {
     say("  \u26A0 this run is TRUNCATED \u2014 the report and the page both lead with that, and so must you.");
   }
   const privacy = outcome.files.some((f) => f.path === "PRIVACY.md");
   if (privacy) say("  PRIVACY.md was written: this run holds named individuals. Read it before sharing the CSV.");
-  say(`next: open ${join12(runDir, "index.html")}`);
+  say(`next: open ${join13(runDir, "index.html")}`);
   return EXIT_OK;
 }
 async function cmdWatch(values, bools) {
@@ -9281,7 +9396,7 @@ async function cmdWatch(values, bools) {
   if (afterDir === beforeDir) throw new UsageError("--run and --since resolve to the same run; there is nothing to compare");
   const delta = diffRuns(readPlaces(beforeDir), readPlaces(afterDir));
   const markdown = buildDelta(delta, requireManifest(beforeDir), requireManifest(afterDir));
-  writeArtifact(join12(afterDir, "DELTA.md"), markdown);
+  writeArtifact(join13(afterDir, "DELTA.md"), markdown);
   if (bools.has("json")) {
     out(
       jsonLine({
@@ -9296,7 +9411,7 @@ async function cmdWatch(values, bools) {
       })
     );
   } else {
-    out(join12(afterDir, "DELTA.md"));
+    out(join13(afterDir, "DELTA.md"));
   }
   say("");
   say(

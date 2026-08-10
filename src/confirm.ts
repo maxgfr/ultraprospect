@@ -28,6 +28,7 @@ import { connectorsFor, noSweepReason, unknownConnectorIds } from "./registry/in
 import type { ConnectorContext, LegalId, RegistryConnector, RegistryRecord } from "./registry/types.js";
 import { MERGE_HIGH, MERGE_LOW } from "./match.js";
 import { extractLegalIds, legalIdCoverage } from "./legal-notice.js";
+import { join } from "node:path";
 import { readPageText } from "./run.js";
 import type { LaneCoverage, MatchCandidate, Place } from "./types.js";
 import { nameSimilarity, normalizeName, tokenSet } from "./util.js";
@@ -58,13 +59,30 @@ export interface ConfirmOutcome {
   undecided: MatchCandidate[];
   /** Places that were asked about and came back with nothing. A finding, not a gap. */
   notFound: number;
+  /**
+   * Identifiers an authority confirmed as live without naming their holder.
+   *
+   * Germany and Spain answer VIES this way. It is not an identity and never
+   * becomes one, but it is more than nothing: the number on the page is real.
+   */
+  attested: number;
   coverage: LaneCoverage;
   notes: string[];
 }
 
-/** Places worth asking a register about: no register record yet, and a name to ask with. */
+/**
+ * Places worth asking a register about, STRONGEST ROUTE FIRST.
+ *
+ * Ordering is not cosmetic here. A place with a fetched page can be confirmed
+ * from the registration number its own site publishes — one request, a
+ * conclusive answer. A place without one can only be looked up by name, which
+ * costs a request per company and, in a country where the only connector is
+ * GLEIF, will confirm almost nothing. Doing the cheap conclusive work first
+ * means a `--limit` cuts off the speculative half rather than the useful one.
+ */
 export function needsConfirming(places: readonly Place[]): Place[] {
-  return places.filter((p) => !p.registry && Boolean(p.name?.trim()));
+  const targets = places.filter((p) => !p.registry && Boolean(p.name?.trim()));
+  return [...targets].sort((a, b) => (b.pages.length > 0 ? 1 : 0) - (a.pages.length > 0 ? 1 : 0));
 }
 
 /**
@@ -128,21 +146,29 @@ function toCandidate(place: Place, rec: RegistryRecord, score: number, matchedNa
   };
 }
 
-/** Ask every applicable connector to verify one identifier, strongest connector first. */
-async function verify(id: LegalId, connectors: readonly RegistryConnector[], ctx: ConnectorContext): Promise<RegistryRecord | undefined> {
+/**
+ * Ask every applicable authority about one identifier, strongest first.
+ *
+ * Returns WHICH authorities were asked as well as what came back, because
+ * "nobody could answer" and "we did not ask" are different findings and the
+ * place record has to be able to tell them apart.
+ */
+async function verify(id: LegalId, connectors: readonly RegistryConnector[], ctx: ConnectorContext): Promise<{ record?: RegistryRecord; asked: string[] }> {
+  const asked: string[] = [];
   for (const connector of connectors) {
     if (!connector.verifyId) continue;
     if (!connector.countries.includes("*") && !connector.countries.includes(id.countryCode)) continue;
+    asked.push(connector.id);
     try {
-      const rec = await connector.verifyId(id, ctx);
-      if (rec) return rec;
+      const record = await connector.verifyId(id, ctx);
+      if (record) return { record, asked };
     } catch {
       // One authority being down must not stop the next one being asked. The
       // lane's coverage records what was reached; a throw here would lose the
       // companies that came after.
     }
   }
-  return undefined;
+  return { asked };
 }
 
 export async function runConfirm(runDir: string, places: Place[], opts: ConfirmOptions = {}): Promise<ConfirmOutcome> {
@@ -168,6 +194,7 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
     matched: 0,
     undecided: [],
     notFound: 0,
+    attested: 0,
     notes,
     coverage: {
       lane: "registry",
@@ -189,6 +216,18 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
 
   const targets = needsConfirming(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
   outcome.coverage.requested = targets.length;
+
+  // Say what this is going to cost before spending it. A name lookup is one
+  // request per company against someone else's public service, and on a dense
+  // territory that is thousands of them — most asking about a corner shop that
+  // no cross-border register has ever heard of.
+  const withPages = targets.filter((p) => p.pages.length > 0).length;
+  const speculative = targets.length - withPages;
+  if (speculative > 50) {
+    note(
+      `confirm: ${withPages} place(s) have a fetched page and can be confirmed from the number their own site publishes. The other ${speculative} can only be looked up by name — one request each against ${selection.confirm.map((c) => c.id).join(", ")}. Use --limit ${Math.max(withPages, 50)} to stop after the conclusive ones.`,
+    );
+  }
   const usedConnectors = new Set<string>();
   let idsFound = 0;
   let done = 0;
@@ -199,26 +238,72 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
 
     // ---- Route 1: an identifier the company published on its own site -------
     let attached: { rec: RegistryRecord; how: string; from?: string; legalId?: string } | undefined;
-    for (const pageRel of place.pages) {
+    const found: NonNullable<Place["legalIds"]> = [];
+    for (const pageId of place.pages) {
       if (attached) break;
-      const text = readPageText(runDir, pageRel);
+      // `place.pages` holds page IDS ("P17"), not paths. The extract lives at
+      // pages/<sanitised place id>/<page id>.md, which is how `check` finds it
+      // too — reading the id as a path silently found no text at all, and the
+      // run reported "no German site published a registration number" while
+      // sitting on a fetched Impressum that did.
+      const text = readPageText(runDir, join("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${pageId}.md`));
       if (!text) continue;
-      const pageId = pageIdOf(pageRel);
       for (const id of extractLegalIds(text, opts.countryCode, pageId)) {
         idsFound++;
-        const rec = await verify(id, selection.confirm, ctx);
-        if (!rec) continue;
+        const { record: rec, asked } = await verify(id, selection.confirm, ctx);
+        if (!rec) {
+          // The number was read off a page this run holds, and no authority
+          // named its holder. That is a real finding — the identifier is on the
+          // record, sourced and re-readable — and it is NOT an identity.
+          found.push({
+            kind: id.kind,
+            value: id.value,
+            from: id.from,
+            status: "unverified",
+            authority: asked.join(",") || undefined,
+            note: asked.length
+              ? `asked ${asked.join(", ")}; none named a holder${id.context ? ` (court: ${id.context})` : ""}`
+              : "no authority here can check this kind of identifier",
+          });
+          continue;
+        }
         // The register answered about SOME company. Check it is this one before
         // believing it: a legal notice can carry a parent group's number, and a
         // shared building's landlord number appears on tenants' pages.
         const { score } = scoreLookup(place, rec);
         if (score < 0.3 && !sharesToken(place, rec)) {
           note(`confirm: ${place.name} published ${id.value}, but the register returned "${rec.names[0]}" — not attached`);
+          // Not "attested": the authority named SOMEBODY, and it was not this
+          // company. In Germany that is usually the register number's fault
+          // rather than the page's — HRA/HRB numbers repeat across courts.
+          found.push({
+            kind: id.kind,
+            value: id.value,
+            from: id.from,
+            status: "unverified",
+            authority: rec.connectorId,
+            note: `${rec.connectorId} named "${rec.names[0]}", which is not this company`,
+          });
           continue;
         }
+        found.push({ kind: id.kind, value: id.value, from: id.from, status: "verified", authority: rec.connectorId, note: id.context });
         attached = { rec, how: "verified-id", from: id.from, legalId: id.value };
         break;
       }
+    }
+    if (found.length) {
+      // One row per identifier, not per page it appeared on: a VAT number in
+      // the footer of every page is one fact observed several times, and three
+      // identical rows read as three findings.
+      const byValue = new Map<string, (typeof found)[number]>();
+      for (const f of found) {
+        const key = `${f.kind}:${f.value}`;
+        const existing = byValue.get(key);
+        // Keep the strongest outcome, and with it the page that produced it.
+        if (!existing || (existing.status === "unverified" && f.status !== "unverified")) byValue.set(key, f);
+      }
+      place.legalIds = [...byValue.values()];
+      outcome.attested += place.legalIds.filter((f) => f.status !== "verified").length;
     }
 
     // ---- Route 2: ask the register for the name in the town -----------------
@@ -281,15 +366,10 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
       `confirm: not one of ${targets.length} site(s) published a registration number, though ${opts.countryCode} requires it. Either the legal pages were not fetched (run \`enrich --tier 1\` first) or they were not reachable.`,
     );
   }
-  note(`confirm: ${outcome.verified} verified, ${outcome.matched} matched by name, ${outcome.undecided.length} undecided, ${outcome.notFound} not found`);
+  note(
+    `confirm: ${outcome.verified} verified, ${outcome.matched} matched by name, ${outcome.undecided.length} undecided, ${outcome.notFound} not found, ${outcome.attested} identifier(s) read but not resolved to an identity`,
+  );
   return outcome;
-}
-
-/** The page id (`P3`) for a stored extract path, so evidence can be cited. */
-function pageIdOf(pageRel: string): string | undefined {
-  const file = pageRel.split("/").pop() ?? "";
-  const m = /^(P\d+)/.exec(file);
-  return m?.[1] ?? undefined;
 }
 
 /**

@@ -323,11 +323,21 @@ async function cmdConfirm(values: Record<string, string>, bools: ReadonlySet<str
   writeRunManifest(runDir, manifest);
 
   if (bools.has("json")) {
-    out(jsonLine({ run: runDir, verified: outcome.verified, matched: outcome.matched, undecided: outcome.undecided.length, notFound: outcome.notFound }));
+    out(
+      jsonLine({
+        run: runDir,
+        verified: outcome.verified,
+        matched: outcome.matched,
+        attested: outcome.attested,
+        undecided: outcome.undecided.length,
+        notFound: outcome.notFound,
+      }),
+    );
   }
   say("");
   say(`  verified by a published number   ${outcome.verified}`);
   say(`  matched by a name lookup         ${outcome.matched}`);
+  say(`  number read, holder not named    ${outcome.attested}`);
   say(`  undecided (in MATCH.todo.json)   ${outcome.undecided.length}`);
   say(`  no register record found         ${outcome.notFound}`);
   say("");

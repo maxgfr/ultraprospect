@@ -108,14 +108,42 @@ export function parseViesAddress(raw: string | undefined, countryCode: string): 
   return address;
 }
 
+/**
+ * What VIES actually said, kept as three states rather than a boolean.
+ *
+ * MEASURED, and the reason this is not `valid: boolean`: VIES answers
+ * `userError: "MS_UNAVAILABLE"` when the member state's own system is down, and
+ * the response still carries `isValid: false`. Reading that as "the number is
+ * invalid" reports somebody else's outage as a fact about a company — a wrong
+ * answer that looks exactly like a right one.
+ *
+ *   valid        — a live intra-community VAT registration.
+ *   invalid      — the member state answered, and does not know this number.
+ *   inconclusive — nobody answered. Says nothing about the number either way.
+ */
+export type ViesVerdict = "valid" | "invalid" | "inconclusive";
+
+/**
+ * Read VIES's answer about the ANSWER rather than about the number.
+ *
+ * Anything that is not a clean VALID/INVALID is the network reporting on
+ * itself. Exported so the rule can be pinned by a test without a live call.
+ */
+export function viesVerdict(data: { isValid?: unknown; userError?: unknown } | undefined): ViesVerdict {
+  if (data?.isValid === true) return "valid";
+  return data?.userError === "INVALID" ? "invalid" : "inconclusive";
+}
+
 export interface ViesAnswer {
-  valid: boolean;
+  verdict: ViesVerdict;
   /** True when this member state disclosed the trader's name. */
   identified: boolean;
   name?: string;
   address?: PostalAddress;
   countryCode: string;
   vatNumber: string;
+  /** VIES's own word for what happened: VALID, INVALID, MS_UNAVAILABLE, TIMEOUT… */
+  userError?: string;
 }
 
 export async function checkVat(countryCode: string, number: string): Promise<ViesAnswer | undefined> {
@@ -128,13 +156,16 @@ export async function checkVat(countryCode: string, number: string): Promise<Vie
   if (!res.ok) return undefined;
   const name = disclosed(res.data?.name);
   const rawAddress = disclosed(res.data?.address);
+  const userError = typeof res.data?.userError === "string" ? res.data.userError : undefined;
+  const verdict = viesVerdict(res.data);
   return {
-    valid: res.data?.isValid === true,
+    verdict,
     identified: Boolean(name),
     name,
     address: rawAddress ? parseViesAddress(rawAddress, cc) : undefined,
     countryCode: cc.toLowerCase(),
     vatNumber: `${cc}${digits}`,
+    userError,
   };
 }
 
@@ -155,8 +186,19 @@ export const euVies: RegistryConnector = {
     if (id.kind !== "vat") return undefined;
     const answer = await checkVat(id.countryCode, id.value);
     if (!answer) return undefined;
-    if (!answer.valid) {
-      ctx.onNote?.(`vies: ${id.value} is NOT a live VAT registration`);
+    if (answer.verdict === "inconclusive") {
+      ctx.onNote?.(
+        `vies: ${answer.vatNumber} could not be checked — ${answer.userError ?? "no answer"}. That is this member state's system, not a fact about the number.`,
+      );
+      return undefined;
+    }
+    if (answer.verdict === "invalid") {
+      // NOT the same as "made up". VIES only knows numbers enabled for
+      // intra-community trade; a small trader's domestic USt-IdNr is legitimate,
+      // printed on its Impressum because the law requires it, and unknown here.
+      ctx.onNote?.(
+        `vies: ${answer.vatNumber} is not registered for intra-community trade. VIES only knows numbers enabled for intra-EU transactions, so this is not evidence that the number is wrong.`,
+      );
       return undefined;
     }
     if (!answer.identified) {
@@ -191,7 +233,7 @@ export const euVies: RegistryConnector = {
     const it = await checkVat("IT", "00488410010");
     checks.push({
       name: "VIES still discloses the trader name for at least one member state (IT)",
-      ok: Boolean(it?.valid && it.identified),
+      ok: it?.verdict === "valid" && it.identified,
       detail: it?.name ? `named "${it.name}"` : "no name returned — the connector can no longer confirm identity anywhere",
     });
 
@@ -202,18 +244,23 @@ export const euVies: RegistryConnector = {
     const de = await checkVat("DE", "811193231");
     checks.push({
       name: "VIES still REDACTS the trader name for DE",
-      ok: Boolean(de?.valid && !de.identified),
+      ok: de?.verdict === "valid" && !de.identified,
       detail: de?.identified ? `DE now discloses ("${de.name}") — the German path can confirm identity through VIES` : "still '---', as measured",
     });
 
     const invalid = await checkVat("DE", "000000000");
-    checks.push({ name: "VIES still answers isValid:false rather than an error for an unknown number", ok: invalid?.valid === false });
+    checks.push({
+      name: "VIES still distinguishes INVALID from a member state being unavailable",
+      ok: invalid?.verdict === "invalid",
+      detail: `userError=${invalid?.userError ?? "none"} — an MS_UNAVAILABLE read as "invalid" reports somebody else's outage as a fact about a company`,
+      inconclusive: invalid?.verdict === "inconclusive",
+    });
 
     return checks;
   },
 
   async probe(): Promise<{ ok: boolean; detail: string }> {
     const answer = await checkVat("IT", "00488410010");
-    return { ok: Boolean(answer?.valid), detail: answer ? `isValid=${answer.valid}, identity ${answer.identified ? "disclosed" : "redacted"}` : "no answer" };
+    return { ok: answer?.verdict === "valid", detail: answer ? `${answer.verdict}, identity ${answer.identified ? "disclosed" : "redacted"}` : "no answer" };
   },
 };

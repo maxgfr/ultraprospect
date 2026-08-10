@@ -14,7 +14,7 @@
 //     query, so a register number has to be re-checked exactly.
 import { describe, expect, it } from "vitest";
 import { euVies } from "../src/registry/eu-vies.js";
-import { parseViesAddress } from "../src/registry/eu-vies.js";
+import { parseViesAddress, viesVerdict } from "../src/registry/eu-vies.js";
 import { toRecord as aresRecord } from "../src/registry/cz-ares.js";
 import { toRecord as brregRecord } from "../src/registry/no-brreg.js";
 import { toRecord as chRecord } from "../src/registry/gb-companies-house.js";
@@ -104,6 +104,17 @@ describe("eu-vies", () => {
   it("serves every member state including Greece, which files under EL", () => {
     expect(euVies.countries).toContain("gr");
     expect(euVies.countries.length).toBe(27);
+  });
+
+  it("distinguishes an invalid number from a member state that did not answer", () => {
+    // MEASURED on a live run: VIES answers `isValid: false` alongside
+    // `userError: "MS_UNAVAILABLE"` when the member state's own system is down.
+    // Reading that as "invalid" reports somebody else's outage as a fact about
+    // a company — wrong in a way that looks exactly like right.
+    expect(viesVerdict({ isValid: false, userError: "INVALID" })).toBe("invalid");
+    expect(viesVerdict({ isValid: false, userError: "MS_UNAVAILABLE" })).toBe("inconclusive");
+    expect(viesVerdict({ isValid: false, userError: "TIMEOUT" })).toBe("inconclusive");
+    expect(viesVerdict({ isValid: true, userError: "VALID" })).toBe("valid");
   });
 });
 
