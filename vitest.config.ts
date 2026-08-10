@@ -21,19 +21,28 @@ export default defineConfig({
       // baseline so coverage cannot silently regress. Raise them when real
       // coverage climbs; never lower them to make a red run pass.
       //
-      // The absolute numbers are modest and honestly so. Roughly half this tree
-      // is network I/O against five public services — the Overpass fetch loop,
-      // the register's pagination, `doctor`'s probes — and unit-testing that
-      // would mean asserting against mocks of somebody else's API, which proves
-      // the mock rather than the code. Those paths are covered by the offline
-      // pipeline eval (a recorded sweep through the real bundle) and by the
-      // weekly upstream canaries. What IS unit-tested is everything where a bug
-      // would be silent: the split ladder, the matcher, the name model.
+      // The absolute numbers are modest and honestly so. A large part of this
+      // tree is network I/O against public services nobody here controls — the
+      // Overpass fetch loop, each register's pagination, `doctor`'s probes —
+      // and asserting the RESPONSE shapes against mocks would prove the mock
+      // rather than the code. Those live shapes are the weekly canary's job,
+      // one per connector.
+      //
+      // What IS unit-tested is everything where a bug would be silent: the
+      // split ladder, the matcher, the name model, every connector's mapper
+      // (against captured real responses), the identifier arithmetic in front
+      // of each request, and `confirm`'s decision to attach a register identity
+      // or refuse one.
+      //
+      // Raised from 48/46/56/47 when the multi-country work landed with its
+      // tests. Raise them again when real coverage climbs; never lower them to
+      // make a red run pass — and note that adding untested code is exactly the
+      // thing this ratchet exists to make visible.
       thresholds: {
-        statements: 48,
-        branches: 46,
-        functions: 56,
-        lines: 47,
+        statements: 51,
+        branches: 48,
+        functions: 57,
+        lines: 51,
       },
     },
   },
