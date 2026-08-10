@@ -52,7 +52,19 @@ function manifest(over: Partial<RunManifest> = {}): RunManifest {
     target: { query: "", label: "", lat: 0, lon: 0, bbox: [0, 0, 0, 0], source: "nominatim" },
     filters: {},
     lanes: [],
-    counts: { osm: 0, sirene: 0, google: 0, places: 1, merged: 0, undecided: 0, withWebsite: 0, enrichedTier1: 0, enrichedTier2: 0, dossiers: 0 },
+    counts: {
+      osm: 0,
+      registry: 0,
+      byConnector: {},
+      places: 1,
+      merged: 0,
+      undecided: 0,
+      withWebsite: 0,
+      enrichedTier1: 0,
+      enrichedTier2: 0,
+      confirmed: 0,
+      dossiers: 0,
+    },
     truncated: false,
     notes: [],
     licences: [],
@@ -109,7 +121,7 @@ describe("contacts", () => {
 
   it("lets open-data provenance through — it is not a page and cannot be one", () => {
     const p = place({
-      contacts: { emails: [], phones: [], socials: [], people: [{ value: "CYRIL KOLODZIEJSKI", from: "sirene", lane: "sirene", registry: true }] },
+      contacts: { emails: [], phones: [], socials: [], people: [{ value: "CYRIL KOLODZIEJSKI", from: "registry", lane: "registry", registry: true }] },
     });
     expect(runCheck({ runDir, places: [p], manifest: manifest() }).ok).toBe(true);
   });

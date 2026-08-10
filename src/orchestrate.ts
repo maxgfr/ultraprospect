@@ -50,10 +50,11 @@ const MATCH_SCHEMA = {
       type: "array",
       items: {
         type: "object",
-        required: ["osmId", "merge", "why"],
+        required: ["osmId", "registryId", "merge", "why"],
         properties: {
           osmId: { type: "string" },
-          siret: { type: "string" },
+          registryId: { type: "string", description: "Copy `registryId` from the pair verbatim." },
+          connectorId: { type: "string", description: "Copy `connectorId` from the pair. Required when two registers cover the country." },
           merge: { type: "boolean", description: "true only when the evidence shows one business. When unsure, false." },
           why: { type: "string", description: "The evidence you decided on, in one sentence." },
         },
@@ -100,7 +101,7 @@ const PHASES: PhaseDefinition<any>[] = [
     // Twenty pairs is about a page of evidence: enough to be worth a subagent,
     // small enough that one bad batch is cheap to redo.
     batchSize: 20,
-    ids: (parsed: MatchTodo | undefined) => (Array.isArray(parsed?.pairs) ? parsed.pairs.map((p) => `${p.osmId}|${p.siret ?? p.siren ?? "?"}`) : undefined),
+    ids: (parsed: MatchTodo | undefined) => (Array.isArray(parsed?.pairs) ? parsed.pairs.map((p) => `${p.osmId}|${p.connectorId}:${p.registryId}`) : undefined),
     prerequisite: (run, engineAbs) => `node ${engineAbs} scan --where "<place>" --out ${run}`,
     description: (n) => `Decide ${n} OSM-to-register pairs the matcher would not merge on its own`,
     applyHint: (run, engineAbs) => [
@@ -239,7 +240,7 @@ pairs it refused to decide, and refusing was the right call.
   is usually NOT the legal name. Judge on this one: "Crèche Jean Burgeat" against
   the legal name "COMMUNE DE VINCENNES" reads as an obvious no, and against the
   enseigne "CRECHE BURGEAT" as an obvious yes. Same pair.
-- \`sireneName\` — the legal name, for context.
+- \`registryName\` — the legal name, for context.
 - \`distanceM\` and \`parts\` — how far apart, and which signal carried the score.
 
 ## Decide
@@ -251,11 +252,11 @@ inside twenty metres.
 
 **When you cannot tell, answer \`false\`.** Two rows are recoverable by anyone
 looking at the list. One wrong merge produces a single plausible company holding
-somebody else's SIREN, and nothing downstream will ever flag it.
+somebody else's registration number, and nothing downstream will ever flag it.
 
 ## Return
 
-\`{"verdicts": [{"osmId": "...", "siret": "...", "merge": true, "why": "..."}]}\`
+\`{"verdicts": [{"osmId": "...", "registryId": "...", "connectorId": "...", "merge": true, "why": "..."}]}\`
 
 One \`why\` sentence per pair, naming the evidence. Do not write to the run —
 the orchestrator folds your verdicts with \`node ${engineAbs} match --run ${run} --apply\`.

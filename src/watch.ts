@@ -31,11 +31,11 @@ export interface Delta {
  *
  * The place id is derived from the OSM node or the SIRET, so it survives a
  * re-scan — but a company that gains a register match between runs changes id
- * from `sirene:…` to `osm:…`. Keying on the SIRET first, then the OSM id, keeps
+ * from `fr-sirene:…` to `osm:…`. Keying on the register id first, then the OSM id, keeps
  * that company one company rather than one closure and one opening.
  */
 export function identityOf(place: Place): string {
-  if (place.sirene?.siret) return `siret:${place.sirene.siret}`;
+  if (place.registry) return `${place.registry.connectorId}:${place.registry.establishmentId ?? place.registry.id}`;
   if (place.osm) return `osm:${place.osm.id}`;
   return place.id;
 }
@@ -63,7 +63,7 @@ export function diffRuns(before: readonly Place[], after: readonly Place[]): Del
       continue;
     }
 
-    if (old.sirene?.etatAdministratif === "A" && place.sirene?.etatAdministratif === "C") delta.closed.push(place);
+    if (old.registry?.status === "active" && place.registry?.status === "ceased") delta.closed.push(place);
 
     const wasHiring = old.signals?.isHiring === true;
     const isHiring = place.signals?.isHiring === true;
@@ -146,7 +146,7 @@ export function buildDelta(delta: Delta, before: RunManifest, after: RunManifest
   l.push(
     ...section(
       "Now marked ceased by the register",
-      delta.closed.map((p) => `- **${p.name}** — SIRET ${p.sirene?.siret ?? "?"}`),
+      delta.closed.map((p) => `- **${p.name}** — ${p.registry?.connectorId ?? "register"} ${p.registry?.establishmentId ?? p.registry?.id ?? "?"}`),
     ),
   );
   l.push(

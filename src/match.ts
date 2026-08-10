@@ -1,9 +1,14 @@
 // Fusing the two discovery lanes into one entity per company.
 //
-// OSM sees shopfronts; the register sees legal units at postal addresses. The
-// same bakery is a `shop=bakery` node with an awning and a SIRET filed at the
-// building — and the whole value of the French path is that the two get joined,
-// because neither half is a prospect on its own.
+// OSM sees shopfronts; a register sees legal units at postal addresses. The
+// same bakery is a `shop=bakery` node with an awning and a filed establishment
+// at the building — and the whole value of the join is that neither half is a
+// prospect on its own.
+//
+// This file is deliberately connector-agnostic. It scores an OSM POI against a
+// `RegistryRecord`, whichever register produced it, which is what lets the same
+// identity-dominant rules adjudicate a French sweep and a German confirmation
+// without a second set of thresholds nobody would keep in sync.
 //
 // The scoring is deliberately IDENTITY-DOMINANT. Proximity alone means nothing:
 // a Paris office block holds fifty registered companies inside twenty metres,
@@ -16,7 +21,9 @@
 // merge is invisible downstream — it produces one plausible company with
 // someone else's SIREN — so the cost of guessing is much higher here than the
 // cost of asking.
-import type { MatchCandidate, MatchTodo, OsmPoi, Place, PostalAddress, SireneRecord } from "./types.js";
+import type { MatchCandidate, MatchTodo, OsmPoi, Place, PostalAddress } from "./types.js";
+import type { RegistryRecord } from "./registry/types.js";
+import { recordKey } from "./registry/types.js";
 import { bestNameMatch, foldAccents, haversineM, nameSimilarity } from "./util.js";
 
 /** Beyond this, two records are not the same shopfront whatever they are called. */
@@ -36,8 +43,8 @@ function cellKey(lat: number, lon: number): string {
 }
 
 /** Every register record within one grid cell of a point, plus its neighbours. */
-function buildIndex(records: readonly SireneRecord[]): Map<string, SireneRecord[]> {
-  const index = new Map<string, SireneRecord[]>();
+function buildIndex(records: readonly RegistryRecord[]): Map<string, RegistryRecord[]> {
+  const index = new Map<string, RegistryRecord[]>();
   for (const r of records) {
     if (typeof r.lat !== "number" || typeof r.lon !== "number") continue;
     const key = cellKey(r.lat, r.lon);
@@ -48,8 +55,8 @@ function buildIndex(records: readonly SireneRecord[]): Map<string, SireneRecord[
   return index;
 }
 
-function nearby(index: Map<string, SireneRecord[]>, lat: number, lon: number): SireneRecord[] {
-  const out: SireneRecord[] = [];
+function nearby(index: Map<string, RegistryRecord[]>, lat: number, lon: number): RegistryRecord[] {
+  const out: RegistryRecord[] = [];
   const baseLat = Math.floor(lat / CELL);
   const baseLon = Math.floor(lon / CELL);
   for (let dy = -1; dy <= 1; dy++) {
@@ -62,8 +69,8 @@ function nearby(index: Map<string, SireneRecord[]>, lat: number, lon: number): S
 }
 
 /** Every name the register knows this establishment by. */
-function registerNames(r: SireneRecord): string[] {
-  return [r.nomComplet, r.nomRaisonSociale, r.sigle, ...r.enseignes].filter((n): n is string => Boolean(n?.trim()));
+function registerNames(r: RegistryRecord): string[] {
+  return r.names.filter((n) => Boolean(n?.trim()));
 }
 
 /** The street address an OSM POI declares, when the mapper filled it in. */
@@ -105,7 +112,7 @@ export interface PairScore {
  * Returns score 0 when the pair fails the identity gate — which is the common
  * case, and the reason a dense area does not collapse into nonsense.
  */
-export function scorePair(poi: OsmPoi, rec: SireneRecord): PairScore {
+export function scorePair(poi: OsmPoi, rec: RegistryRecord): PairScore {
   const distanceM = typeof rec.lat === "number" && typeof rec.lon === "number" ? haversineM(poi.lat, poi.lon, rec.lat, rec.lon) : Number.POSITIVE_INFINITY;
   const zero: PairScore = { score: 0, parts: { distance: 0, name: 0, enseigne: 0, address: 0 }, distanceM };
   if (!Number.isFinite(distanceM) || distanceM > MAX_DISTANCE_M) return zero;
@@ -122,7 +129,8 @@ export function scorePair(poi: OsmPoi, rec: SireneRecord): PairScore {
   // `brand=Carrefour` with `name=Carrefour City Vincennes`, and the register
   // files it under an enseigne rather than a denomination.
   const brand = poi.tags.brand ?? poi.tags.operator ?? "";
-  const enseigneScore = brand && rec.enseignes.length ? Math.max(0, ...rec.enseignes.map((e) => nameSimilarity(brand, e))) : 0;
+  const trading = rec.tradingNames ?? [];
+  const enseigneScore = brand && trading.length ? Math.max(0, ...trading.map((e: string) => nameSimilarity(brand, e))) : 0;
 
   const pa = poiAddress(poi);
   const numberAgrees = Boolean(
@@ -143,7 +151,7 @@ export function scorePair(poi: OsmPoi, rec: SireneRecord): PairScore {
   //
   // Occupancy was tried as the discriminator — an address one company occupies
   // versus one several share — and abandoned: it can only be counted over the
-  // records this run FETCHED, and any `--section`/`--min-effectif` filter makes
+  // records this run FETCHED, and any `--section`/`--min-employees` filter makes
   // every address look like a sole occupancy. A signal that is wrong precisely
   // when a filter is used is worse than no signal.
   //
@@ -170,22 +178,19 @@ export interface MergeDecision {
 }
 
 export interface MatchOutcome {
-  /** SIRET (or `siren:` key) -> the merge, for pairs confident enough. */
+  /** `recordKey(rec)` -> the merge, for pairs confident enough. */
   merged: Map<string, MergeDecision>;
   /** Pairs in the middle band, for the agent. */
   undecided: MatchCandidate[];
 }
 
-function recordKey(rec: SireneRecord): string {
-  return rec.siret ?? `siren:${rec.siren}`;
-}
-
-function toCandidate(poi: OsmPoi, rec: SireneRecord, scored: PairScore): MatchCandidate {
+function toCandidate(poi: OsmPoi, rec: RegistryRecord, scored: PairScore): MatchCandidate {
   return {
     osmId: poi.id,
-    siret: rec.siret,
-    siren: rec.siren,
-    sireneName: rec.nomComplet ?? rec.nomRaisonSociale,
+    connectorId: rec.connectorId,
+    registryId: rec.establishmentId ?? rec.id,
+    legalId: rec.establishmentId ? rec.id : undefined,
+    registryName: rec.legalName ?? rec.names[0],
     // The name the score came from, which is often NOT nomComplet.
     matchedName: scored.matchedName,
     osmName: poi.name,
@@ -208,9 +213,9 @@ function toCandidate(poi: OsmPoi, rec: SireneRecord, scored: PairScore): MatchCa
  * well-separated, so the optimal matching and the greedy one agree except in
  * cases that belong in the undecided band anyway.
  */
-export function matchLanes(pois: readonly OsmPoi[], records: readonly SireneRecord[]): MatchOutcome {
+export function matchLanes(pois: readonly OsmPoi[], records: readonly RegistryRecord[]): MatchOutcome {
   const index = buildIndex(records);
-  const scored: { poi: OsmPoi; rec: SireneRecord; s: PairScore }[] = [];
+  const scored: { poi: OsmPoi; rec: RegistryRecord; s: PairScore }[] = [];
 
   for (const poi of pois) {
     for (const rec of nearby(index, poi.lat, poi.lon)) {
@@ -260,10 +265,34 @@ export function buildMatchTodo(undecided: readonly MatchCandidate[]): MatchTodo 
 /** An adjudication the agent hands back: merge this pair, or keep them apart. */
 export interface MatchVerdict {
   osmId: string;
-  siret?: string;
-  siren?: string;
+  /**
+   * The register side of the pair, copied from `MATCH.todo.json`.
+   *
+   * Either the bare identifier (`"12345678900012"`) or the fully-qualified key
+   * (`"fr-sirene:12345678900012"`). Both are accepted because the todo file
+   * shows both, and rejecting the one the agent happened to copy would turn a
+   * correct adjudication into an "unknown pair" line nobody can act on.
+   */
+  registryId?: string;
+  connectorId?: string;
   merge: boolean;
   why?: string;
+}
+
+/** Resolve whatever the agent copied back into the key `applyVerdicts` indexes on. */
+export function verdictKey(v: MatchVerdict, known: ReadonlySet<string>): string | undefined {
+  const raw = v.registryId?.trim();
+  if (!raw) return undefined;
+  if (known.has(raw)) return raw;
+  if (v.connectorId) {
+    const qualified = `${v.connectorId}:${raw}`;
+    if (known.has(qualified)) return qualified;
+  }
+  // The agent gave a bare id and no connector. Unambiguous only if exactly one
+  // connector in this run carries it; two matches is a real ambiguity and must
+  // not be resolved by picking the first.
+  const suffixed = [...known].filter((k) => k.endsWith(`:${raw}`));
+  return suffixed.length === 1 ? suffixed[0] : undefined;
 }
 
 /**
@@ -277,8 +306,9 @@ export function applyVerdicts(places: Place[], verdicts: readonly MatchVerdict[]
   const byRecord = new Map<string, Place>();
   for (const p of places) {
     if (p.osm) byOsm.set(p.osm.id, p);
-    if (p.sirene) byRecord.set(recordKey(p.sirene), p);
+    if (p.registry) byRecord.set(recordKey(p.registry), p);
   }
+  const known = new Set(byRecord.keys());
 
   let mergedCount = 0;
   let skipped = 0;
@@ -289,17 +319,18 @@ export function applyVerdicts(places: Place[], verdicts: readonly MatchVerdict[]
       skipped++;
       continue;
     }
-    const key = v.siret ?? (v.siren ? `siren:${v.siren}` : undefined);
+    const key = verdictKey(v, known);
     const osmPlace = byOsm.get(v.osmId);
     const recPlace = key ? byRecord.get(key) : undefined;
     if (!osmPlace || !recPlace || osmPlace === recPlace) {
-      unknown.push(`${v.osmId} <-> ${key ?? "?"}`);
+      unknown.push(`${v.osmId} <-> ${key ?? v.registryId ?? "?"}`);
       continue;
     }
     // Keep the OSM entity as the survivor: it carries the physical identity
     // (name on the door, coordinates, category) the rest of the run keys on.
-    osmPlace.sirene = recPlace.sirene;
-    osmPlace.sources = [...new Set([...osmPlace.sources, "sirene" as const])];
+    osmPlace.registry = recPlace.registry;
+    osmPlace.registryEvidence = recPlace.registryEvidence ?? { mode: "sweep", how: "agent-adjudicated" };
+    osmPlace.sources = [...new Set([...osmPlace.sources, "registry" as const])];
     osmPlace.matchConfidence = 1;
     osmPlace.address = { ...recPlace.address, ...osmPlace.address };
     recPlace.id = "";

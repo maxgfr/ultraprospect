@@ -108,7 +108,7 @@ export async function probeAll(): Promise<DoctorProbe[]> {
     });
     return { ok: res.ok && typeof res.data?.total_results === "number", detail: res.ok ? "answers register queries" : `HTTP ${res.status}` };
   });
-  probes.push({ name: "sirene", target: "recherche-entreprises.api.gouv.fr", required: false, ...sirene });
+  probes.push({ name: "fr-sirene", target: "recherche-entreprises.api.gouv.fr", required: false, ...sirene });
 
   // Mirrors are probed in parallel: they are independent, and doing it serially
   // turns a diagnostic into a two-minute wait on exactly the bad day it is for.

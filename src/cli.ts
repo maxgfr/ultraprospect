@@ -19,13 +19,27 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { EXIT_FAILURE, EXIT_OK, EXIT_USAGE, UsageError, isInvokedDirectly, jsonLine, parseArgs, positionalText, setNoWrite, writeArtifact } from "./engine.js";
+import {
+  EXIT_FAILURE,
+  EXIT_OK,
+  EXIT_USAGE,
+  UsageError,
+  isInvokedDirectly,
+  jsonLine,
+  parseArgs,
+  positionalText,
+  readJsonSafe,
+  setNoWrite,
+  writeArtifact,
+} from "./engine.js";
 import { brandEngine } from "./engine.js";
 import { runDoctor } from "./doctor.js";
 import { resolveWhere } from "./geocode.js";
 import { runScan, writeScan } from "./scan.js";
 import { loadFixture, recordFixture } from "./fixture.js";
-import { applyVerdicts, type MatchVerdict } from "./match.js";
+import { applyVerdicts, buildMatchTodo, type MatchVerdict } from "./match.js";
+import { needsConfirming, runConfirm } from "./confirm.js";
+import { CONNECTORS } from "./registry/index.js";
 import { buildResolveTodo, needsResolving, runResolve, type WebHit } from "./resolve.js";
 import { newPageStore } from "./pages.js";
 import { enrichable, runEnrich } from "./enrich.js";
@@ -37,8 +51,9 @@ import { buildDelta, diffRuns } from "./watch.js";
 import { createAdapter } from "./mcp/adapter.js";
 import { emitOrchestration } from "./orchestrate.js";
 import { runStdioServer, startHttpServer } from "./engine.js";
-import type { FitVerdict } from "./types.js";
-import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, shortLabel, writeJson, writePlaces, writeRunManifest } from "./run.js";
+import type { FitVerdict, MatchTodo } from "./types.js";
+import type { RegistryRecord } from "./registry/types.js";
+import { DEFAULT_OUT, licencesFor, newRun, readPlaces, requireManifest, resolveRun, shortLabel, writeJson, writePlaces, writeRunManifest } from "./run.js";
 import { clampInt, parseBbox, parseDistanceM } from "./util.js";
 import { VERSION } from "./version.js";
 
@@ -46,6 +61,7 @@ export const COMMANDS = [
   "where",
   "scan",
   "match",
+  "confirm",
   "resolve",
   "enrich",
   "score",
@@ -71,10 +87,12 @@ export const VALUE_FLAGS = [
   "out",
   "run",
   "osm-groups",
-  "naf",
+  "activity",
   "section",
-  "effectif",
-  "min-effectif",
+  "size-band",
+  "min-employees",
+  "registry",
+  "companies-house-key",
   "max-results",
   "overpass",
   "apply",
@@ -100,7 +118,7 @@ export const VALUE_FLAGS = [
 export const BOOL_FLAGS = [
   "json",
   "no-osm",
-  "no-sirene",
+  "no-registry",
   "include-ceased",
   "no-people",
   "queries",
@@ -119,8 +137,9 @@ USAGE
 
 COMMANDS
   where <query>          Resolve a place name to a search area. Refuses to guess when ambiguous.
-  scan                   Discover every company in the area, from OSM and the French register.
+  scan                   Discover every company in the area, from OSM and the country's register.
   match --apply <file>   Fold the agent's adjudication of MATCH.todo.json back into places.json.
+  confirm                Check each company against its country's register, outside France's sweep.
   resolve                Find each company's own website and prove it is theirs.
   enrich --tier 1|2      Read those websites: tier 1 on all of them, tier 2 on the ones you pick.
   score                  Rank by measured signals; fold your ICP verdicts in with --apply.
@@ -128,9 +147,9 @@ COMMANDS
   check                  The gate: citations resolve, claims are cited, contacts were observed.
   render                 CSV, JSON, report and a self-contained HTML page.
   watch --since <run>    Diff this run against an earlier one: who opened, closed, started hiring.
-  orchestrate            Emit the fan-out for the two judgement phases: match and dossier.
+  orchestrate            Emit the fan-out: one search phase and two judgement phases.
   mcp                    Serve the run over MCP: where, scan, places, dossier, check.
-  doctor                 Check node, network and the health of every upstream.
+  doctor                 Check node, network and the health of every upstream this run needs.
   version                Print the version.
 
 TARGETING (scan, where)
@@ -144,14 +163,15 @@ TARGETING (scan, where)
 
 FILTERS (scan)
   --osm-groups <list>    OSM catalogue groups: shop,office,craft,healthcare,amenity,tourism,leisure,club.
-  --naf <list>           Full NAF codes, e.g. 62.01Z,70.22Z. Prefixes are rejected by the register.
-  --section <list>       NAF section letters, e.g. J,M.
-  --effectif <list>      INSEE employee-band codes, e.g. 11,12,21.
-  --min-effectif <n>     Keep companies with at least n employees.
+  --activity <list>      Activity codes in the register's own scheme, e.g. 62.01Z,70.22Z (NAF, France).
+  --section <list>       Section letters in the country's own scheme, e.g. J,M (NACE across Europe).
+  --size-band <list>     The register's own headcount band codes, e.g. 11,12,21 (INSEE, France).
+  --min-employees <n>    Keep companies with at least n employees, where the register publishes size.
   --include-ceased       Include companies the register marks as ceased. Off by default.
   --max-results <n>      Cap on register rows before the lane declares itself partial (default 3000).
   --no-osm               Skip the OpenStreetMap lane.
-  --no-sirene            Skip the French register lane.
+  --no-registry          Skip the register lane entirely.
+  --registry <ids>       Only these register connectors, e.g. fr-sirene. doctor lists them.
   --overpass <url>       Override the Overpass endpoint instead of rotating mirrors.
   --fixture <dir>        Replay a recorded sweep instead of calling the live lanes. Offline.
   --record <dir>         Write this run's raw lane output as a replayable fixture.
@@ -176,7 +196,11 @@ DOSSIER
   --id <place id>        Which company's packet to print. Use --json for the list of ids.
 
 ADJUDICATION (match)
-  --apply <file>         A JSON array of {osmId, siret|siren, merge, why}. "-" reads stdin.
+  --apply <file>         A JSON array of {osmId, registryId, connectorId?, merge, why}. "-" reads stdin.
+
+REGISTER CONFIRMATION (confirm)
+  --limit <n>            Only confirm this many places.
+  --companies-house-key <key>   UK Companies House key. Free, email only. Or set the env var.
 
 DELIVERABLES (render)
   --min-score <n>        Only rows at or above this measured score.
@@ -207,8 +231,10 @@ ENVIRONMENT
   ULTRAPROSPECT_CACHE_DIR      Where fetched pages are cached. Default <tmpdir>/ultraprospect.
   ULTRAPROSPECT_NO_WRITE=1     Same as --stdout.
   ULTRAPROSPECT_POLITE_DELAY_MS  Per-host delay between requests. Default 400.
+  ULTRAPROSPECT_COMPANIES_HOUSE_KEY  UK register key. Free, email only. Same as --companies-house-key.
 
-Data: © OpenStreetMap contributors (ODbL); base Sirene / RNE via data.gouv.fr (Licence Ouverte 2.0).
+Data: © OpenStreetMap contributors (ODbL). Register attributions travel per run —
+the manifest lists the ones this run actually owes.
 `;
 
 const SPEC = { commands: COMMANDS, valueFlags: VALUE_FLAGS, boolFlags: BOOL_FLAGS };
@@ -229,6 +255,118 @@ function list(raw: string | undefined): string[] | undefined {
     .map((s) => s.trim())
     .filter(Boolean);
   return items.length ? items : undefined;
+}
+
+/**
+ * `confirm` — attach a register identity to companies no sweep could reach.
+ *
+ * Runs after `enrich --tier 1`, because the strongest route reads the
+ * registration number off the legal-notice page that tier fetches. Ordering
+ * matters enough to be enforced rather than documented: without pages, the only
+ * route left is a name lookup, and a run that quietly fell back to it would
+ * report weaker evidence under the same field.
+ */
+async function cmdConfirm(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
+  if (!values.run) throw new UsageError("confirm needs --run <dir>");
+  const runDir = resolveRun(values.run);
+  const manifest = requireManifest(runDir);
+  const places = readPlaces(runDir);
+  const country = manifest.target.countryCode;
+
+  const targets = needsConfirming(places);
+  if (targets.length === 0) {
+    say("confirm: every place already carries a register record — nothing to do");
+    if (bools.has("json")) out(jsonLine({ run: runDir, verified: 0, matched: 0, undecided: 0, notFound: 0 }));
+    return EXIT_OK;
+  }
+
+  const withPages = targets.filter((p) => p.pages.length > 0).length;
+  if (withPages === 0) {
+    // Refuse rather than do the weak half silently. The published-identifier
+    // route is what makes this command worth running outside France, and a run
+    // that skipped it would fill the same field with name guesses.
+    say(`confirm: none of the ${targets.length} place(s) has a fetched page, so no legal notice can be read.`);
+    say(`  run: ultraprospect resolve --run ${runDir} --web-results hits.json`);
+    say(`  then: ultraprospect enrich --run ${runDir} --tier 1`);
+    throw Object.assign(new Error("no pages to read a legal notice from"), { exitCode: EXIT_USAGE, handled: true });
+  }
+
+  say(`ultraprospect: confirming ${targets.length} place(s) against the register for ${country ?? "an unknown country"}`);
+  const outcome = await runConfirm(runDir, places, {
+    countryCode: country,
+    town: manifest.target.label,
+    limit: values.limit ? clampInt(values.limit, 1, 100_000, 200) : undefined,
+    registryIds: list(values.registry),
+    keys: connectorKeys(values),
+    onNote: (n) => say(`  ${n}`),
+    onProgress: (done, total, name) => {
+      if (done % 10 === 0 || done === total) say(`  confirm: ${done}/${total} — ${name}`);
+    },
+  });
+
+  writePlaces(runDir, places);
+  writeJson(runDir, "registry.json", mergeRegistryRecords(runDir, outcome.records));
+  if (outcome.undecided.length) {
+    // The middle band joins the file the agent already adjudicates, rather than
+    // getting a second worklist with the same job and different filename.
+    const existing = (readJsonSafe(join(runDir, "MATCH.todo.json")) as MatchTodo | undefined)?.pairs ?? [];
+    writeJson(runDir, "MATCH.todo.json", buildMatchTodo([...existing, ...outcome.undecided]));
+  }
+
+  manifest.lanes = [...manifest.lanes.filter((l) => l.lane !== "registry" || l.mode === "sweep"), outcome.coverage];
+  manifest.counts.registry += outcome.records.length;
+  manifest.counts.confirmed = outcome.verified + outcome.matched;
+  manifest.counts.undecided += outcome.undecided.length;
+  for (const rec of outcome.records) manifest.counts.byConnector[rec.connectorId] = (manifest.counts.byConnector[rec.connectorId] ?? 0) + 1;
+  manifest.licences = licencesFor(manifest.lanes);
+  manifest.notes.push(...outcome.notes);
+  writeRunManifest(runDir, manifest);
+
+  if (bools.has("json")) {
+    out(jsonLine({ run: runDir, verified: outcome.verified, matched: outcome.matched, undecided: outcome.undecided.length, notFound: outcome.notFound }));
+  }
+  say("");
+  say(`  verified by a published number   ${outcome.verified}`);
+  say(`  matched by a name lookup         ${outcome.matched}`);
+  say(`  undecided (in MATCH.todo.json)   ${outcome.undecided.length}`);
+  say(`  no register record found         ${outcome.notFound}`);
+  say("");
+  say("  This is a per-company confirmation, not a territory sweep: a company");
+  say("  that is not in OpenStreetMap is not in this run at all.");
+  if (outcome.undecided.length) say(`next: ultraprospect orchestrate --run ${runDir} --phase match`);
+  else say(`next: ultraprospect score --run ${runDir}`);
+  return EXIT_OK;
+}
+
+/**
+ * Credentials for the connectors that need one, from flag or environment.
+ *
+ * A flag beats the environment, and an absent key is not an error here: the
+ * connector reports itself unavailable with the steps to fix it, and the run
+ * continues without pretending the country has no register.
+ */
+function connectorKeys(values: Record<string, string>): Record<string, string | undefined> {
+  const keys: Record<string, string | undefined> = {};
+  for (const connector of CONNECTORS) {
+    if (!connector.needsKey) continue;
+    const flag = connector.needsKey.flag.replace(/^--/, "");
+    keys[connector.id] = values[flag] ?? process.env[connector.needsKey.env];
+  }
+  return keys;
+}
+
+/**
+ * Fold newly confirmed records into whatever `registry.json` already holds.
+ *
+ * `confirm` can be re-run — after a wider `--limit`, or once a key is supplied —
+ * and it must add rather than replace. Keyed by connector + identifier so the
+ * same company confirmed twice stays one row.
+ */
+function mergeRegistryRecords(runDir: string, fresh: readonly RegistryRecord[]): RegistryRecord[] {
+  const existing = (readJsonSafe(join(runDir, "registry.json")) as RegistryRecord[] | undefined) ?? [];
+  const byKey = new Map<string, RegistryRecord>();
+  for (const rec of [...existing, ...fresh]) byKey.set(`${rec.connectorId}:${rec.establishmentId ?? rec.id}`, rec);
+  return [...byKey.values()];
 }
 
 /** Build the geographic target from whatever targeting flags were given. */
@@ -315,13 +453,15 @@ async function cmdScan(values: Record<string, string>, bools: ReadonlySet<string
 
   const outcome = await runScan(target, {
     osmGroups: list(values["osm-groups"]),
-    naf: list(values.naf),
+    activityCodes: list(values.activity),
     sections: list(values.section),
-    effectif: list(values.effectif),
-    minEffectif: values["min-effectif"] ? clampInt(values["min-effectif"], 0, 100_000, 0) : undefined,
+    sizeBands: list(values["size-band"]),
+    minEmployees: values["min-employees"] ? clampInt(values["min-employees"], 0, 100_000, 0) : undefined,
     includeCeased: bools.has("include-ceased"),
     noOsm: bools.has("no-osm"),
-    noSirene: bools.has("no-sirene"),
+    noRegistry: bools.has("no-registry"),
+    registryIds: list(values.registry),
+    keys: connectorKeys(values),
     maxResults: values["max-results"] ? clampInt(values["max-results"], 1, 10_000, 3000) : undefined,
     overpass: values.overpass,
     fixture: values.fixture,
@@ -343,16 +483,24 @@ async function cmdScan(values: Record<string, string>, bools: ReadonlySet<string
     out(run.dir);
   }
 
+  const registerLane = outcome.manifest.lanes.find((l) => l.lane === "registry");
   say("");
   say(`  OSM              ${c.osm}`);
-  say(`  register         ${c.sirene}`);
-  say(`  fused places     ${c.places}  (${c.merged} matched across both lanes)`);
+  if (registerLane?.mode === "sweep") {
+    say(`  register         ${c.registry}  (${registerLane.connectorId})`);
+    say(`  fused places     ${c.places}  (${c.merged} matched across both lanes)`);
+  } else {
+    // Saying "register 0" here would read as an empty register rather than as a
+    // register that cannot be swept. The distinction is the whole point.
+    say(`  register         not swept — ${registerLane?.reason ?? "no connector"}`);
+    say(`  places           ${c.places}  (OSM only, so far)`);
+  }
   say(`  with a website   ${c.withWebsite}`);
   if (outcome.manifest.truncated) {
     say("");
     say("  ⚠ TRUNCATED — this run does NOT cover the whole territory:");
     for (const lane of outcome.manifest.lanes.filter((l) => l.truncated)) say(`      ${lane.lane}: ${lane.reason}`);
-    say("      narrow with --section / --naf / --min-effectif, or raise --max-results");
+    say("      narrow with --section / --activity / --min-employees, or raise --max-results");
   }
   say("");
   say(`next: ultraprospect resolve --run ${run.dir}`);
@@ -361,7 +509,7 @@ async function cmdScan(values: Record<string, string>, bools: ReadonlySet<string
 
 async function cmdMatch(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
   if (!values.run) throw new UsageError("match needs --run <dir>");
-  if (!values.apply) throw new UsageError('match needs --apply <file> (a JSON array of {osmId, siret, merge}), or "-" for stdin');
+  if (!values.apply) throw new UsageError('match needs --apply <file> (a JSON array of {osmId, registryId, merge}), or "-" for stdin');
   const runDir = resolveRun(values.run);
 
   const raw = values.apply === "-" ? readFileSync(0, "utf8") : readFileSync(values.apply, "utf8");
@@ -373,7 +521,7 @@ async function cmdMatch(values: Record<string, string>, bools: ReadonlySet<strin
     throw new UsageError(`--apply ${values.apply} is not valid JSON: ${(e as Error).message}`);
   }
   if (!Array.isArray(verdicts) || verdicts.length === 0) {
-    throw new UsageError("--apply contained no verdicts — expected [{osmId, siret, merge, why}, ...]");
+    throw new UsageError("--apply contained no verdicts — expected [{osmId, registryId, merge, why}, ...]");
   }
 
   const places = readPlaces(runDir);
@@ -596,7 +744,7 @@ async function cmdDossier(values: Record<string, string>, bools: ReadonlySet<str
   if (!values.id) {
     // No id: list what can be written up, best first. Cheaper than making
     // someone grep places.json for an id.
-    const order = ranked(places).filter((p) => p.pages.length > 0 || p.sirene);
+    const order = ranked(places).filter((p) => p.pages.length > 0 || p.registry);
     if (bools.has("json")) out(jsonLine(order.map((p) => ({ id: p.id, name: p.name, pages: p.pages.length, total: p.score?.total ?? 0 }))));
     else for (const p of order.slice(0, 40)) out(`${p.id}\t${p.pages.length} page(s)\t${p.name}`);
     say("");
@@ -764,6 +912,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return cmdScan(values, bools, text);
     case "match":
       return cmdMatch(values, bools);
+    case "confirm":
+      return cmdConfirm(values, bools);
     case "resolve":
       return cmdResolve(values, bools);
     case "enrich":

@@ -33,8 +33,32 @@ const TIER1_ROLES: PageRole[] = ["home", "legal"];
 /** Tier 2: one page per role, in the order they earn their fetch. */
 const TIER2_ROLES: PageRole[] = ["about", "services", "products", "pricing", "careers", "team", "contact", "cases", "news"];
 
-/** Common legal-notice paths, tried when the sitemap does not name one. */
-const LEGAL_GUESSES = ["/mentions-legales", "/mentions-legales/", "/legal", "/impressum", "/cgv", "/legal-notice"];
+/**
+ * Common legal-notice paths, tried when the sitemap does not name one.
+ *
+ * Worth more than it looks: this page is where German and Spanish law puts the
+ * registration number that `confirm` turns into a register record, and outside
+ * France it is the only route to a legal identity without an API key. A guess
+ * that misses costs one 404; a guess that is missing costs the whole company.
+ */
+const LEGAL_GUESSES = [
+  "/mentions-legales",
+  "/mentions-legales/",
+  "/legal",
+  "/legal-notice",
+  "/cgv",
+  // Germany — § 5 DDG makes this page mandatory and two clicks from anywhere.
+  "/impressum",
+  "/impressum/",
+  "/imprint",
+  // Spain — Ley 34/2002 art. 10.
+  "/aviso-legal",
+  "/aviso-legal/",
+  "/informacion-legal",
+  // Italy, and the English fallback a lot of European sites use.
+  "/note-legali",
+  "/legal-notices",
+];
 
 export interface EnrichOptions {
   tier: 1 | 2;

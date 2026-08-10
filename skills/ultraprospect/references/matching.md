@@ -67,7 +67,7 @@ indistinguishable from each other:
 Nothing in the data separates them. Occupancy was tried as the discriminator —
 one company at that doorway versus several — and abandoned, because it can only
 be counted over the records a run actually fetched, so any `--section` or
-`--min-effectif` filter makes every address look like a sole occupancy. A signal
+`--min-employees` filter makes every address look like a sole occupancy. A signal
 that is wrong exactly when a filter is used is worse than no signal.
 
 So an address with **no** name agreement scores 0.6 identity and lands in the

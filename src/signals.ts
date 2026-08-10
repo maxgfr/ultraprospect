@@ -13,16 +13,36 @@
 import { extractJsonLd, htmlToText } from "./engine.js";
 import type { JobPosting, PageRecord, PageRole, Signals, SourcedValue } from "./types.js";
 
-/** Path fragments that identify a page's job, in French and English. */
+/**
+ * Path fragments that identify a page's job.
+ *
+ * French and English first, because that is what the corpus was built on, then
+ * German, Spanish and Italian — a Berlin run whose careers page is `/karriere`
+ * would otherwise report "no careers page" and, through `Signals.isHiring`,
+ * assert that a hiring company is not hiring. Absence is a finding here, so a
+ * missing pattern does not produce a gap: it produces a wrong answer.
+ */
 const ROLE_PATTERNS: { role: PageRole; re: RegExp }[] = [
-  { role: "careers", re: /(?:^|\/)(?:careers?|jobs?|emplois?|recrutement|nous-rejoindre|rejoignez|join-us|hiring|carriere|carrières?)(?:\/|$|\.)/i },
-  { role: "pricing", re: /(?:^|\/)(?:pricing|tarifs?|prix|nos-tarifs|abonnements?|plans?|devis)(?:\/|$|\.)/i },
-  { role: "about", re: /(?:^|\/)(?:about|about-us|a-propos|à-propos|qui-sommes-nous|notre-histoire|entreprise|company)(?:\/|$|\.)/i },
-  { role: "team", re: /(?:^|\/)(?:team|equipe|équipe|notre-equipe|people|staff|collaborateurs|direction)(?:\/|$|\.)/i },
-  { role: "contact", re: /(?:^|\/)(?:contact|contactez-nous|nous-contacter|contact-us)(?:\/|$|\.)/i },
+  {
+    role: "careers",
+    re: /(?:^|\/)(?:careers?|jobs?|emplois?|recrutement|nous-rejoindre|rejoignez|join-us|hiring|carriere|carrières?|karriere|stellen|stellenangebote|jobboerse|empleo|trabaja-con-nosotros|ofertas-de-empleo|lavora-con-noi)(?:\/|$|\.)/i,
+  },
+  { role: "pricing", re: /(?:^|\/)(?:pricing|tarifs?|prix|nos-tarifs|abonnements?|plans?|devis|preise|preisliste|precios|tarifas|prezzi)(?:\/|$|\.)/i },
+  {
+    role: "about",
+    re: /(?:^|\/)(?:about|about-us|a-propos|à-propos|qui-sommes-nous|notre-histoire|entreprise|company|ueber-uns|über-uns|unternehmen|wir-ueber-uns|sobre-nosotros|quienes-somos|empresa|chi-siamo)(?:\/|$|\.)/i,
+  },
+  {
+    role: "team",
+    re: /(?:^|\/)(?:team|equipe|équipe|notre-equipe|people|staff|collaborateurs|direction|mitarbeiter|ansprechpartner|equipo|nuestro-equipo)(?:\/|$|\.)/i,
+  },
+  { role: "contact", re: /(?:^|\/)(?:contact|contactez-nous|nous-contacter|contact-us|kontakt|kontaktieren|contacto|contatti)(?:\/|$|\.)/i },
   {
     role: "legal",
-    re: /(?:^|\/)(?:mentions-legales|mentions-légales|legal|legal-notice|impressum|cgv|cgu|conditions-generales|privacy|confidentialite)(?:\/|$|\.)/i,
+    // The legal page is the one this tool most depends on outside France: it is
+    // where German and Spanish law puts the registration number that `confirm`
+    // turns into a register record.
+    re: /(?:^|\/)(?:mentions-legales|mentions-légales|legal|legal-notice|legal-notices|impressum|imprint|anbieterkennzeichnung|aviso-legal|informacion-legal|note-legali|cgv|cgu|conditions-generales|privacy|confidentialite|datenschutz)(?:\/|$|\.)/i,
   },
   { role: "services", re: /(?:^|\/)(?:services?|prestations?|expertises?|solutions?|savoir-faire|metiers?|métiers?)(?:\/|$|\.)/i },
   { role: "products", re: /(?:^|\/)(?:products?|produits?|boutique|shop|catalogue|collections?)(?:\/|$|\.)/i },
@@ -163,16 +183,12 @@ export function extractSocials(html: string, pageId: string): SourcedValue[] {
   return [...out.values()];
 }
 
-/** A French SIREN/SIRET or an intra-community VAT number, published on the site. */
-export function extractLegalId(text: string): string | undefined {
-  const vat = /\bFR\s?[0-9A-Z]{2}\s?(\d{3})\s?(\d{3})\s?(\d{3})\b/i.exec(text);
-  if (vat) return vat[0].replace(/\s+/g, "").toUpperCase();
-  const siret = /\b(?:SIRET)\D{0,12}(\d[\d\s.]{12,17}\d)\b/i.exec(text);
-  if (siret) return siret[1]!.replace(/\D/g, "");
-  const siren = /\b(?:SIREN|RCS[^\d]{0,30})\D{0,6}(\d[\d\s.]{7,12}\d)\b/i.exec(text);
-  if (siren) return siren[1]!.replace(/\D/g, "");
-  return undefined;
-}
+// The legal-identifier patterns moved to src/legal-notice.ts, where they became
+// per-country: a German Impressum carries an HRB number and a registry court, a
+// Spanish aviso legal a CIF, and neither is a SIREN. Re-exported here because
+// `Signals.legalIdOnSite` is the field the rest of the run reads.
+export { extractLegalId } from "./legal-notice.js";
+import { extractLegalId as readLegalId } from "./legal-notice.js";
 
 /** Language codes the page declares, from `<html lang>` and hreflang links. */
 export function extractLanguages(html: string): string[] {
@@ -190,6 +206,8 @@ export interface SignalInput {
   sitemapUrls?: number;
   lastContentAt?: string;
   siteReachable: boolean;
+  /** The run's country, so the legal-identifier patterns match the right law. */
+  countryCode?: string;
 }
 
 /** Fold everything measured about a site into one record. */
@@ -224,7 +242,7 @@ export function buildSignals(input: SignalInput): Signals {
     hasEcommerce: ECOMMERCE_FINGERPRINTS.test(html),
     languages: extractLanguages(html),
     socialProfiles: [...new Set(input.pages.flatMap((p) => extractSocials(p.html ?? "", p.record.id).map((s) => s.value)))],
-    legalIdOnSite: input.pages.map((p) => extractLegalId(p.text)).find(Boolean),
+    legalIdOnSite: input.pages.map((p) => readLegalId(p.text, input.countryCode)).find(Boolean),
   };
 }
 

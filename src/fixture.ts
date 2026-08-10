@@ -14,12 +14,15 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { readJsonSafe, writeArtifact } from "./engine.js";
-import type { GeoTarget, OsmPoi, SireneRecord } from "./types.js";
+import type { GeoTarget, OsmPoi } from "./types.js";
+import type { RegistryRecord } from "./registry/types.js";
 
 export interface Fixture {
   target: GeoTarget;
   osm: OsmPoi[];
-  sirene: SireneRecord[];
+  registry: RegistryRecord[];
+  /** Which connector recorded the register side. Read off the records themselves. */
+  connectorId?: string;
 }
 
 /**
@@ -31,13 +34,15 @@ export interface Fixture {
 export function loadFixture(dir: string): Fixture {
   const target = readJsonSafe(join(dir, "target.json")) as GeoTarget | undefined;
   if (!target) throw new Error(`${join(dir, "target.json")} is missing — a fixture needs the geocoded target it was recorded for`);
-  for (const file of ["osm.json", "sirene.json"]) {
+  for (const file of ["osm.json", "registry.json"]) {
     if (!existsSync(join(dir, file))) throw new Error(`${join(dir, file)} is missing — record it with \`ultraprospect scan --record <dir>\``);
   }
+  const registry = (readJsonSafe(join(dir, "registry.json")) as RegistryRecord[]) ?? [];
   return {
     target,
     osm: (readJsonSafe(join(dir, "osm.json")) as OsmPoi[]) ?? [],
-    sirene: (readJsonSafe(join(dir, "sirene.json")) as SireneRecord[]) ?? [],
+    registry,
+    connectorId: registry[0]?.connectorId,
   };
 }
 
@@ -49,9 +54,9 @@ export function loadFixture(dir: string): Fixture {
  * recording raw Overpass JSON would also pin the tag catalogue and the query
  * builder, so any catalogue edit would look like a regression.
  */
-export function recordFixture(dir: string, outcome: { osm: OsmPoi[]; sirene: SireneRecord[] }, target: GeoTarget): void {
+export function recordFixture(dir: string, outcome: { osm: OsmPoi[]; registry: RegistryRecord[] }, target: GeoTarget): void {
   mkdirSync(dir, { recursive: true });
   writeArtifact(join(dir, "target.json"), JSON.stringify(target, null, 2) + "\n");
   writeArtifact(join(dir, "osm.json"), JSON.stringify(outcome.osm, null, 2) + "\n");
-  writeArtifact(join(dir, "sirene.json"), JSON.stringify(outcome.sirene, null, 2) + "\n");
+  writeArtifact(join(dir, "registry.json"), JSON.stringify(outcome.registry, null, 2) + "\n");
 }

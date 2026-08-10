@@ -69,23 +69,23 @@ async function offline() {
   check("every lane reported its coverage", manifest.lanes?.length === 2);
 
   // Fusion invariants — the ones a downstream consumer would be wrong without.
-  check("fusion produced fewer entities than the two lanes summed", places.length < manifest.counts.osm + manifest.counts.sirene, `${places.length} places`);
+  check("fusion produced fewer entities than the two lanes summed", places.length < manifest.counts.osm + manifest.counts.registry, `${places.length} places`);
   check("at least one pair matched across both lanes", manifest.counts.merged > 0, `${manifest.counts.merged} merged`);
   check("place ids are unique", new Set(places.map((p) => p.id)).size === places.length);
   check(
     "every merged place carries both lane records",
-    places.filter((p) => p.sources.length > 1).every((p) => p.osm && p.sirene),
+    places.filter((p) => p.sources.length > 1).every((p) => p.osm && p.registry),
     "a place claiming two sources must hold both",
   );
   check(
     "no place claims a source it has no record for",
-    places.every((p) => (!p.sources.includes("sirene") || p.sirene) && (!p.sources.includes("osm") || p.osm)),
+    places.every((p) => (!p.sources.includes("registry") || p.registry) && (!p.sources.includes("osm") || p.osm)),
   );
   check(
     "no register record was merged into two different places",
     (() => {
-      const sirets = places.filter((p) => p.sirene?.siret).map((p) => p.sirene.siret);
-      return new Set(sirets).size === sirets.length;
+      const keys = places.filter((p) => p.registry).map((p) => `${p.registry.connectorId}:${p.registry.establishmentId ?? p.registry.id}`);
+      return new Set(keys).size === keys.length;
     })(),
   );
   check(

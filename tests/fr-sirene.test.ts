@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { EFFECTIF_BANDS, EFFECTIF_FLOOR, EFFECTIF_LABELS, HARD_CAP, PER_PAGE, buildUrl, expandRecord, parseRawAddress } from "../src/sirene.js";
-import { bandsAtLeast } from "../src/scan.js";
+import { EFFECTIF_BANDS, EFFECTIF_FLOOR, EFFECTIF_LABELS, HARD_CAP, PER_PAGE, buildUrl, expandRecord, parseRawAddress } from "../src/registry/fr-sirene.js";
+import { bandsAtLeast } from "../src/registry/fr-sirene.js";
 
 describe("buildUrl", () => {
   it("uses /near_point for a bare point search", () => {
@@ -137,11 +137,11 @@ describe("expandRecord", () => {
     // chain with four branches is four prospects at four addresses.
     const out = expandRecord(entity);
     expect(out).toHaveLength(2);
-    expect(out.map((r) => r.siret)).toEqual(["79459881300077", "79459881300085"]);
+    expect(out.map((r) => r.establishmentId)).toEqual(["79459881300077", "79459881300085"]);
   });
 
   it("takes the latest filed year from the year-keyed finances map", () => {
-    expect(expandRecord(entity)[0]!.finances).toMatchObject({ annee: "2024", ca: 311448000, resultatNet: -127499000 });
+    expect(expandRecord(entity)[0]!.finances).toMatchObject({ year: "2024", revenue: 311448000, netIncome: -127499000 });
   });
 
   it("prefers the siege's pre-parsed address for the siege establishment", () => {
@@ -158,13 +158,13 @@ describe("expandRecord", () => {
   });
 
   it("maps directors, natural and legal alike", () => {
-    expect(expandRecord(entity)[0]!.dirigeants[0]).toMatchObject({ nom: "NIOX-CHATEAU", prenoms: "STANISLAS", qualite: "Président de SAS" });
+    expect(expandRecord(entity)[0]!.officers[0]).toMatchObject({ nom: "NIOX-CHATEAU", prenoms: "STANISLAS", qualite: "Président de SAS" });
   });
 
   it("falls back to the siege when there are no matching establishments", () => {
     const out = expandRecord({ ...entity, matching_etablissements: [] });
     expect(out).toHaveLength(1);
-    expect(out[0]!.siret).toBe("79459881300077");
+    expect(out[0]!.establishmentId).toBe("79459881300077");
   });
 
   it("returns nothing for an entity with neither", () => {

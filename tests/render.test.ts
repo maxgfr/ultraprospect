@@ -3,6 +3,7 @@ import { CSV_COLUMNS, toCsv } from "../src/csv.js";
 import { buildHtml, buildPrivacyNote, buildReport } from "../src/render.js";
 import { diffRuns, identityOf } from "../src/watch.js";
 import type { Place, RunManifest } from "../src/types.js";
+import { rec } from "./factories.js";
 
 function place(over: Partial<Place> = {}): Place {
   return {
@@ -27,7 +28,19 @@ function manifest(over: Partial<RunManifest> = {}): RunManifest {
     target: { query: "Vincennes", label: "Vincennes, Val-de-Marne, France", lat: 48.8, lon: 2.4, bbox: [48.8, 48.9, 2.4, 2.5], source: "nominatim" },
     filters: {},
     lanes: [{ lane: "osm", requested: 0, returned: 10, truncated: false }],
-    counts: { osm: 10, sirene: 5, google: 0, places: 12, merged: 3, undecided: 1, withWebsite: 2, enrichedTier1: 2, enrichedTier2: 1, dossiers: 0 },
+    counts: {
+      osm: 10,
+      registry: 5,
+      byConnector: { "fr-sirene": 5 },
+      places: 12,
+      merged: 3,
+      undecided: 1,
+      withWebsite: 2,
+      enrichedTier1: 2,
+      enrichedTier2: 1,
+      confirmed: 0,
+      dossiers: 0,
+    },
     truncated: false,
     notes: [],
     licences: ["Places and tags: © OpenStreetMap contributors, ODbL"],
@@ -84,7 +97,7 @@ describe("CSV", () => {
   });
 
   it("drops officers under --no-people", () => {
-    const p = place({ sirene: { siren: "1", enseignes: [], address: {}, dirigeants: [{ nom: "MARTIN", prenoms: "JEAN", qualite: "Président" }] } });
+    const p = place({ registry: rec({ officers: [{ nom: "MARTIN", prenoms: "JEAN", qualite: "Président" }] }) });
     expect(toCsv([p])).toContain("MARTIN");
     expect(toCsv([p], { noPeople: true })).not.toContain("MARTIN");
   });
@@ -105,7 +118,10 @@ describe("REPORT.md", () => {
   it("LEADS with the truncation warning", () => {
     // Not a footnote. A prospect file that quietly covers part of a town is the
     // one failure nobody downstream can detect.
-    const m = manifest({ truncated: true, lanes: [{ lane: "sirene", requested: 0, returned: 3000, truncated: true, reason: "budget reached" }] });
+    const m = manifest({
+      truncated: true,
+      lanes: [{ lane: "registry", mode: "sweep", connectorId: "fr-sirene", requested: 0, returned: 3000, truncated: true, reason: "budget reached" }],
+    });
     const report = buildReport([place()], m);
     const firstLines = report.split("\n").slice(0, 6).join("\n");
     expect(firstLines).toContain("does not cover the whole territory");
@@ -116,11 +132,11 @@ describe("REPORT.md", () => {
     // "shop 460 / G 128" side by side reads as one ranking of one thing, and it
     // is two incomparable vocabularies.
     const report = buildReport(
-      [place({ id: "a", category: "shop=bakery" }), place({ id: "b", sirene: { siren: "1", enseignes: [], dirigeants: [], address: {}, section: "G" } })],
+      [place({ id: "a", category: "shop=bakery" }), place({ id: "b", registry: rec({ section: "G", activityScheme: "nace" }) })],
       manifest(),
     );
     expect(report).toContain("shop (OSM tag)");
-    expect(report).toContain("Trade and vehicle repair (NAF G)");
+    expect(report).toContain("Trade and vehicle repair (NACE G)");
   });
 
   it("carries the attributions", () => {
@@ -184,16 +200,16 @@ describe("index.html", () => {
 describe("PRIVACY.md", () => {
   it("is written only when the run actually holds people", () => {
     expect(buildPrivacyNote([place()], manifest())).toBeUndefined();
-    const withOfficer = place({ sirene: { siren: "1", enseignes: [], address: {}, dirigeants: [{ nom: "MARTIN", qualite: "Gérant" }] } });
+    const withOfficer = place({ registry: rec({ officers: [{ nom: "MARTIN", qualite: "Gérant" }] }) });
     // The phrase wraps across lines in the rendered note, so match on a token
     // that cannot: the obligation itself.
     expect(buildPrivacyNote([withOfficer], manifest())).toContain("GDPR");
   });
 
   it("says where each category of personal data came from", () => {
-    const withOfficer = place({ sirene: { siren: "1", enseignes: [], address: {}, dirigeants: [{ nom: "MARTIN", qualite: "Gérant" }] } });
+    const withOfficer = place({ registry: rec({ officers: [{ nom: "MARTIN", qualite: "Gérant" }] }) });
     const note = buildPrivacyNote([withOfficer], manifest())!;
-    expect(note).toContain("Registre national des entreprises");
+    expect(note).toContain("the company registers listed in the manifest");
     expect(note).toContain("--no-people");
   });
 });
@@ -211,11 +227,11 @@ describe("watch", () => {
     languages: [],
     socialProfiles: [],
   };
-  const sirene = (siret: string, etat = "A") => ({ siren: siret.slice(0, 9), siret, enseignes: [], dirigeants: [], address: {}, etatAdministratif: etat });
+  const reg = (establishmentId: string, status: "active" | "ceased" = "active") => rec({ id: establishmentId.slice(0, 9), establishmentId, status });
 
   it("keys on the SIRET so a place that gains a register match is not a closure plus an opening", () => {
-    const before = place({ id: "sirene:123", sirene: sirene("12345678900011") });
-    const after = place({ id: "osm:n1", osm: { id: "n1", osmType: "node", osmId: 1, lat: 0, lon: 0, tags: {} }, sirene: sirene("12345678900011") });
+    const before = place({ id: "fr-sirene:123", registry: reg("12345678900011") });
+    const after = place({ id: "osm:n1", osm: { id: "n1", osmType: "node", osmId: 1, lat: 0, lon: 0, tags: {} }, registry: reg("12345678900011") });
     expect(identityOf(before)).toBe(identityOf(after));
     const d = diffRuns([before], [after]);
     expect(d.appeared).toHaveLength(0);
@@ -238,11 +254,11 @@ describe("watch", () => {
   });
 
   it("separates ceased-by-the-register from gone-from-the-sweep", () => {
-    const before = [place({ id: "a", sirene: sirene("11111111100011") }), place({ id: "b", sirene: sirene("22222222200011") })];
-    const after = [place({ id: "a", sirene: sirene("11111111100011", "C") })];
+    const before = [place({ id: "a", registry: reg("11111111100011") }), place({ id: "b", registry: reg("22222222200011") })];
+    const after = [place({ id: "a", registry: reg("11111111100011", "ceased") })];
     const d = diffRuns(before, after);
-    expect(d.closed.map((p) => p.sirene!.siret)).toEqual(["11111111100011"]);
-    expect(d.disappeared.map((p) => p.sirene!.siret)).toEqual(["22222222200011"]);
+    expect(d.closed.map((p) => p.registry!.establishmentId)).toEqual(["11111111100011"]);
+    expect(d.disappeared.map((p) => p.registry!.establishmentId)).toEqual(["22222222200011"]);
   });
 
   it("notices a new website and a moved one", () => {

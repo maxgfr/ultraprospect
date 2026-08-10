@@ -1,16 +1,23 @@
-// The French register lane, over `recherche-entreprises.api.gouv.fr`.
+// France — `recherche-entreprises.api.gouv.fr` (Sirene / RNE).
 //
 // No key, no quota form, 7 requests a second, and it carries what OSM never
 // will: SIREN/SIRET, the NAF activity code, the employee band, the directors,
 // and filed revenue. For a French territory it is the difference between a list
 // of shopfronts and a list of companies.
 //
+// IT IS ALSO THE ONLY CONNECTOR IN THIS TOOL THAT CAN SWEEP. Every other
+// register here was measured and cannot enumerate the companies inside an area
+// without a key, so the two-lanes-over-one-territory design that this file
+// implements is a French privilege, not the shape of the world. That is why
+// `sweep` is an optional method on the connector interface rather than the
+// interface itself.
+//
 // TWO UNDOCUMENTED BEHAVIOURS SHAPE THIS WHOLE FILE. Both were measured against
 // the live API, not read in a spec:
 //
 //   1. `total_results` IS CLAMPED AT 10 000. Asking for every legal unit in
 //      Vincennes reports exactly 10 000; summing the same query across the 21
-//      NAF sections reports 37 717. So the field is a floor, never a count, and
+//      NACE sections reports 37 717. So the field is a floor, never a count, and
 //      any code that treats 10 000 as "the total" silently loses two thirds of
 //      a town. Here, `>= HARD_CAP` means "at least this many" and forces a split.
 //   2. `/near_point` IGNORES FILTERS IT DOES NOT IMPLEMENT rather than
@@ -18,16 +25,33 @@
 //      comes back identical. Anything that endpoint does not support is
 //      therefore applied client-side, and never assumed to have taken effect.
 //
+// Both are asserted by `canary()` below, so the day either changes the weekly
+// run opens an `upstream-drift` issue instead of the split ladder quietly doing
+// unnecessary — or wrong — work.
+//
 // The pagination cap is separate and documented: `page * per_page <= 10 000`
 // with `per_page <= 25`, so one query can never yield more than 10 000 rows
 // however patiently it is walked.
-import { awaitHostSlot, httpJson, mapLimit } from "./engine.js";
-import { politeUa } from "./net.js";
-import { NAF_SECTIONS, divisionsOfSection, nafSection } from "./naf.js";
-import type { Dirigeant, LaneCoverage, PostalAddress, SireneRecord } from "./types.js";
-import { firstText } from "./util.js";
+import { awaitHostSlot, httpJson, mapLimit } from "../engine.js";
+import { politeUa } from "../net.js";
+import { NACE_SECTIONS, naceSection } from "../classification/nace.js";
+import { divisionsOfSection } from "../classification/naf-codes.js";
+import type { Dirigeant, GeoTarget, LaneCoverage, PostalAddress } from "../types.js";
+import { firstText } from "../util.js";
+import type {
+  Availability,
+  CanaryCheck,
+  ConnectorContext,
+  LegalId,
+  LookupQuery,
+  RegistryConnector,
+  RegistryFilters,
+  RegistryRecord,
+  SweepResult,
+} from "./types.js";
 
 const BASE = "https://recherche-entreprises.api.gouv.fr";
+const CONNECTOR_ID = "fr-sirene";
 
 /** Server-side maximum. `page * per_page` may not exceed it, and `total_results` is clamped to it. */
 export const HARD_CAP = 10_000;
@@ -48,6 +72,10 @@ const PAGE_CONCURRENCY = 4;
  * Anything that walked the object expecting size order — the report's
  * distribution table, a band picker in a UI — would be quietly wrong, and would
  * look right in every spot check that happened to hit the numeric codes.
+ *
+ * These are French codes. A connector that publishes an exact headcount instead
+ * fills `RegistryRecord.employees` and leaves the band alone; nothing downstream
+ * may assume every record has a band.
  */
 export const EFFECTIF_BANDS: ReadonlyArray<{ code: string; floor: number; label: string }> = [
   { code: "NN", floor: -1, label: "non déterminé" },
@@ -108,7 +136,7 @@ export interface SireneOptions {
 }
 
 export interface SireneResult {
-  records: SireneRecord[];
+  records: RegistryRecord[];
   coverage: LaneCoverage;
   notes: string[];
 }
@@ -196,13 +224,20 @@ function mapDirigeants(raw: any[]): Dirigeant[] {
 }
 
 /** Latest filed year in the `finances` map, which is keyed by year. */
-function latestFinances(raw: any): SireneRecord["finances"] {
+function latestFinances(raw: any): RegistryRecord["finances"] {
   if (!raw || typeof raw !== "object") return undefined;
   const years = Object.keys(raw).filter((y) => /^\d{4}$/.test(y));
   if (years.length === 0) return undefined;
   const year = years.sort().at(-1)!;
   const entry = raw[year] ?? {};
-  return { annee: year, ca: entry.ca ?? undefined, resultatNet: entry.resultat_net ?? undefined };
+  return { year, revenue: entry.ca ?? undefined, netIncome: entry.resultat_net ?? undefined, currency: "EUR" };
+}
+
+/** The register's own words for the establishment's state, normalised. */
+function statusOf(raw: string | undefined): RegistryRecord["status"] {
+  if (raw === "A") return "active";
+  if (raw === "C") return "ceased";
+  return "unknown";
 }
 
 /**
@@ -213,26 +248,32 @@ function latestFinances(raw: any): SireneRecord["finances"] {
  * addresses, and collapsing it to the head office would put the whole thing at
  * a registered address in another département.
  */
-export function expandRecord(entity: any): SireneRecord[] {
+export function expandRecord(entity: any): RegistryRecord[] {
+  const siren = String(entity?.siren ?? "");
   const base = {
-    siren: String(entity?.siren ?? ""),
-    nomComplet: entity?.nom_complet ?? undefined,
-    nomRaisonSociale: entity?.nom_raison_sociale ?? undefined,
-    sigle: entity?.sigle ?? undefined,
-    categorieEntreprise: entity?.categorie_entreprise ?? undefined,
-    natureJuridique: entity?.nature_juridique ?? undefined,
-    dateCreation: entity?.date_creation ?? undefined,
-    nombreEtablissements: entity?.nombre_etablissements ?? undefined,
-    dirigeants: mapDirigeants(entity?.dirigeants),
+    connectorId: CONNECTOR_ID,
+    id: siren,
+    countryCode: "fr",
+    activityScheme: "nace" as const,
+    legalForm: entity?.nature_juridique ?? undefined,
+    establishmentCount: entity?.nombre_etablissements ?? undefined,
+    dateCreated: entity?.date_creation ?? undefined,
+    officers: mapDirigeants(entity?.dirigeants),
     finances: latestFinances(entity?.finances),
     // The legal unit's own activity and size. Every filter the API applies
     // matches on THESE, so a row has to be able to explain why it came back.
-    company: {
-      nafCode: entity?.activite_principale ?? undefined,
+    parent: {
+      activityCode: entity?.activite_principale ?? undefined,
       section: entity?.section_activite_principale ?? undefined,
-      effectifTranche: entity?.tranche_effectif_salarie ?? undefined,
-      effectifAnnee: entity?.annee_tranche_effectif_salarie ?? undefined,
+      sizeBand: entity?.tranche_effectif_salarie ?? undefined,
+      sizeBandYear: entity?.annee_tranche_effectif_salarie ?? undefined,
     },
+    national: {
+      nomComplet: entity?.nom_complet ?? undefined,
+      nomRaisonSociale: entity?.nom_raison_sociale ?? undefined,
+      sigle: entity?.sigle ?? undefined,
+      categorieEntreprise: entity?.categorie_entreprise ?? undefined,
+    } as Record<string, unknown>,
   };
 
   const establishments: any[] = entity?.matching_etablissements?.length ? entity.matching_etablissements : entity?.siege ? [entity.siege] : [];
@@ -259,25 +300,37 @@ export function expandRecord(entity: any): SireneRecord[] {
 
       const lat = Number.parseFloat(e.latitude);
       const lon = Number.parseFloat(e.longitude);
+      const activityCode = e.activite_principale ?? entity?.activite_principale ?? undefined;
+      // Trading names first: the sign over the door is what a prospector reads
+      // and what OSM will have mapped. The legal name follows for matching.
+      const tradingNames = ((e.liste_enseignes ?? []) as unknown[]).filter((n): n is string => Boolean(typeof n === "string" && n.trim()));
+      const legalName = firstText(entity?.nom_complet, entity?.nom_raison_sociale);
+      const names = [...tradingNames, entity?.nom_complet, entity?.nom_raison_sociale, entity?.sigle].filter((n): n is string => Boolean(n?.trim()));
+
       return {
         ...base,
-        siret: e.siret ?? undefined,
-        enseignes: (e.liste_enseignes ?? []).filter(Boolean),
-        nafCode: e.activite_principale ?? entity?.activite_principale ?? undefined,
+        establishmentId: e.siret ?? undefined,
+        names,
+        legalName,
+        tradingNames,
+        activityCode,
         // Derived from THIS establishment's code, never inherited from the
         // legal unit's: pairing an establishment's 68.20B with the company's
         // section J produces a line that is impossible on its face and reads as
         // a bug rather than as two true things about two levels.
-        section: nafSection(e.activite_principale ?? entity?.activite_principale ?? "") ?? undefined,
-        effectifTranche: e.tranche_effectif_salarie ?? entity?.tranche_effectif_salarie ?? undefined,
-        effectifAnnee: e.annee_tranche_effectif_salarie ?? undefined,
-        dateFermeture: e.date_fermeture ?? undefined,
-        etatAdministratif: e.etat_administratif ?? entity?.etat_administratif ?? undefined,
-        estSiege: Boolean(e.est_siege),
+        section: naceSection(activityCode ?? "") ?? undefined,
+        sizeBand: e.tranche_effectif_salarie ?? entity?.tranche_effectif_salarie ?? undefined,
+        sizeBandYear: e.annee_tranche_effectif_salarie ?? undefined,
+        dateClosed: e.date_fermeture ?? undefined,
+        status: statusOf(e.etat_administratif ?? entity?.etat_administratif),
+        isHeadOffice: Boolean(e.est_siege),
         address,
         lat: Number.isFinite(lat) ? lat : undefined,
         lon: Number.isFinite(lon) ? lon : undefined,
-      } satisfies SireneRecord;
+        sourceUrl: e.siret
+          ? `https://annuaire-entreprises.data.gouv.fr/etablissement/${e.siret}`
+          : `https://annuaire-entreprises.data.gouv.fr/entreprise/${siren}`,
+      } satisfies RegistryRecord;
     });
 }
 
@@ -297,12 +350,15 @@ export function expandRecord(entity: any): SireneRecord[] {
  *      wrong, the question was. So the establishment's OWN state is filtered
  *      here regardless of which endpoint answered.
  */
-function applyClientFilters(records: SireneRecord[], query: SireneQuery, endpoint: string): SireneRecord[] {
+function applyClientFilters(records: RegistryRecord[], query: SireneQuery, endpoint: string): RegistryRecord[] {
   let out = records;
-  if (query.etatAdministratif) out = out.filter((r) => r.etatAdministratif === query.etatAdministratif);
+  if (query.etatAdministratif) {
+    const wanted = statusOf(query.etatAdministratif);
+    out = out.filter((r) => r.status === wanted);
+  }
   if (endpoint === "near_point" && query.tranchesEffectif?.length) {
     const wanted = new Set(query.tranchesEffectif);
-    out = out.filter((r) => r.effectifTranche && wanted.has(r.effectifTranche));
+    out = out.filter((r) => r.sizeBand && wanted.has(r.sizeBand));
   }
   return out;
 }
@@ -313,12 +369,12 @@ async function drain(
   budget: { left: number },
   label: string,
   opts: SireneOptions,
-): Promise<{ records: SireneRecord[]; total: number; error?: string }> {
+): Promise<{ records: RegistryRecord[]; total: number; error?: string }> {
   const first = await fetchPage(query, 1);
   if (first.error) return { records: [], total: 0, error: first.error };
 
   const endpoint = endpointFor(query);
-  const collected: SireneRecord[] = [];
+  const collected: RegistryRecord[] = [];
   const push = (entities: any[]) => {
     for (const e of entities) {
       for (const rec of applyClientFilters(expandRecord(e), query, endpoint)) {
@@ -356,7 +412,7 @@ async function drain(
 /**
  * Fetch every establishment matching the query, splitting to get under the cap.
  *
- * The ladder is: whole query -> per NAF section -> per NAF division inside the
+ * The ladder is: whole query -> per NACE section -> per NAF division inside the
  * section. Each rung multiplies the reachable ceiling by the number of parts,
  * and section alone is usually enough (the largest section in a French commune
  * runs to a few thousand). A leaf that still reports `>= HARD_CAP` is recorded
@@ -369,16 +425,16 @@ export async function fetchSirene(query: SireneQuery, opts: SireneOptions = {}):
   const maxDepth = opts.maxSplitDepth ?? 2;
   const budget = { left: maxResults };
   const notes: string[] = [];
-  const bySiret = new Map<string, SireneRecord>();
+  const bySiret = new Map<string, RegistryRecord>();
   let partitions = 0;
   let truncated = false;
   let truncReason: string | undefined;
 
-  const absorb = (records: SireneRecord[]) => {
+  const absorb = (records: RegistryRecord[]) => {
     for (const r of records) {
       // Establishments are unique by SIRET; a legal unit with no SIRET (rare,
       // and only in the siege fallback) is keyed by SIREN so it is not dropped.
-      const key = r.siret ?? `siren:${r.siren}`;
+      const key = r.establishmentId ?? `siren:${r.id}`;
       if (!bySiret.has(key)) bySiret.set(key, r);
     }
   };
@@ -396,9 +452,9 @@ export async function fetchSirene(query: SireneQuery, opts: SireneOptions = {}):
 
     if (probe.total >= HARD_CAP && depth < maxDepth) {
       if (depth === 0) {
-        opts.onNote?.(`sirene: ${label} reports >= ${HARD_CAP} (the API clamps the count) — splitting by NAF section`);
-        notes.push(`sirene: ${label} is at or above the ${HARD_CAP} cap; split into ${NAF_SECTIONS.length} NAF sections`);
-        for (const section of part.sections?.length ? part.sections : NAF_SECTIONS) {
+        opts.onNote?.(`sirene: ${label} reports >= ${HARD_CAP} (the API clamps the count) — splitting by NACE section`);
+        notes.push(`sirene: ${label} is at or above the ${HARD_CAP} cap; split into ${NACE_SECTIONS.length} NACE sections`);
+        for (const section of part.sections?.length ? part.sections : NACE_SECTIONS) {
           await walk({ ...part, sections: [section] }, `${label} / section ${section}`, depth + 1);
         }
         return;
@@ -446,7 +502,9 @@ export async function fetchSirene(query: SireneQuery, opts: SireneOptions = {}):
     records,
     notes,
     coverage: {
-      lane: "sirene",
+      lane: "registry",
+      mode: "sweep",
+      connectorId: CONNECTOR_ID,
       requested: maxResults,
       returned: records.length,
       truncated,
@@ -455,3 +513,134 @@ export async function fetchSirene(query: SireneQuery, opts: SireneOptions = {}):
     },
   };
 }
+
+/** `--min-employees 10` expressed as every INSEE band that satisfies it. */
+export function bandsAtLeast(minHeadcount: number): string[] {
+  // "NN" (undetermined) is excluded: a company whose headcount the register does
+  // not know is not evidence of a company with at least ten people. Including it
+  // would silently reinstate most of the micro-entrepreneurs the filter exists
+  // to remove.
+  return EFFECTIF_BANDS.filter((b) => b.floor >= 0 && b.floor >= minHeadcount).map((b) => b.code);
+}
+
+async function get(url: string): Promise<{ ok: boolean; data: any; status: number }> {
+  await awaitHostSlot(url, REQUEST_DELAY_MS);
+  const res = await httpJson("GET", url, undefined, { timeoutMs: 30_000, retries: 1, userAgent: politeUa() });
+  return { ok: res.ok, data: res.data, status: res.status };
+}
+
+export const frSirene: RegistryConnector = {
+  id: CONNECTOR_ID,
+  countries: ["fr"],
+  label: "France — Sirene / RNE via recherche-entreprises.api.gouv.fr",
+  licence: "French company data: base Sirene / RNE via recherche-entreprises.api.gouv.fr, Licence Ouverte 2.0",
+  activityScheme: "nace",
+  activityPrefix: "naf",
+  docsUrl: "https://recherche-entreprises.api.gouv.fr/docs/",
+  sizeBands: EFFECTIF_BANDS,
+
+  availability(): Availability {
+    return { available: true };
+  },
+
+  async sweep(target: GeoTarget, filters: RegistryFilters, ctx: ConnectorContext): Promise<SweepResult> {
+    return fetchSirene(
+      {
+        // A commune code searches the real boundary; a radius is the fallback
+        // when the geocoder gave us a point rather than an administrative area.
+        codeCommune: target.codeCommune && !target.radiusM ? [target.codeCommune] : undefined,
+        point: target.radiusM || !target.codeCommune ? { lat: target.lat, lon: target.lon, radiusKm: (target.radiusM ?? 1000) / 1000 } : undefined,
+        sections: filters.sections,
+        activitePrincipale: filters.activityCodes,
+        tranchesEffectif: filters.sizeBands,
+        etatAdministratif: filters.includeCeased ? undefined : "A",
+      },
+      { maxResults: filters.maxResults, onNote: ctx.onNote, onProgress: ctx.onProgress },
+    );
+  },
+
+  async lookup(query: LookupQuery): Promise<RegistryRecord[]> {
+    const name = query.names.find((n) => n?.trim());
+    if (!name) return [];
+    // Locality goes in the free-text query rather than in a filter: the API's
+    // `q` already weights the address, and `code_commune` would need an INSEE
+    // code we do not have when the caller only knows a town's name.
+    const q = query.locality ? `${name} ${query.locality}` : name;
+    const page = await fetchPage({ q, etatAdministratif: "A" }, 1, Math.min(25, query.limit ?? 5));
+    if (page.error) return [];
+    return page.results.flatMap((e: any) => expandRecord(e)).slice(0, query.limit ?? 5);
+  },
+
+  async verifyId(id: LegalId): Promise<RegistryRecord | undefined> {
+    // SIREN identifies the legal unit, SIRET one of its establishments, and a
+    // French VAT number embeds the SIREN in its last nine digits.
+    const digits = id.value.replace(/\D+/g, "");
+    let siren: string | undefined;
+    if (id.kind === "siren" && digits.length === 9) siren = digits;
+    else if (id.kind === "siret" && digits.length === 14) siren = digits.slice(0, 9);
+    else if (id.kind === "vat" && digits.length === 11) siren = digits.slice(2);
+    if (!siren) return undefined;
+
+    const page = await fetchPage({ q: siren }, 1, 5);
+    if (page.error) return undefined;
+    const entity = page.results.find((e: any) => String(e?.siren) === siren);
+    if (!entity) return undefined;
+    const records = expandRecord(entity);
+    if (id.kind === "siret") {
+      const exact = records.find((r) => r.establishmentId === digits);
+      if (exact) return exact;
+    }
+    return records.find((r) => r.isHeadOffice) ?? records[0];
+  },
+
+  async canary(): Promise<CanaryCheck[]> {
+    const checks: CanaryCheck[] = [];
+
+    const search = await get(`${BASE}/search?q=doctolib&per_page=1`);
+    const first = search.data?.results?.[0];
+    checks.push({ name: "register still returns results[].siege", ok: Boolean(first?.siege) });
+    checks.push({ name: "register still returns matching_etablissements", ok: Array.isArray(first?.matching_etablissements) });
+    checks.push({
+      name: "register still keys finances by year",
+      ok: Object.keys(first?.finances ?? {}).every((k) => /^\d{4}$/.test(k)),
+    });
+
+    // The two undocumented behaviours this connector is built around. If either
+    // ever changes, the split ladder is doing unnecessary work — or worse, the
+    // wrong work — and this is the only thing that would say so.
+    const capped = await get(`${BASE}/search?code_commune=94080&per_page=1`);
+    checks.push({
+      name: "register still CLAMPS total_results at 10 000",
+      ok: capped.data?.total_results === HARD_CAP,
+      detail: "if this changed, the NAF split ladder can trust the count again",
+    });
+
+    const withFilter = await get(`${BASE}/near_point?lat=48.8566&long=2.3522&radius=0.3&etat_administratif=A&per_page=1`);
+    const without = await get(`${BASE}/near_point?lat=48.8566&long=2.3522&radius=0.3&per_page=1`);
+    checks.push({
+      name: "/near_point still IGNORES etat_administratif",
+      ok: withFilter.data?.total_results === without.data?.total_results,
+      detail: "if it now honours it, the client-side filter is redundant",
+    });
+
+    // The activity catalogue is harvested from this endpoint's own rejection
+    // message, so a change in its shape silently freezes the split ladder.
+    const rejected = await get(`${BASE}/search?activite_principale=__invalid__&per_page=1`);
+    const listed = [...String(rejected.data?.erreur ?? "").matchAll(/'(\d{2}\.\d{2}[A-Z])'/g)].length;
+    checks.push({
+      name: "register still lists the whole NAF catalogue in its rejection message",
+      ok: listed >= 600,
+      detail: `${listed} codes parsed out of the error; scripts/refresh-naf.mjs reads this`,
+    });
+
+    return checks;
+  },
+
+  async probe(): Promise<{ ok: boolean; detail: string }> {
+    const res = await get(`${BASE}/search?q=test&per_page=1`);
+    return {
+      ok: res.ok && typeof res.data?.total_results === "number",
+      detail: res.ok ? `HTTP ${res.status}, total_results present` : `HTTP ${res.status}`,
+    };
+  },
+};

@@ -52,7 +52,7 @@ vi.mock("../src/engine.js", () => ({
   },
 }));
 
-const { HARD_CAP, fetchSirene } = await import("../src/sirene.js");
+const { HARD_CAP, fetchSirene } = await import("../src/registry/fr-sirene.js");
 
 function sectionsQueried(): string[] {
   return [...new Set(calls.map((c) => new URL(c).searchParams.get("section_activite_principale")).filter((s): s is string => Boolean(s)))];
@@ -130,7 +130,7 @@ describe("the split ladder", () => {
     totals = (url) => (url.searchParams.get("section_activite_principale") ? 25 : HARD_CAP);
     perPageRecords = 25;
     const result = await fetchSirene({ codeCommune: ["94080"] });
-    const sirets = result.records.map((r) => r.siret);
+    const sirets = result.records.map((r) => r.establishmentId);
     expect(new Set(sirets).size).toBe(sirets.length);
   });
 

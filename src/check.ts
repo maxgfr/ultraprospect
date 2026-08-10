@@ -135,7 +135,7 @@ export function runCheck(input: CheckInput): CheckReport {
     for (const item of items) {
       contacts++;
       // Open-data lanes carry their own provenance and are not on disk as pages.
-      if (item.lane === "sirene" || item.lane === "osm" || item.from === "osm" || item.from === "sirene") continue;
+      if (item.lane === "registry" || item.lane === "osm" || item.from === "osm" || item.from === "registry") continue;
       const text = pageText.get(item.from);
       if (!text) {
         err(

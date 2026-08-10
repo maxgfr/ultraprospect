@@ -14,8 +14,8 @@
 // that is so the file works from a USB stick in a meeting room, and partly
 // because a page about who a company's prospects are should not phone anybody
 // while it is being read.
-import { EFFECTIF_BANDS } from "./sirene.js";
-import { NAF_SECTION_LABELS } from "./naf-labels.js";
+import { vocabularyOf } from "./classification/index.js";
+import { connectorById } from "./registry/index.js";
 import { ranked } from "./score.js";
 import { toCsv, type CsvOptions } from "./csv.js";
 import { shortLabel } from "./run.js";
@@ -44,14 +44,21 @@ function truncationBanner(manifest: RunManifest): string[] {
 /**
  * Group by activity, saying which taxonomy each row comes from.
  *
- * Two vocabularies are in play and they are not comparable: the register files
- * a company under a NAF section (G, Q, K), OSM tags a shopfront by feature key
- * (shop, amenity, office). A table listing "shop 460 / G 128" side by side
- * reads as one ranking of one thing, and it is neither.
+ * Several vocabularies are in play and they are NOT comparable. A register files
+ * a company under a section letter, OSM tags a shopfront by feature key (shop,
+ * amenity, office) — and now the section letters themselves disagree across
+ * countries: NACE "D" is electricity and gas, US SIC "D" is manufacturing. A
+ * table listing "shop 460 / D 128" side by side reads as one ranking of one
+ * thing, and it is neither. So every label names its own scheme.
  */
 function activityLabel(place: Place): string {
-  const section = place.sirene?.section;
-  if (section) return `${NAF_SECTION_LABELS[section] ?? section} (NAF ${section})`;
+  const rec = place.registry;
+  const section = rec?.section;
+  if (section && rec) {
+    const vocabulary = vocabularyOf(rec.activityScheme);
+    const scheme = vocabulary.scheme === "none" ? rec.connectorId : vocabulary.scheme.toUpperCase();
+    return `${vocabulary.label(section)} (${scheme} ${section})`;
+  }
   const key = place.category?.split("=")[0];
   return key ? `${key} (OSM tag)` : "unclassified";
 }
@@ -62,12 +69,20 @@ function distribution(places: readonly Place[]): { bySection: [string, number][]
     const key = activityLabel(p);
     bySection.set(key, (bySection.get(key) ?? 0) + 1);
   }
-  // Bands are walked in the ordered array, never in key order — the INSEE codes
-  // are canonical integer keys and an object literal reorders them silently.
+  // Bands are walked in each connector's own ordered array, never in key order —
+  // France's codes are canonical integer keys and an object literal reorders
+  // them silently. A run can hold records from more than one connector, and
+  // their band vocabularies do not line up, so each is counted on its own terms.
   const byBand: [string, number][] = [];
-  for (const band of EFFECTIF_BANDS) {
-    const n = places.filter((p) => p.sirene?.effectifTranche === band.code).length;
-    if (n > 0) byBand.push([band.label, n]);
+  const connectorIds = [...new Set(places.map((p) => p.registry?.connectorId).filter((id): id is string => Boolean(id)))];
+  for (const id of connectorIds) {
+    const bands = connectorById(id)?.sizeBands;
+    if (!bands) continue;
+    const scoped = places.filter((p) => p.registry?.connectorId === id);
+    for (const band of bands) {
+      const n = scoped.filter((p) => p.registry?.sizeBand === band.code).length;
+      if (n > 0) byBand.push([connectorIds.length > 1 ? `${band.label} (${id})` : band.label, n]);
+    }
   }
   return { bySection: [...bySection.entries()].sort((a, b) => b[1] - a[1]), byBand };
 }
@@ -198,7 +213,7 @@ export function buildHtml(places: readonly Place[], manifest: RunManifest): stri
     .map((p) => {
       const h = p.signals?.isHiring === true ? `${p.signals.openRoles}` : p.signals?.isHiring === false ? "—" : "?";
       const site = p.website?.url ? `<a href="${esc(p.website.url)}" rel="noreferrer nofollow">${esc(new URL(p.website.url).hostname)}</a>` : "";
-      return `<tr><td>${esc(p.name)}</td><td class="n">${p.score?.total ?? 0}</td><td>${esc(p.score?.fit ?? "")}</td><td class="n">${h}</td><td>${esc(p.sirene?.nafCode ?? p.category ?? "")}</td><td>${esc(p.address.commune ?? "")}</td><td>${site}</td></tr>`;
+      return `<tr><td>${esc(p.name)}</td><td class="n">${p.score?.total ?? 0}</td><td>${esc(p.score?.fit ?? "")}</td><td class="n">${h}</td><td>${esc(p.registry?.activityCode ?? p.category ?? "")}</td><td>${esc(p.address.commune ?? "")}</td><td>${site}</td></tr>`;
     })
     .join("\n");
 
@@ -287,7 +302,7 @@ ${manifest.licences.map((x) => `<p>${esc(x)}</p>`).join("\n")}
  * will reconstruct it later from a CSV.
  */
 export function buildPrivacyNote(places: readonly Place[], manifest: RunManifest): string | undefined {
-  const withOfficers = places.filter((p) => (p.sirene?.dirigeants.length ?? 0) > 0);
+  const withOfficers = places.filter((p) => (p.registry?.officers.length ?? 0) > 0);
   const withPeople = places.filter((p) => p.contacts.people.length > 0);
   const namedEmails = places.flatMap((p) => p.contacts.emails.filter((e) => /^[a-z]+[._-][a-z]+@/i.test(e.value)));
   if (withOfficers.length === 0 && withPeople.length === 0 && namedEmails.length === 0) return undefined;
@@ -303,7 +318,7 @@ controller under the GDPR, and that is a role rather than a formality.
 
 | Category | Records | Source |
 |---|---:|---|
-| Company officers (name, role, sometimes year of birth) | ${withOfficers.reduce((n, p) => n + p.sirene!.dirigeants.length, 0)} across ${withOfficers.length} companies | Registre national des entreprises, published open data |
+| Company officers (name, role, sometimes year of birth) | ${withOfficers.reduce((n, p) => n + p.registry!.officers.length, 0)} across ${withOfficers.length} companies | the company registers listed in the manifest, published open data |
 | People named on a company's own website | ${withPeople.reduce((n, p) => n + p.contacts.people.length, 0)} across ${withPeople.length} companies | Fetched web pages, each recorded with its page id |
 | Personal-looking email addresses | ${namedEmails.length} | Published verbatim on a fetched page — never constructed |
 

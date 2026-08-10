@@ -6,8 +6,17 @@
 // and fails the run when one does not hold, which is the only reason a prospect
 // file produced by a language model can be trusted at all.
 
-/** Which upstream produced a fact. */
-export type Lane = "osm" | "sirene" | "google" | "web" | "agent";
+import type { RegistryMode, RegistryRecord } from "./registry/types.js";
+
+/**
+ * Which upstream produced a fact.
+ *
+ * `registry` rather than `sirene`: the French register is one connector among
+ * several now, and a lane named after one country's service made every
+ * downstream consumer read as if France were the only place with companies.
+ * Which connector answered is on the record and on the lane, not in the enum.
+ */
+export type Lane = "osm" | "registry" | "web" | "agent";
 
 /** A resolved geographic target: what `where` returns and `scan` searches. */
 export interface GeoTarget {
@@ -19,7 +28,7 @@ export interface GeoTarget {
   lon: number;
   /** [south, north, west, east] in degrees. */
   bbox: [number, number, number, number];
-  /** ISO-3166-1 alpha-2, lowercased. Decides whether the SIRENE lane runs at all. */
+  /** ISO-3166-1 alpha-2, lowercased. Decides which register connectors apply at all. */
   countryCode?: string;
   /** OSM relation/way id, when the geocoder resolved an administrative area. */
   osmType?: "node" | "way" | "relation";
@@ -64,61 +73,22 @@ export interface Dirigeant {
   siren?: string;
 }
 
-/** A French establishment, as `recherche-entreprises` returns it. */
-export interface SireneRecord {
-  siren: string;
-  siret?: string;
-  nomComplet?: string;
-  nomRaisonSociale?: string;
-  sigle?: string;
-  enseignes: string[];
-  /**
-   * The ESTABLISHMENT's activity — this site's, not the company's.
-   *
-   * They differ more often than you would expect, and the difference is real
-   * rather than a data flaw: Orange is a telecom operator (61.10Z, section J)
-   * and its Vincennes establishment is a phone shop (47.42Z, section G). Both
-   * are true, and a prospect list about the shop should say shop.
-   */
-  nafCode?: string;
-  section?: string;
-  /**
-   * The LEGAL UNIT's activity and size, carried alongside — because EVERY
-   * register filter matches on these, never on the establishment's.
-   *
-   * Filtering `--section J,M` and displaying only the establishment's `47.42Z`
-   * makes the tool look broken when it is being accurate; showing both is what
-   * makes the row explicable.
-   */
-  company?: {
-    nafCode?: string;
-    section?: string;
-    effectifTranche?: string;
-    effectifAnnee?: string;
-  };
-  categorieEntreprise?: string;
-  natureJuridique?: string;
-  effectifTranche?: string;
-  effectifAnnee?: string;
-  dateCreation?: string;
-  dateFermeture?: string;
-  etatAdministratif?: string;
-  estSiege?: boolean;
-  nombreEtablissements?: number;
-  dirigeants: Dirigeant[];
-  finances?: { annee?: string; ca?: number; resultatNet?: number };
-  address: PostalAddress;
-  lat?: number;
-  lon?: number;
-}
-
+/**
+ * A postal address, in the shape the French register parses into.
+ *
+ * The field names stayed French deliberately. They are not a lowest common
+ * denominator — `codeCommune` is an INSEE code and has no equivalent in
+ * Norway — and renaming them to `street`/`city` would have implied a
+ * cross-country meaning the values do not have. A connector fills the parts its
+ * register actually publishes and leaves the rest alone; `raw` is always safe.
+ */
 export interface PostalAddress {
   raw?: string;
   numero?: string;
   typeVoie?: string;
   libelleVoie?: string;
   codePostal?: string;
-  /** INSEE code, not the postcode. */
+  /** INSEE code, not the postcode. France only. */
   codeCommune?: string;
   commune?: string;
   pays?: string;
@@ -219,8 +189,25 @@ export interface Place {
   /** Which signal carried the merge: the name, a brand, or the street address. */
   matchedBy?: string;
   osm?: OsmPoi;
-  sirene?: SireneRecord;
-  google?: GooglePlace;
+  /**
+   * What a company register filed about this place, whichever register answered.
+   *
+   * In France it arrives from the territory sweep; everywhere else `confirm`
+   * puts it here one company at a time, after the legal identity was read off
+   * the company's own site. `registryEvidence` says which of the two happened,
+   * because a swept record and a confirmed one are not equally strong.
+   */
+  registry?: RegistryRecord;
+  /** How the register record got attached, and what backs it. */
+  registryEvidence?: {
+    mode: RegistryMode;
+    /** "verified-id" | "name-lookup" | "sweep-match". */
+    how: string;
+    /** Page id the legal identifier was read from, when there was one. */
+    from?: string;
+    /** The identifier that was confirmed, e.g. "DE811907980". */
+    legalId?: string;
+  };
   address: PostalAddress;
   lat?: number;
   lon?: number;
@@ -245,23 +232,17 @@ export interface Place {
   matchCandidates?: MatchCandidate[];
 }
 
-export interface GooglePlace {
-  placeId: string;
-  displayName?: string;
-  rating?: number;
-  userRatingCount?: number;
-  types: string[];
-  websiteUri?: string;
-  nationalPhoneNumber?: string;
-}
-
 /** A pair the matcher scored but would not decide alone. */
 export interface MatchCandidate {
   osmId: string;
-  siret?: string;
-  siren?: string;
-  sireneName?: string;
-  /** The register name that actually produced the score — an enseigne, often. */
+  /** Which register produced the candidate. Two connectors can cover one country. */
+  connectorId: string;
+  /** The establishment identifier where the register has one, else the legal-unit id. */
+  registryId: string;
+  /** The legal-unit identifier, when it differs from `registryId`. */
+  legalId?: string;
+  registryName?: string;
+  /** The register name that actually produced the score — a trading name, often. */
   matchedName?: string;
   osmName?: string;
   score: number;
@@ -279,6 +260,18 @@ export interface MatchTodo {
 /** How a lane's coverage ended: complete, or capped and saying so. */
 export interface LaneCoverage {
   lane: Lane;
+  /**
+   * For a register lane: was the territory ENUMERATED, or were companies
+   * confirmed one at a time?
+   *
+   * The most important field in this interface. A sweep answers "every company
+   * filed here"; a confirm answers "the companies OSM found, checked against
+   * the register". A reader who cannot tell them apart will read a Berlin run as
+   * if it were a Vincennes run, and every downstream number will look complete.
+   */
+  mode?: RegistryMode;
+  /** Which connector produced this coverage. Absent for the OSM lane. */
+  connectorId?: string;
   requested: number;
   returned: number;
   /** True when an upstream limit stopped us short of everything that exists. */
@@ -300,14 +293,18 @@ export interface RunManifest {
   lanes: LaneCoverage[];
   counts: {
     osm: number;
-    sirene: number;
-    google: number;
+    /** Register records, from every connector that ran. */
+    registry: number;
+    /** The same total, split by connector id, so a multi-connector run is legible. */
+    byConnector: Record<string, number>;
     places: number;
     merged: number;
     undecided: number;
     withWebsite: number;
     enrichedTier1: number;
     enrichedTier2: number;
+    /** Places a register confirmed after the fact, outside a sweep. */
+    confirmed: number;
     dossiers: number;
   };
   truncated: boolean;

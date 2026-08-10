@@ -53,8 +53,8 @@ const TOOLS: ToolDecl[] = [
         query: { type: "string", description: "A town, a street, an address." },
         country: { type: "string" },
         radius: { type: "string", description: "For a point search: 800, 800m, 2km." },
-        section: { type: "string", description: "NAF section letters, comma-separated, e.g. J,M." },
-        minEffectif: { type: "number", description: "Keep companies with at least this many employees." },
+        section: { type: "string", description: "Activity section letters in the country's own scheme, comma-separated. NACE A-U across Europe, e.g. J,M." },
+        minEmployees: { type: "number", description: "Keep companies with at least this many employees, where the register publishes size." },
         maxResults: { type: "number", description: "Register rows before the lane declares itself partial." },
         out: { type: "string", description: "Run root. Defaults to ./.ultraprospect" },
       },
@@ -109,7 +109,7 @@ export function createAdapter(): McpAdapter {
     capAdvice: {
       ultraprospect_places: "pass a smaller `limit`, or `withWebsiteOnly: true`.",
       ultraprospect_dossier: "pass `factSheetOnly: true` to skip the page texts.",
-      ultraprospect_scan: "narrow with `section` or `minEffectif`, or lower `maxResults`.",
+      ultraprospect_scan: "narrow with `section` or `minEmployees`, or lower `maxResults`.",
     },
 
     async callTool(name: string, args: Record<string, unknown>): Promise<ToolOutcome> {
@@ -137,7 +137,7 @@ export function createAdapter(): McpAdapter {
 
           const outcome = await runScan(resolved.target, {
             sections: typeof args.section === "string" ? args.section.split(",").map((s) => s.trim()) : undefined,
-            minEffectif: typeof args.minEffectif === "number" ? args.minEffectif : undefined,
+            minEmployees: typeof args.minEmployees === "number" ? args.minEmployees : undefined,
             maxResults: typeof args.maxResults === "number" ? clampInt(args.maxResults, 1, 10_000, 3000) : undefined,
           });
           const run = newRun(typeof args.out === "string" ? args.out : DEFAULT_OUT, resolved.target.label);
@@ -169,8 +169,10 @@ export function createAdapter(): McpAdapter {
                   name: p.name,
                   score: p.score?.total ?? 0,
                   fit: p.score?.fit,
-                  naf: p.sirene?.nafCode,
-                  headcount: p.sirene?.effectifTranche,
+                  registry: p.registry?.connectorId,
+                  activityCode: p.registry?.activityCode,
+                  activityScheme: p.registry?.activityScheme,
+                  headcount: p.registry?.sizeBand ?? p.registry?.employees,
                   website: p.website?.url,
                   websiteConfidence: p.website?.confidence,
                   openRoles: p.signals?.openRoles,

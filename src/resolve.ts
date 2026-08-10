@@ -120,17 +120,36 @@ export function queriesFor(place: Place, fallbackTown?: string): string[] {
   const town = place.address.commune ?? place.address.codePostal ?? fallbackTown ?? "";
   const names = new Set<string>();
   if (place.osm?.name) names.add(place.osm.name);
-  if (place.sirene?.enseignes[0]) names.add(place.sirene.enseignes[0]);
-  if (place.sirene?.nomComplet) names.add(place.sirene.nomComplet.replace(/\s*\([^)]*\)/g, "").trim());
+  for (const n of namesOf(place)) names.add(n);
 
   const queries: string[] = [];
   for (const n of names) {
     queries.push(town ? `${n} ${town}` : n);
   }
-  // The SIREN is the highest-precision query there is: a page carrying it is
-  // almost always the company's own legal-notice page.
-  if (place.sirene?.siren) queries.push(`"${place.sirene.siren}"`);
+  // A quoted registration number is the highest-precision query there is: a page
+  // carrying it is almost always the company's own legal-notice page. Which
+  // number that is depends on the register — SIREN in France, company number in
+  // the UK — so it comes off the record rather than out of a French constant.
+  const legalId = place.registry?.establishmentId ?? place.registry?.id;
+  if (legalId) queries.push(`"${legalId}"`);
   return [...new Set(queries)].slice(0, 3);
+}
+
+/**
+ * Every name a register knows this place by, cleaned for searching.
+ *
+ * Trading name first: it is the sign over the door, which is what a search
+ * engine has indexed. The parenthetical strip is for the French register's
+ * habit of appending a disambiguator to `nom_complet`.
+ */
+function namesOf(place: Place): string[] {
+  const rec = place.registry;
+  if (!rec) return [];
+  const out: string[] = [];
+  const first = rec.tradingNames?.[0];
+  if (first) out.push(first);
+  if (rec.legalName) out.push(rec.legalName.replace(/\s*\([^)]*\)/g, "").trim());
+  return out.filter(Boolean);
 }
 
 /** One place's search plan, as written to RESOLVE.todo.json. */
@@ -179,8 +198,13 @@ export interface Corroboration {
  * Any ONE of three signals is enough, and they are ordered by how hard they are
  * to coincide with:
  *
- *   SIREN/SIRET — conclusive. French sites must publish it in their legal
- *     notice, and no other company carries the same number.
+ *   The registration number — conclusive. No other company carries it. Most of
+ *     Europe legally requires it on the site: SIREN in France's mentions
+ *     légales, the Handelsregister number in Germany's Impressum, the company
+ *     number in the UK, the CIF in Spain's aviso legal. THE UNITED STATES HAS
+ *     NO EQUIVALENT — an EIN is never published — so a US run loses the
+ *     strongest signal here and leans on the two below. That is a real
+ *     difference in what can be proven, not a gap to paper over.
  *   Street + postcode — near-conclusive. Two businesses can share a name; they
  *     do not share a doorway.
  *   Name — good, with a caveat: it must be the DISTINCTIVE part. "Pharmacie"
@@ -193,10 +217,19 @@ export function corroborate(place: Place, pageText: string, pageTitle?: string):
   const digits = haystack.replace(/[^0-9]/g, "");
   const evidence: string[] = [];
 
-  const siren = place.sirene?.siren;
-  const siret = place.sirene?.siret;
-  if (siret && digits.includes(siret)) evidence.push(`SIRET ${siret} on the page`);
-  else if (siren && digits.includes(siren)) evidence.push(`SIREN ${siren} on the page`);
+  // Digits only, so formatting on the page ("123 456 789") cannot hide a match.
+  // A register whose identifiers are not numeric (a UK company number can carry
+  // a two-letter prefix) is matched on the raw text instead.
+  const legalUnitId = place.registry?.id;
+  const establishmentId = place.registry?.establishmentId;
+  const carries = (id: string | undefined): boolean => {
+    if (!id) return false;
+    const bare = id.replace(/\s+/g, "");
+    if (/^\d+$/.test(bare)) return bare.length >= 6 && digits.includes(bare);
+    return bare.length >= 6 && haystack.includes(bare.toLowerCase());
+  };
+  if (carries(establishmentId)) evidence.push(`registration ${establishmentId} on the page`);
+  else if (carries(legalUnitId)) evidence.push(`registration ${legalUnitId} on the page`);
 
   const street = place.address.libelleVoie;
   const postcode = place.address.codePostal;
@@ -210,7 +243,7 @@ export function corroborate(place: Place, pageText: string, pageTitle?: string):
     if (streetSeen && haystack.includes(postcode)) evidence.push(`address "${street} ${postcode}" on the page`);
   }
 
-  const candidateNames = [place.osm?.name, place.sirene?.enseignes[0], place.sirene?.nomComplet].filter((n): n is string => Boolean(n));
+  const candidateNames = [place.osm?.name, ...namesOf(place)].filter((n): n is string => Boolean(n));
   for (const name of candidateNames) {
     const distinctive = [...tokenSet(normalizeName(name))].filter((t) => t.length >= 4);
     if (distinctive.length === 0) continue;
@@ -289,7 +322,7 @@ export function groupHits(places: readonly Place[], hits: readonly WebHit[]): Ma
   // tokens appear in its title or snippet. A hit that matches nothing is
   // dropped rather than assigned to the nearest guess.
   for (const place of places) {
-    const names = [place.osm?.name, place.sirene?.enseignes[0], place.sirene?.nomComplet].filter((n): n is string => Boolean(n));
+    const names = [place.osm?.name, ...namesOf(place)].filter((n): n is string => Boolean(n));
     const tokens = names.flatMap((n) => [...tokenSet(normalizeName(n))].filter((t) => t.length >= 4));
     if (tokens.length === 0) continue;
     for (const h of hits) {

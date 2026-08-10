@@ -14,7 +14,7 @@
 //
 // So: the engine gives counts, the agent gives verdicts, and the CSV carries
 // both in separate columns.
-import { EFFECTIF_FLOOR } from "./sirene.js";
+import { employeeFloor } from "./registry/index.js";
 import type { FitVerdict, Place, Score } from "./types.js";
 
 /** How many days of silence before a site stops looking maintained. */
@@ -96,18 +96,20 @@ export function scoreOf(place: Place, weights: ScoreWeights = DEFAULT_WEIGHTS): 
   // establishment would rank a 1 500-person firm's branch as unknown while its
   // competitor's head office scores full marks — an artefact of where the
   // paperwork landed, not a difference between the prospects.
-  const band = place.sirene?.company?.effectifTranche ?? place.sirene?.effectifTranche;
-  const floor = band ? EFFECTIF_FLOOR[band] : undefined;
+  // The LEGAL UNIT's size where the register has one, because that is what every
+  // register filter matched on. `employeeFloor` prefers an exact headcount over
+  // a band and refuses to read "undetermined" as zero.
+  const floor = place.registry ? employeeFloor(place.registry) : undefined;
   // -1 is the register's "undetermined". Unknown headcount scores nothing; it
   // does not score as zero employees.
   if (floor !== undefined && floor >= 0) {
     parts.size = Math.round(weights.size * Math.min(1, Math.log10(Math.max(1, floor) + 1) / 3));
   }
 
-  const ca = place.sirene?.finances?.ca;
+  const ca = place.registry?.finances?.revenue;
   if (typeof ca === "number" && ca > 0) parts.revenue = Math.round(weights.revenue * Math.min(1, Math.log10(ca) / 8));
 
-  if (place.sirene?.siren) parts.registered = weights.registered;
+  if (place.registry?.id) parts.registered = weights.registered;
 
   const contactable = place.contacts.emails.length > 0 || place.contacts.phones.length > 0;
   if (contactable) parts.contactable = weights.contactable;

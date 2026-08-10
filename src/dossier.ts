@@ -11,7 +11,8 @@
 // re-open a summary to check whether it said what a dossier claims it said.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { EFFECTIF_LABELS } from "./sirene.js";
+import { vocabularyOf } from "./classification/index.js";
+import { sizeBandLabel } from "./registry/index.js";
 import type { Place, PostalAddress, RunManifest } from "./types.js";
 
 /** Where a place's write-up goes, relative to the run. */
@@ -37,9 +38,19 @@ function streetLine(a: PostalAddress): string {
   return [a.numero, alreadyPrefixed ? undefined : type, name].filter(Boolean).join(" ");
 }
 
-function fmtMoney(n: number | undefined): string | undefined {
+/**
+ * Money, in the currency the register filed it in.
+ *
+ * The currency used to be hardcoded to EUR with a French locale, which was
+ * correct while the only register was French and silently wrong the moment a
+ * Norwegian or British figure arrived. An unknown currency prints the bare
+ * number rather than guessing one: a NOK amount rendered with a euro sign is a
+ * fact about money that is off by a factor of ten.
+ */
+function fmtMoney(n: number | undefined, currency?: string): string | undefined {
   if (typeof n !== "number") return undefined;
-  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
+  if (!currency) return new Intl.NumberFormat("en", { maximumFractionDigits: 0 }).format(n);
+  return new Intl.NumberFormat("en", { style: "currency", currency, maximumFractionDigits: 0 }).format(n);
 }
 
 /** The structured half: what the two open-data lanes say, laid out. */
@@ -54,9 +65,23 @@ export function factSheet(place: Place): string {
   if (addr || a.commune) l.push(`- address: ${[addr, a.codePostal, a.commune].filter(Boolean).join(", ")}`);
   if (place.category) l.push(`- category: ${place.category}`);
 
-  if (place.sirene) {
-    const s = place.sirene;
-    l.push(`- SIREN: ${s.siren}${s.siret ? ` · SIRET ${s.siret}` : ""}${s.estSiege ? " (head office)" : ""}`);
+  if (place.registry) {
+    const s = place.registry;
+    const scheme = vocabularyOf(s.activityScheme);
+    const schemeName = scheme.scheme === "none" ? s.connectorId : scheme.scheme.toUpperCase();
+    l.push(`- register: ${s.connectorId}${s.sourceUrl ? ` · ${s.sourceUrl}` : ""}`);
+    l.push(
+      `- identifier: ${s.id}${s.establishmentId && s.establishmentId !== s.id ? ` · establishment ${s.establishmentId}` : ""}${s.isHeadOffice ? " (head office)" : ""}`,
+    );
+    if (s.legalName && s.legalName !== place.name) l.push(`- legal name: ${s.legalName}`);
+    if (s.legalForm) l.push(`- legal form: ${s.legalForm}`);
+    // How the register record got attached. A swept record was found by
+    // enumerating the territory; a confirmed one was matched from an identifier
+    // read off the company's own site. The reader has to be able to tell.
+    if (place.registryEvidence) {
+      const ev = place.registryEvidence;
+      l.push(`- how the register was matched: ${ev.mode} / ${ev.how}${ev.legalId ? ` (${ev.legalId}${ev.from ? ` read from [${ev.from}]` : ""})` : ""}`);
+    }
     // Two levels, and where they differ the difference is real rather than a
     // data flaw: Orange is a telecom operator (61.10Z, section J) and its
     // Vincennes establishment is a phone shop (47.42Z, section G). Both are
@@ -64,30 +89,28 @@ export function factSheet(place: Place): string {
     // stays one line — but always when it does, because EVERY register filter
     // matched on the company's values, and a reader who asked for section J
     // deserves to see why a section-G shop came back.
-    if (s.nafCode) l.push(`- NAF, this establishment: ${s.nafCode}${s.section ? ` (section ${s.section})` : ""}`);
-    if (s.company?.nafCode && s.company.nafCode !== s.nafCode) {
+    if (s.activityCode) l.push(`- activity, this establishment: ${s.activityCode}${s.section ? ` (${schemeName} section ${s.section})` : ""}`);
+    if (s.parent?.activityCode && s.parent.activityCode !== s.activityCode) {
       l.push(
-        `- NAF, the company as a whole: ${s.company.nafCode}${s.company.section ? ` (section ${s.company.section})` : ""} — the register filters matched on this`,
+        `- activity, the company as a whole: ${s.parent.activityCode}${s.parent.section ? ` (${schemeName} section ${s.parent.section})` : ""} — the register filters matched on this`,
       );
     }
-    if (s.effectifTranche) {
-      l.push(`- headcount, this establishment: ${EFFECTIF_LABELS[s.effectifTranche] ?? s.effectifTranche}${s.effectifAnnee ? ` (${s.effectifAnnee})` : ""}`);
+    const here = sizeBandLabel(s, s.sizeBand) ?? (s.employees != null ? `${s.employees} employees` : undefined);
+    if (here) l.push(`- headcount, this establishment: ${here}${s.sizeBandYear ? ` (${s.sizeBandYear})` : ""}`);
+    const whole = sizeBandLabel(s, s.parent?.sizeBand) ?? (s.parent?.employees != null ? `${s.parent.employees} employees` : undefined);
+    if (whole && whole !== here) {
+      l.push(`- headcount, the company as a whole: ${whole} — the filters matched on this, and it is what the score uses`);
     }
-    if (s.company?.effectifTranche && s.company.effectifTranche !== s.effectifTranche) {
+    if (s.dateCreated) l.push(`- registered since: ${s.dateCreated}`);
+    if (s.status && s.status !== "unknown") l.push(`- administrative state: ${s.status}`);
+    if (s.establishmentCount) l.push(`- establishments: ${s.establishmentCount}`);
+    if (s.finances?.revenue)
       l.push(
-        `- headcount, the company as a whole: ${EFFECTIF_LABELS[s.company.effectifTranche] ?? s.company.effectifTranche} — the filters matched on this, and it is what the score uses`,
+        `- revenue (${s.finances.year}): ${fmtMoney(s.finances.revenue, s.finances.currency)}${s.finances.netIncome !== undefined ? ` · net ${fmtMoney(s.finances.netIncome, s.finances.currency)}` : ""}`,
       );
-    }
-    if (s.dateCreation) l.push(`- registered since: ${s.dateCreation}`);
-    if (s.etatAdministratif) l.push(`- administrative state: ${s.etatAdministratif === "A" ? "active" : "ceased"}`);
-    if (s.nombreEtablissements) l.push(`- establishments: ${s.nombreEtablissements}`);
-    if (s.finances?.ca)
+    if (s.officers.length) {
       l.push(
-        `- revenue (${s.finances.annee}): ${fmtMoney(s.finances.ca)}${s.finances.resultatNet !== undefined ? ` · net ${fmtMoney(s.finances.resultatNet)}` : ""}`,
-      );
-    if (s.dirigeants.length) {
-      l.push(
-        `- officers (open data, register): ${s.dirigeants.map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" — ")).join("; ")}`,
+        `- officers (open data, register): ${s.officers.map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" — ")).join("; ")}`,
       );
     }
   }

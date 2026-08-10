@@ -4,7 +4,7 @@
 //
 //   manifest.json     what was asked, what each lane returned, what was capped
 //   osm.json          raw OSM lane output, never overwritten by later stages
-//   sirene.json       raw register lane output, likewise
+//   registry.json     raw register lane output, likewise
 //   places.json       the fused entities — the ONLY input the rest of the run reads
 //   MATCH.todo.json   pairs the matcher refused to decide alone
 //   pages/<slug>/     one markdown extract per fetched page, cited as [P#]
@@ -17,7 +17,8 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { readJsonSafe, readManifest, runId, slugify, writeArtifact, writeManifest } from "./engine.js";
-import type { Place, RunManifest } from "./types.js";
+import { connectorById } from "./registry/index.js";
+import type { LaneCoverage, Place, RunManifest } from "./types.js";
 import { VERSION } from "./version.js";
 
 /** Default root, relative to the working directory. Overridden by `--out`. */
@@ -124,12 +125,29 @@ export function readPageText(runDir: string, extractRelPath: string): string | u
   return readFileSync(p, "utf8");
 }
 
-/** The attributions that must travel with any rendered output. */
+/**
+ * The attributions that always apply, whatever the territory.
+ *
+ * OSM and the geocoders run on every run. Register attributions are NOT here:
+ * they are per-connector and only travel when that connector actually answered,
+ * which is what `licencesFor` assembles. Listing France's Licence Ouverte on a
+ * German run would be a false claim about the provenance of the data.
+ */
 export const LICENCES = [
   "Places and tags: © OpenStreetMap contributors, ODbL (https://www.openstreetmap.org/copyright)",
-  "French company data: base Sirene / RNE via recherche-entreprises.api.gouv.fr, Licence Ouverte 2.0",
   "Geocoding: Nominatim (ODbL) and Base Adresse Nationale (Licence Ouverte 2.0)",
 ];
+
+/** The attributions this run actually owes, given which connectors returned data. */
+export function licencesFor(lanes: readonly LaneCoverage[]): string[] {
+  const out = [...LICENCES];
+  for (const lane of lanes) {
+    if (lane.lane !== "registry" || !lane.connectorId || lane.returned <= 0) continue;
+    const licence = connectorById(lane.connectorId)?.licence;
+    if (licence && !out.includes(licence)) out.push(licence);
+  }
+  return out;
+}
 
 export function emptyManifest(label: string): RunManifest {
   // The slug is the short place name, not the geocoder's full administrative
@@ -144,7 +162,19 @@ export function emptyManifest(label: string): RunManifest {
     target: { query: "", label: "", lat: 0, lon: 0, bbox: [0, 0, 0, 0], source: "nominatim" },
     filters: {},
     lanes: [],
-    counts: { osm: 0, sirene: 0, google: 0, places: 0, merged: 0, undecided: 0, withWebsite: 0, enrichedTier1: 0, enrichedTier2: 0, dossiers: 0 },
+    counts: {
+      osm: 0,
+      registry: 0,
+      byConnector: {},
+      places: 0,
+      merged: 0,
+      undecided: 0,
+      withWebsite: 0,
+      enrichedTier1: 0,
+      enrichedTier2: 0,
+      confirmed: 0,
+      dossiers: 0,
+    },
     truncated: false,
     notes: [],
     licences: LICENCES,

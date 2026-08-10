@@ -10,7 +10,8 @@ import {
   poiCategory,
   poiWebsite,
 } from "../src/overpass.js";
-import { NAF_CODES, NAF_SECTIONS, divisionsOfSection, nafSection } from "../src/naf.js";
+import { NACE_SECTIONS, naceSection } from "../src/classification/nace.js";
+import { NAF_CODES, divisionsOfSection } from "../src/classification/naf-codes.js";
 import type { OsmPoi } from "../src/types.js";
 
 describe("areaIdFor", () => {
@@ -125,7 +126,7 @@ describe("poi helpers", () => {
 
 describe("the NAF catalogue, generated from the register's own validation error", () => {
   it("covers every section with at least one code", () => {
-    for (const section of NAF_SECTIONS) {
+    for (const section of NACE_SECTIONS) {
       expect(divisionsOfSection(section).length, `section ${section} has no divisions`).toBeGreaterThan(0);
     }
   });
@@ -133,7 +134,7 @@ describe("the NAF catalogue, generated from the register's own validation error"
   it("assigns every code to exactly one section", () => {
     // A code outside every section range would be silently dropped from the
     // split ladder, so part of the economy would stop being searchable.
-    for (const code of NAF_CODES) expect(nafSection(code), `no section for ${code}`).toBeDefined();
+    for (const code of NAF_CODES) expect(naceSection(code), `no section for ${code}`).toBeDefined();
   });
 
   it("holds the full nomenclature, not a sample", () => {
@@ -151,6 +152,6 @@ describe("the NAF catalogue, generated from the register's own validation error"
   });
 
   it("rejects a malformed code", () => {
-    expect(nafSection("nope")).toBeUndefined();
+    expect(naceSection("nope")).toBeUndefined();
   });
 });

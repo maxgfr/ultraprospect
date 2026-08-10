@@ -57,10 +57,11 @@ gate. Read it rather than guessing a flag.
 |---|---|
 | Check a place name resolves, before spending a sweep | `where "<place>"` |
 | List every company in a town, street or radius | `scan --where "<place>"` |
-| Same, narrowed to an industry or a company size | `scan --where "<place>" --section J,M --min-effectif 10` |
+| Same, narrowed to an industry or a company size | `scan --where "<place>" --section J,M --min-employees 10` |
 | Answer the pairs the matcher would not decide | `match --run <dir> --apply verdicts.json` |
 | Find each company's website (your WebSearch) | `resolve --run <dir> --queries`, then `--web-results` |
 | Read those websites — what they do, who they hire | `enrich --run <dir> --tier 1`, then `--tier 2 --limit 20` |
+| Attach a register identity outside France's sweep | `confirm --run <dir>` |
 | Rank what you found | `score --run <dir>` |
 | Write up one company from its evidence | `dossier --run <dir> --id <id>` |
 | Prove the write-up is grounded before anyone reads it | `check --run <dir>` |
@@ -77,8 +78,10 @@ ultraprospect doctor                                          # are the five ups
 ultraprospect where "Vincennes" --country fr                  # resolve, or list the candidates and exit 2
 ultraprospect scan --where "Vincennes" --country fr           # both lanes, fused
 ultraprospect scan --lat 48.8566 --long 2.3522 --radius 500m  # a point and a radius
-ultraprospect scan --where "Lyon" --section M --min-effectif 20 --out ./runs
-ultraprospect scan --where "Berlin" --no-sirene               # outside France, OSM only
+ultraprospect scan --where "Lyon" --section M --min-employees 20 --out ./runs
+ultraprospect scan --where "Berlin" --country de              # OSM sweeps the ground; the register comes later
+ultraprospect confirm --run <dir>                             # Impressum -> HRB/USt-IdNr -> the authority confirms
+ultraprospect scan --where "Berlin" --no-registry             # skip the register lane entirely
 ultraprospect match --run <dir> --apply verdicts.json         # fold your adjudication back in
 ultraprospect resolve --run <dir> --queries                   # the queries for YOU to search
 ultraprospect resolve --run <dir> --web-results hits.json     # ingest your hits, fetch, corroborate
@@ -106,7 +109,7 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 
 2. **Scan, with filters if the territory is dense.** A French commune holds tens
    of thousands of registered units, most of them dormant micro-entrepreneurs.
-   `--min-effectif`, `--section` and `--naf` are how a run stays useful; the
+   `--min-employees`, `--section` and `--activity` are how a run stays useful; the
    register lane stops at `--max-results` and declares itself partial rather
    than spending twenty minutes.
 
@@ -194,8 +197,8 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | Very few OSM places | Overpass mirrors were busy. `doctor` shows which answered; re-run. |
 | `truncated: true` on the register lane | The territory exceeds the API's 10 000-result ceiling even after the NAF split, or `--max-results` was reached. Narrow the filters. |
 | Register lane returned 0 outside France | Expected. The register is French; only the OSM lane applies. |
-| A merged place looks like two companies | Adjudication was skipped or answered too generously. Check `matchConfidence` and the raw lanes in `osm.json` / `sirene.json`. |
-| Thousands of dormant one-person companies | Add `--min-effectif`; ceased companies are already excluded unless `--include-ceased`. |
+| A merged place looks like two companies | Adjudication was skipped or answered too generously. Check `matchConfidence` and the raw lanes in `osm.json` / `registry.json`. |
+| Thousands of dormant one-person companies | Add `--min-employees`; ceased companies are already excluded unless `--include-ceased`. |
 | `resolve` exits 2 saying no results were supplied | Working as designed. Run `--queries`, do the searching, pass `--web-results`. |
 | A company's own domain shows as `unverified` | The page did not carry its name, address or SIREN. Often a JavaScript-only site — the evidence string says which. It is a candidate, not a confirmed site. |
 | `enrich` says "no place has a corroborated website" | `resolve` has not run, or corroborated nothing. Enrichment only ever reads sites we proved belong to the company. |

@@ -3122,7 +3122,7 @@ async function probeAll() {
     });
     return { ok: res.ok && typeof res.data?.total_results === "number", detail: res.ok ? "answers register queries" : `HTTP ${res.status}` };
   });
-  probes.push({ name: "sirene", target: "recherche-entreprises.api.gouv.fr", required: false, ...sirene });
+  probes.push({ name: "fr-sirene", target: "recherche-entreprises.api.gouv.fr", required: false, ...sirene });
   probes.push(...await Promise.all(OVERPASS_MIRRORS.map(probeOverpass)));
   return probes;
 }
@@ -3258,6 +3258,11 @@ async function banCityCode(query) {
   return { citycode: props.citycode, postcode: props.postcode };
 }
 
+// src/registry/types.ts
+function recordKey(rec) {
+  return `${rec.connectorId}:${rec.establishmentId ?? rec.id}`;
+}
+
 // src/match.ts
 var MAX_DISTANCE_M = 150;
 var MERGE_HIGH = 0.72;
@@ -3291,7 +3296,7 @@ function nearby(index, lat, lon) {
   return out2;
 }
 function registerNames(r) {
-  return [r.nomComplet, r.nomRaisonSociale, r.sigle, ...r.enseignes].filter((n) => Boolean(n?.trim()));
+  return r.names.filter((n) => Boolean(n?.trim()));
 }
 function poiAddress(poi) {
   return {
@@ -3316,7 +3321,8 @@ function scorePair(poi, rec) {
   const best = poiName ? bestNameMatch(poiName, registerNames(rec)) : { name: void 0, score: 0 };
   const nameScore = best.score;
   const brand2 = poi.tags.brand ?? poi.tags.operator ?? "";
-  const enseigneScore = brand2 && rec.enseignes.length ? Math.max(0, ...rec.enseignes.map((e) => nameSimilarity(brand2, e))) : 0;
+  const trading = rec.tradingNames ?? [];
+  const enseigneScore = brand2 && trading.length ? Math.max(0, ...trading.map((e) => nameSimilarity(brand2, e))) : 0;
   const pa = poiAddress(poi);
   const numberAgrees = Boolean(
     pa.numero && rec.address.numero && pa.numero.replace(/\s/g, "").toLowerCase() === rec.address.numero.replace(/\s/g, "").toLowerCase()
@@ -3331,15 +3337,13 @@ function scorePair(poi, rec) {
   const score = 0.8 * identity + 0.2 * proximity;
   return { score, parts: { distance: proximity, name: nameScore, enseigne: enseigneScore, address: addressScore }, distanceM, matchedName: best.name };
 }
-function recordKey(rec) {
-  return rec.siret ?? `siren:${rec.siren}`;
-}
 function toCandidate2(poi, rec, scored) {
   return {
     osmId: poi.id,
-    siret: rec.siret,
-    siren: rec.siren,
-    sireneName: rec.nomComplet ?? rec.nomRaisonSociale,
+    connectorId: rec.connectorId,
+    registryId: rec.establishmentId ?? rec.id,
+    legalId: rec.establishmentId ? rec.id : void 0,
+    registryName: rec.legalName ?? rec.names[0],
     // The name the score came from, which is often NOT nomComplet.
     matchedName: scored.matchedName,
     osmName: poi.name,
@@ -3390,13 +3394,25 @@ function buildMatchTodo(undecided) {
     pairs: [...undecided].sort((a, b) => b.score - a.score)
   };
 }
+function verdictKey(v, known) {
+  const raw = v.registryId?.trim();
+  if (!raw) return void 0;
+  if (known.has(raw)) return raw;
+  if (v.connectorId) {
+    const qualified = `${v.connectorId}:${raw}`;
+    if (known.has(qualified)) return qualified;
+  }
+  const suffixed = [...known].filter((k) => k.endsWith(`:${raw}`));
+  return suffixed.length === 1 ? suffixed[0] : void 0;
+}
 function applyVerdicts(places, verdicts) {
   const byOsm = /* @__PURE__ */ new Map();
   const byRecord = /* @__PURE__ */ new Map();
   for (const p of places) {
     if (p.osm) byOsm.set(p.osm.id, p);
-    if (p.sirene) byRecord.set(recordKey(p.sirene), p);
+    if (p.registry) byRecord.set(recordKey(p.registry), p);
   }
+  const known = new Set(byRecord.keys());
   let mergedCount = 0;
   let skipped = 0;
   const unknown = [];
@@ -3405,15 +3421,16 @@ function applyVerdicts(places, verdicts) {
       skipped++;
       continue;
     }
-    const key = v.siret ?? (v.siren ? `siren:${v.siren}` : void 0);
+    const key = verdictKey(v, known);
     const osmPlace = byOsm.get(v.osmId);
     const recPlace = key ? byRecord.get(key) : void 0;
     if (!osmPlace || !recPlace || osmPlace === recPlace) {
-      unknown.push(`${v.osmId} <-> ${key ?? "?"}`);
+      unknown.push(`${v.osmId} <-> ${key ?? v.registryId ?? "?"}`);
       continue;
     }
-    osmPlace.sirene = recPlace.sirene;
-    osmPlace.sources = [.../* @__PURE__ */ new Set([...osmPlace.sources, "sirene"])];
+    osmPlace.registry = recPlace.registry;
+    osmPlace.registryEvidence = recPlace.registryEvidence ?? { mode: "sweep", how: "agent-adjudicated" };
+    osmPlace.sources = [.../* @__PURE__ */ new Set([...osmPlace.sources, "registry"])];
     osmPlace.matchConfidence = 1;
     osmPlace.address = { ...recPlace.address, ...osmPlace.address };
     recPlace.id = "";
@@ -3423,8 +3440,8 @@ function applyVerdicts(places, verdicts) {
   return { merged: mergedCount, skipped, unknown };
 }
 
-// src/naf.ts
-var NAF_SECTION_DIVISIONS = [
+// src/classification/nace.ts
+var NACE_SECTION_DIVISIONS = [
   ["A", 1, 3],
   ["B", 5, 9],
   ["C", 10, 33],
@@ -3447,6 +3464,37 @@ var NAF_SECTION_DIVISIONS = [
   ["T", 97, 98],
   ["U", 99, 99]
 ];
+var NACE_SECTIONS = NACE_SECTION_DIVISIONS.map(([s]) => s);
+var NACE_SECTION_LABELS = {
+  A: "Agriculture, forestry, fishing",
+  B: "Mining and quarrying",
+  C: "Manufacturing",
+  D: "Electricity and gas",
+  E: "Water, waste, remediation",
+  F: "Construction",
+  G: "Trade and vehicle repair",
+  H: "Transport and storage",
+  I: "Hospitality and food service",
+  J: "Information and communication",
+  K: "Finance and insurance",
+  L: "Real estate",
+  M: "Professional, scientific, technical",
+  N: "Administrative and support services",
+  O: "Public administration",
+  P: "Education",
+  Q: "Health and social work",
+  R: "Arts, entertainment, recreation",
+  S: "Other services",
+  T: "Household employers",
+  U: "Extraterritorial bodies"
+};
+function naceSection(code) {
+  const div = Number.parseInt(code.slice(0, 2), 10);
+  if (!Number.isFinite(div)) return void 0;
+  return NACE_SECTION_DIVISIONS.find(([, lo, hi]) => div >= lo && div <= hi)?.[0];
+}
+
+// src/classification/naf-codes.ts
 var NAF_CODES = [
   "01.11Z",
   "01.12Z",
@@ -4181,15 +4229,10 @@ var NAF_CODES = [
   "98.20Z",
   "99.00Z"
 ];
-function nafSection(code) {
-  const div = Number.parseInt(code.slice(0, 2), 10);
-  if (!Number.isFinite(div)) return void 0;
-  return NAF_SECTION_DIVISIONS.find(([, lo, hi]) => div >= lo && div <= hi)?.[0];
-}
 function divisionsOfSection(section2) {
   const byDivision = /* @__PURE__ */ new Map();
   for (const code of NAF_CODES) {
-    if (nafSection(code) !== section2) continue;
+    if (naceSection(code) !== section2) continue;
     const div = code.slice(0, 2);
     const list2 = byDivision.get(div);
     if (list2) list2.push(code);
@@ -4197,10 +4240,10 @@ function divisionsOfSection(section2) {
   }
   return [...byDivision.values()];
 }
-var NAF_SECTIONS = NAF_SECTION_DIVISIONS.map(([s]) => s);
 
-// src/sirene.ts
+// src/registry/fr-sirene.ts
 var BASE = "https://recherche-entreprises.api.gouv.fr";
+var CONNECTOR_ID = "fr-sirene";
 var HARD_CAP = 1e4;
 var PER_PAGE = 25;
 var REQUEST_DELAY_MS = 200;
@@ -4294,27 +4337,38 @@ function latestFinances(raw) {
   if (years.length === 0) return void 0;
   const year = years.sort().at(-1);
   const entry = raw[year] ?? {};
-  return { annee: year, ca: entry.ca ?? void 0, resultatNet: entry.resultat_net ?? void 0 };
+  return { year, revenue: entry.ca ?? void 0, netIncome: entry.resultat_net ?? void 0, currency: "EUR" };
+}
+function statusOf(raw) {
+  if (raw === "A") return "active";
+  if (raw === "C") return "ceased";
+  return "unknown";
 }
 function expandRecord(entity) {
+  const siren = String(entity?.siren ?? "");
   const base = {
-    siren: String(entity?.siren ?? ""),
-    nomComplet: entity?.nom_complet ?? void 0,
-    nomRaisonSociale: entity?.nom_raison_sociale ?? void 0,
-    sigle: entity?.sigle ?? void 0,
-    categorieEntreprise: entity?.categorie_entreprise ?? void 0,
-    natureJuridique: entity?.nature_juridique ?? void 0,
-    dateCreation: entity?.date_creation ?? void 0,
-    nombreEtablissements: entity?.nombre_etablissements ?? void 0,
-    dirigeants: mapDirigeants(entity?.dirigeants),
+    connectorId: CONNECTOR_ID,
+    id: siren,
+    countryCode: "fr",
+    activityScheme: "nace",
+    legalForm: entity?.nature_juridique ?? void 0,
+    establishmentCount: entity?.nombre_etablissements ?? void 0,
+    dateCreated: entity?.date_creation ?? void 0,
+    officers: mapDirigeants(entity?.dirigeants),
     finances: latestFinances(entity?.finances),
     // The legal unit's own activity and size. Every filter the API applies
     // matches on THESE, so a row has to be able to explain why it came back.
-    company: {
-      nafCode: entity?.activite_principale ?? void 0,
+    parent: {
+      activityCode: entity?.activite_principale ?? void 0,
       section: entity?.section_activite_principale ?? void 0,
-      effectifTranche: entity?.tranche_effectif_salarie ?? void 0,
-      effectifAnnee: entity?.annee_tranche_effectif_salarie ?? void 0
+      sizeBand: entity?.tranche_effectif_salarie ?? void 0,
+      sizeBandYear: entity?.annee_tranche_effectif_salarie ?? void 0
+    },
+    national: {
+      nomComplet: entity?.nom_complet ?? void 0,
+      nomRaisonSociale: entity?.nom_raison_sociale ?? void 0,
+      sigle: entity?.sigle ?? void 0,
+      categorieEntreprise: entity?.categorie_entreprise ?? void 0
     }
   };
   const establishments = entity?.matching_etablissements?.length ? entity.matching_etablissements : entity?.siege ? [entity.siege] : [];
@@ -4332,33 +4386,43 @@ function expandRecord(entity) {
     } : { ...parseRawAddress(e.adresse), codeCommune: e.commune ?? void 0, commune: e.libelle_commune ?? void 0, pays: "France" };
     const lat = Number.parseFloat(e.latitude);
     const lon = Number.parseFloat(e.longitude);
+    const activityCode = e.activite_principale ?? entity?.activite_principale ?? void 0;
+    const tradingNames = (e.liste_enseignes ?? []).filter((n) => Boolean(typeof n === "string" && n.trim()));
+    const legalName = firstText(entity?.nom_complet, entity?.nom_raison_sociale);
+    const names = [...tradingNames, entity?.nom_complet, entity?.nom_raison_sociale, entity?.sigle].filter((n) => Boolean(n?.trim()));
     return {
       ...base,
-      siret: e.siret ?? void 0,
-      enseignes: (e.liste_enseignes ?? []).filter(Boolean),
-      nafCode: e.activite_principale ?? entity?.activite_principale ?? void 0,
+      establishmentId: e.siret ?? void 0,
+      names,
+      legalName,
+      tradingNames,
+      activityCode,
       // Derived from THIS establishment's code, never inherited from the
       // legal unit's: pairing an establishment's 68.20B with the company's
       // section J produces a line that is impossible on its face and reads as
       // a bug rather than as two true things about two levels.
-      section: nafSection(e.activite_principale ?? entity?.activite_principale ?? "") ?? void 0,
-      effectifTranche: e.tranche_effectif_salarie ?? entity?.tranche_effectif_salarie ?? void 0,
-      effectifAnnee: e.annee_tranche_effectif_salarie ?? void 0,
-      dateFermeture: e.date_fermeture ?? void 0,
-      etatAdministratif: e.etat_administratif ?? entity?.etat_administratif ?? void 0,
-      estSiege: Boolean(e.est_siege),
+      section: naceSection(activityCode ?? "") ?? void 0,
+      sizeBand: e.tranche_effectif_salarie ?? entity?.tranche_effectif_salarie ?? void 0,
+      sizeBandYear: e.annee_tranche_effectif_salarie ?? void 0,
+      dateClosed: e.date_fermeture ?? void 0,
+      status: statusOf(e.etat_administratif ?? entity?.etat_administratif),
+      isHeadOffice: Boolean(e.est_siege),
       address,
       lat: Number.isFinite(lat) ? lat : void 0,
-      lon: Number.isFinite(lon) ? lon : void 0
+      lon: Number.isFinite(lon) ? lon : void 0,
+      sourceUrl: e.siret ? `https://annuaire-entreprises.data.gouv.fr/etablissement/${e.siret}` : `https://annuaire-entreprises.data.gouv.fr/entreprise/${siren}`
     };
   });
 }
 function applyClientFilters(records, query, endpoint) {
   let out2 = records;
-  if (query.etatAdministratif) out2 = out2.filter((r) => r.etatAdministratif === query.etatAdministratif);
+  if (query.etatAdministratif) {
+    const wanted = statusOf(query.etatAdministratif);
+    out2 = out2.filter((r) => r.status === wanted);
+  }
   if (endpoint === "near_point" && query.tranchesEffectif?.length) {
     const wanted = new Set(query.tranchesEffectif);
-    out2 = out2.filter((r) => r.effectifTranche && wanted.has(r.effectifTranche));
+    out2 = out2.filter((r) => r.sizeBand && wanted.has(r.sizeBand));
   }
   return out2;
 }
@@ -4406,7 +4470,7 @@ async function fetchSirene(query, opts = {}) {
   let truncReason;
   const absorb = (records2) => {
     for (const r of records2) {
-      const key = r.siret ?? `siren:${r.siren}`;
+      const key = r.establishmentId ?? `siren:${r.id}`;
       if (!bySiret.has(key)) bySiret.set(key, r);
     }
   };
@@ -4422,9 +4486,9 @@ async function fetchSirene(query, opts = {}) {
     }
     if (probe.total >= HARD_CAP && depth < maxDepth) {
       if (depth === 0) {
-        opts.onNote?.(`sirene: ${label} reports >= ${HARD_CAP} (the API clamps the count) \u2014 splitting by NAF section`);
-        notes.push(`sirene: ${label} is at or above the ${HARD_CAP} cap; split into ${NAF_SECTIONS.length} NAF sections`);
-        for (const section3 of part.sections?.length ? part.sections : NAF_SECTIONS) {
+        opts.onNote?.(`sirene: ${label} reports >= ${HARD_CAP} (the API clamps the count) \u2014 splitting by NACE section`);
+        notes.push(`sirene: ${label} is at or above the ${HARD_CAP} cap; split into ${NACE_SECTIONS.length} NACE sections`);
+        for (const section3 of part.sections?.length ? part.sections : NACE_SECTIONS) {
           await walk({ ...part, sections: [section3] }, `${label} / section ${section3}`, depth + 1);
         }
         return;
@@ -4467,7 +4531,9 @@ async function fetchSirene(query, opts = {}) {
     records,
     notes,
     coverage: {
-      lane: "sirene",
+      lane: "registry",
+      mode: "sweep",
+      connectorId: CONNECTOR_ID,
       requested: maxResults,
       returned: records.length,
       truncated,
@@ -4475,6 +4541,165 @@ async function fetchSirene(query, opts = {}) {
       partitions: Math.max(1, partitions)
     }
   };
+}
+function bandsAtLeast(minHeadcount) {
+  return EFFECTIF_BANDS.filter((b) => b.floor >= 0 && b.floor >= minHeadcount).map((b) => b.code);
+}
+async function get(url) {
+  await awaitHostSlot(url, REQUEST_DELAY_MS);
+  const res = await httpJson("GET", url, void 0, { timeoutMs: 3e4, retries: 1, userAgent: politeUa() });
+  return { ok: res.ok, data: res.data, status: res.status };
+}
+var frSirene = {
+  id: CONNECTOR_ID,
+  countries: ["fr"],
+  label: "France \u2014 Sirene / RNE via recherche-entreprises.api.gouv.fr",
+  licence: "French company data: base Sirene / RNE via recherche-entreprises.api.gouv.fr, Licence Ouverte 2.0",
+  activityScheme: "nace",
+  activityPrefix: "naf",
+  docsUrl: "https://recherche-entreprises.api.gouv.fr/docs/",
+  sizeBands: EFFECTIF_BANDS,
+  availability() {
+    return { available: true };
+  },
+  async sweep(target, filters, ctx) {
+    return fetchSirene(
+      {
+        // A commune code searches the real boundary; a radius is the fallback
+        // when the geocoder gave us a point rather than an administrative area.
+        codeCommune: target.codeCommune && !target.radiusM ? [target.codeCommune] : void 0,
+        point: target.radiusM || !target.codeCommune ? { lat: target.lat, lon: target.lon, radiusKm: (target.radiusM ?? 1e3) / 1e3 } : void 0,
+        sections: filters.sections,
+        activitePrincipale: filters.activityCodes,
+        tranchesEffectif: filters.sizeBands,
+        etatAdministratif: filters.includeCeased ? void 0 : "A"
+      },
+      { maxResults: filters.maxResults, onNote: ctx.onNote, onProgress: ctx.onProgress }
+    );
+  },
+  async lookup(query) {
+    const name = query.names.find((n) => n?.trim());
+    if (!name) return [];
+    const q = query.locality ? `${name} ${query.locality}` : name;
+    const page = await fetchPage({ q, etatAdministratif: "A" }, 1, Math.min(25, query.limit ?? 5));
+    if (page.error) return [];
+    return page.results.flatMap((e) => expandRecord(e)).slice(0, query.limit ?? 5);
+  },
+  async verifyId(id) {
+    const digits = id.value.replace(/\D+/g, "");
+    let siren;
+    if (id.kind === "siren" && digits.length === 9) siren = digits;
+    else if (id.kind === "siret" && digits.length === 14) siren = digits.slice(0, 9);
+    else if (id.kind === "vat" && digits.length === 11) siren = digits.slice(2);
+    if (!siren) return void 0;
+    const page = await fetchPage({ q: siren }, 1, 5);
+    if (page.error) return void 0;
+    const entity = page.results.find((e) => String(e?.siren) === siren);
+    if (!entity) return void 0;
+    const records = expandRecord(entity);
+    if (id.kind === "siret") {
+      const exact = records.find((r) => r.establishmentId === digits);
+      if (exact) return exact;
+    }
+    return records.find((r) => r.isHeadOffice) ?? records[0];
+  },
+  async canary() {
+    const checks = [];
+    const search2 = await get(`${BASE}/search?q=doctolib&per_page=1`);
+    const first = search2.data?.results?.[0];
+    checks.push({ name: "register still returns results[].siege", ok: Boolean(first?.siege) });
+    checks.push({ name: "register still returns matching_etablissements", ok: Array.isArray(first?.matching_etablissements) });
+    checks.push({
+      name: "register still keys finances by year",
+      ok: Object.keys(first?.finances ?? {}).every((k) => /^\d{4}$/.test(k))
+    });
+    const capped = await get(`${BASE}/search?code_commune=94080&per_page=1`);
+    checks.push({
+      name: "register still CLAMPS total_results at 10 000",
+      ok: capped.data?.total_results === HARD_CAP,
+      detail: "if this changed, the NAF split ladder can trust the count again"
+    });
+    const withFilter = await get(`${BASE}/near_point?lat=48.8566&long=2.3522&radius=0.3&etat_administratif=A&per_page=1`);
+    const without = await get(`${BASE}/near_point?lat=48.8566&long=2.3522&radius=0.3&per_page=1`);
+    checks.push({
+      name: "/near_point still IGNORES etat_administratif",
+      ok: withFilter.data?.total_results === without.data?.total_results,
+      detail: "if it now honours it, the client-side filter is redundant"
+    });
+    const rejected = await get(`${BASE}/search?activite_principale=__invalid__&per_page=1`);
+    const listed = [...String(rejected.data?.erreur ?? "").matchAll(/'(\d{2}\.\d{2}[A-Z])'/g)].length;
+    checks.push({
+      name: "register still lists the whole NAF catalogue in its rejection message",
+      ok: listed >= 600,
+      detail: `${listed} codes parsed out of the error; scripts/refresh-naf.mjs reads this`
+    });
+    return checks;
+  },
+  async probe() {
+    const res = await get(`${BASE}/search?q=test&per_page=1`);
+    return {
+      ok: res.ok && typeof res.data?.total_results === "number",
+      detail: res.ok ? `HTTP ${res.status}, total_results present` : `HTTP ${res.status}`
+    };
+  }
+};
+
+// src/registry/index.ts
+var CONNECTORS = [frSirene];
+function connectorById(id) {
+  return CONNECTORS.find((c) => c.id === id);
+}
+function servesCountry(connector, countryCode) {
+  if (connector.countries.includes("*")) return true;
+  if (!countryCode) return false;
+  return connector.countries.includes(countryCode.toLowerCase());
+}
+function connectorsFor(countryCode, opts = {}) {
+  const ctx = opts.ctx ?? {};
+  const only = opts.only?.length ? new Set(opts.only.map((s) => s.trim().toLowerCase()).filter(Boolean)) : void 0;
+  const selection = { confirm: [], unavailable: [] };
+  for (const connector of CONNECTORS) {
+    if (only && !only.has(connector.id)) continue;
+    if (!servesCountry(connector, countryCode)) continue;
+    const availability = connector.availability(ctx);
+    if (!availability.available) {
+      selection.unavailable.push({ connector, availability });
+      continue;
+    }
+    if (connector.sweep && !selection.sweep) selection.sweep = connector;
+    if (connector.lookup || connector.verifyId) selection.confirm.push(connector);
+  }
+  return selection;
+}
+function unknownConnectorIds(only) {
+  if (!only?.length) return [];
+  const known = new Set(CONNECTORS.map((c) => c.id));
+  return only.map((s) => s.trim().toLowerCase()).filter((s) => s && !known.has(s));
+}
+function noSweepReason(countryCode, selection) {
+  const where = countryCode ? `country=${countryCode}` : "country unknown";
+  if (selection.confirm.length) {
+    const names = selection.confirm.map((c) => c.id).join(", ");
+    return `no register can be swept for ${where}; OSM covered the territory and ${names} can confirm each company (run \`confirm\`)`;
+  }
+  if (selection.unavailable.length) {
+    const blocked = selection.unavailable.map(({ connector, availability }) => `${connector.id} (${availability.available ? "" : availability.reason})`).join(", ");
+    return `no register ran for ${where}: ${blocked}`;
+  }
+  return `no register connector covers ${where}; the territory is OSM-only and the list is not a register extract`;
+}
+function sizeBandLabel(record, band) {
+  if (!band) return void 0;
+  const bands = connectorById(record.connectorId)?.sizeBands;
+  return bands?.find((b) => b.code === band)?.label ?? band;
+}
+function employeeFloor(record) {
+  if (typeof record.employees === "number") return record.employees;
+  const bands = connectorById(record.connectorId)?.sizeBands;
+  if (!bands) return void 0;
+  const code = record.parent?.sizeBand ?? record.sizeBand;
+  const floor = bands.find((b) => b.code === code)?.floor;
+  return typeof floor === "number" && floor >= 0 ? floor : void 0;
 }
 
 // src/run.ts
@@ -4522,11 +4747,24 @@ function writePlaces(runDir, places) {
 function writeJson(runDir, file, value) {
   writeArtifact(join2(runDir, file), JSON.stringify(value, null, 2) + "\n");
 }
+function readPageText(runDir, extractRelPath) {
+  const p = join2(runDir, extractRelPath);
+  if (!existsSync2(p)) return void 0;
+  return readFileSync2(p, "utf8");
+}
 var LICENCES = [
   "Places and tags: \xA9 OpenStreetMap contributors, ODbL (https://www.openstreetmap.org/copyright)",
-  "French company data: base Sirene / RNE via recherche-entreprises.api.gouv.fr, Licence Ouverte 2.0",
   "Geocoding: Nominatim (ODbL) and Base Adresse Nationale (Licence Ouverte 2.0)"
 ];
+function licencesFor(lanes) {
+  const out2 = [...LICENCES];
+  for (const lane of lanes) {
+    if (lane.lane !== "registry" || !lane.connectorId || lane.returned <= 0) continue;
+    const licence = connectorById(lane.connectorId)?.licence;
+    if (licence && !out2.includes(licence)) out2.push(licence);
+  }
+  return out2;
+}
 function emptyManifest(label) {
   const slug = shortLabel(label);
   return {
@@ -4538,7 +4776,19 @@ function emptyManifest(label) {
     target: { query: "", label: "", lat: 0, lon: 0, bbox: [0, 0, 0, 0], source: "nominatim" },
     filters: {},
     lanes: [],
-    counts: { osm: 0, sirene: 0, google: 0, places: 0, merged: 0, undecided: 0, withWebsite: 0, enrichedTier1: 0, enrichedTier2: 0, dossiers: 0 },
+    counts: {
+      osm: 0,
+      registry: 0,
+      byConnector: {},
+      places: 0,
+      merged: 0,
+      undecided: 0,
+      withWebsite: 0,
+      enrichedTier1: 0,
+      enrichedTier2: 0,
+      confirmed: 0,
+      dossiers: 0
+    },
     truncated: false,
     notes: [],
     licences: LICENCES,
@@ -4552,26 +4802,25 @@ import { join as join3 } from "path";
 function loadFixture(dir) {
   const target = readJsonSafe(join3(dir, "target.json"));
   if (!target) throw new Error(`${join3(dir, "target.json")} is missing \u2014 a fixture needs the geocoded target it was recorded for`);
-  for (const file of ["osm.json", "sirene.json"]) {
+  for (const file of ["osm.json", "registry.json"]) {
     if (!existsSync3(join3(dir, file))) throw new Error(`${join3(dir, file)} is missing \u2014 record it with \`ultraprospect scan --record <dir>\``);
   }
+  const registry = readJsonSafe(join3(dir, "registry.json")) ?? [];
   return {
     target,
     osm: readJsonSafe(join3(dir, "osm.json")) ?? [],
-    sirene: readJsonSafe(join3(dir, "sirene.json")) ?? []
+    registry,
+    connectorId: registry[0]?.connectorId
   };
 }
 function recordFixture(dir, outcome, target) {
   mkdirSync2(dir, { recursive: true });
   writeArtifact(join3(dir, "target.json"), JSON.stringify(target, null, 2) + "\n");
   writeArtifact(join3(dir, "osm.json"), JSON.stringify(outcome.osm, null, 2) + "\n");
-  writeArtifact(join3(dir, "sirene.json"), JSON.stringify(outcome.sirene, null, 2) + "\n");
+  writeArtifact(join3(dir, "registry.json"), JSON.stringify(outcome.registry, null, 2) + "\n");
 }
 
 // src/scan.ts
-function bandsAtLeast(minHeadcount) {
-  return EFFECTIF_BANDS.filter((b) => b.floor >= 0 && b.floor >= minHeadcount).map((b) => b.code);
-}
 function placeFromPoi(poi) {
   const website = poiWebsite(poi);
   return {
@@ -4599,22 +4848,29 @@ function placeFromPoi(poi) {
 }
 function placeFromRecord(rec) {
   return {
-    id: `sirene:${rec.siret ?? rec.siren}`,
-    name: firstText(rec.enseignes[0], rec.nomComplet, rec.nomRaisonSociale, rec.sigle) ?? rec.siren,
-    sources: ["sirene"],
-    sirene: rec,
+    id: recordKey(rec),
+    name: firstText(...rec.names) ?? rec.id,
+    sources: ["registry"],
+    registry: rec,
+    registryEvidence: { mode: "sweep", how: "sweep-match" },
     address: rec.address,
     lat: rec.lat,
     lon: rec.lon,
-    category: rec.nafCode ? `naf=${rec.nafCode}` : void 0,
+    // Namespaced by scheme, not by country: "naf=62.01Z" and "sic=62012" are
+    // both activity codes and neither is comparable with "shop=bakery".
+    category: rec.activityCode ? `${activityPrefix(rec)}=${rec.activityCode}` : void 0,
     contacts: { emails: [], phones: [], socials: [], people: [] },
     jobs: [],
     pages: []
   };
 }
+function activityPrefix(rec) {
+  return connectorById(rec.connectorId)?.activityPrefix ?? "activity";
+}
 function mergeInto(poiPlace, rec, confidence, by) {
-  poiPlace.sirene = rec;
-  poiPlace.sources = [.../* @__PURE__ */ new Set([...poiPlace.sources, "sirene"])];
+  poiPlace.registry = rec;
+  poiPlace.registryEvidence = { mode: "sweep", how: "sweep-match" };
+  poiPlace.sources = [.../* @__PURE__ */ new Set([...poiPlace.sources, "registry"])];
   poiPlace.matchConfidence = Number(confidence.toFixed(3));
   poiPlace.matchedBy = by;
   poiPlace.address = {
@@ -4630,12 +4886,22 @@ async function runScan(target, opts = {}) {
   };
   const lanes = [];
   const timings = {};
-  const effectifBands = opts.effectif?.length ? opts.effectif : opts.minEffectif ? bandsAtLeast(opts.minEffectif) : void 0;
+  const sizeBands = opts.sizeBands?.length ? opts.sizeBands : opts.minEmployees ? bandsAtLeast(opts.minEmployees) : void 0;
+  const ctx = { keys: opts.keys, onNote: note };
   const replay = opts.fixture ? loadFixture(opts.fixture) : void 0;
   if (replay) {
     note(`fixture: replaying a recorded sweep from ${opts.fixture}`);
     lanes.push({ lane: "osm", requested: 0, returned: replay.osm.length, truncated: false, reason: "replayed from a fixture", partitions: 1 });
-    lanes.push({ lane: "sirene", requested: 0, returned: replay.sirene.length, truncated: false, reason: "replayed from a fixture", partitions: 1 });
+    lanes.push({
+      lane: "registry",
+      mode: "sweep",
+      connectorId: replay.connectorId,
+      requested: 0,
+      returned: replay.registry.length,
+      truncated: false,
+      reason: "replayed from a fixture",
+      partitions: 1
+    });
   }
   let pois = replay?.osm ?? [];
   if (!replay && !opts.noOsm) {
@@ -4656,37 +4922,51 @@ async function runScan(target, opts = {}) {
   } else if (!replay) {
     lanes.push({ lane: "osm", requested: 0, returned: 0, truncated: false, reason: "skipped (--no-osm)" });
   }
-  let records = replay?.sirene ?? [];
-  const registerApplies = target.countryCode === "fr";
-  if (!replay && !opts.noSirene && registerApplies) {
+  let records = replay?.registry ?? [];
+  let sweepConnectorId = replay?.connectorId;
+  const selection = connectorsFor(target.countryCode, { only: opts.registryIds, ctx });
+  const bogus = unknownConnectorIds(opts.registryIds);
+  if (bogus.length) note(`--registry: no connector is called ${bogus.join(", ")} \u2014 run \`doctor\` for the list`);
+  for (const { connector, availability } of selection.unavailable) {
+    if (availability.available) continue;
+    note(`registry: ${connector.id} covers this country but cannot run \u2014 ${availability.reason}${availability.how ? `. ${availability.how}` : ""}`);
+  }
+  if (!replay && !opts.noRegistry && selection.sweep?.sweep) {
+    const connector = selection.sweep;
     const t02 = Date.now();
-    const result = await fetchSirene(
+    const result = await connector.sweep(
+      target,
       {
-        // A commune code searches the real boundary; a radius is the fallback
-        // when the geocoder gave us a point rather than an administrative area.
-        codeCommune: target.codeCommune && !target.radiusM ? [target.codeCommune] : void 0,
-        point: target.radiusM || !target.codeCommune ? { lat: target.lat, lon: target.lon, radiusKm: (target.radiusM ?? 1e3) / 1e3 } : void 0,
         sections: opts.sections,
-        activitePrincipale: opts.naf,
-        tranchesEffectif: effectifBands,
-        etatAdministratif: opts.includeCeased ? void 0 : "A"
+        activityCodes: opts.activityCodes,
+        sizeBands,
+        includeCeased: opts.includeCeased,
+        maxResults: opts.maxResults
       },
-      { maxResults: opts.maxResults, onNote: note }
+      ctx
     );
-    timings.sirene = Date.now() - t02;
+    timings.registry = Date.now() - t02;
     records = result.records;
+    sweepConnectorId = connector.id;
     for (const n of result.notes) notes.push(n);
     lanes.push(result.coverage);
   } else if (!replay) {
     lanes.push({
-      lane: "sirene",
+      lane: "registry",
+      connectorId: selection.sweep?.id,
       requested: 0,
       returned: 0,
       truncated: false,
-      // Not applicable is not the same as failed, and the manifest must not blur
-      // them: one is a property of the territory, the other of the run.
-      reason: opts.noSirene ? "skipped (--no-sirene)" : `not applicable outside France (country=${target.countryCode ?? "unknown"})`
+      // Skipped, not-sweepable and not-covered are three different facts and the
+      // manifest must not blur them: one is a property of the run, one of the
+      // world's open data, one of the territory.
+      reason: opts.noRegistry ? "skipped (--no-registry)" : noSweepReason(target.countryCode, selection)
     });
+    if (!opts.noRegistry && selection.confirm.length) {
+      note(
+        `registry: ${target.countryCode ?? "this country"} has no sweepable register \u2014 run \`confirm\` after \`enrich --tier 1\` to check each company against ${selection.confirm.map((c) => c.id).join(", ")}`
+      );
+    }
   }
   const t0 = Date.now();
   const { merged, undecided } = matchLanes(pois, records);
@@ -4700,7 +4980,7 @@ async function runScan(target, opts = {}) {
   }
   const claimed = /* @__PURE__ */ new Set();
   for (const rec of records) {
-    const key = rec.siret ?? `siren:${rec.siren}`;
+    const key = recordKey(rec);
     const decision = merged.get(key);
     const host = decision ? poiPlaces.get(decision.osmId) : void 0;
     if (host && decision) {
@@ -4713,9 +4993,9 @@ async function runScan(target, opts = {}) {
   if (opts.noPeople) {
     let stripped = 0;
     for (const p of places) {
-      if (p.sirene?.dirigeants.length) {
-        stripped += p.sirene.dirigeants.length;
-        p.sirene = { ...p.sirene, dirigeants: [] };
+      if (p.registry?.officers.length) {
+        stripped += p.registry.officers.length;
+        p.registry = { ...p.registry, officers: [] };
       }
       p.contacts.people = [];
     }
@@ -4725,33 +5005,337 @@ async function runScan(target, opts = {}) {
   manifest.target = target;
   manifest.filters = {
     osmGroups: opts.osmGroups ?? "all",
-    naf: opts.naf ?? null,
+    activityCodes: opts.activityCodes ?? null,
     sections: opts.sections ?? null,
-    effectif: effectifBands ?? null,
+    sizeBands: sizeBands ?? null,
     includeCeased: Boolean(opts.includeCeased),
-    maxResults: opts.maxResults ?? null
+    maxResults: opts.maxResults ?? null,
+    registryIds: opts.registryIds ?? null
   };
   manifest.lanes = lanes;
   manifest.timings = timings;
   manifest.counts = {
     ...manifest.counts,
     osm: pois.length,
-    sirene: records.length,
+    registry: records.length,
+    byConnector: sweepConnectorId && records.length ? { [sweepConnectorId]: records.length } : {},
     places: places.length,
     merged: claimed.size,
     undecided: undecided.length,
     withWebsite: places.filter((p) => p.website?.url).length
   };
+  manifest.licences = licencesFor(lanes);
   manifest.truncated = lanes.some((l) => l.truncated);
   manifest.notes = notes;
-  return { places, manifest, osm: pois, sirene: records, undecided, notes };
+  return { places, manifest, osm: pois, registry: records, undecided, notes };
 }
 function writeScan(runDir, outcome) {
   writeJson(runDir, "osm.json", outcome.osm);
-  writeJson(runDir, "sirene.json", outcome.sirene);
+  writeJson(runDir, "registry.json", outcome.registry);
   writePlaces(runDir, outcome.places);
   writeJson(runDir, "MATCH.todo.json", buildMatchTodo(outcome.undecided));
   writeRunManifest(runDir, outcome.manifest);
+}
+
+// src/legal-notice.ts
+var LEGAL_NOTICE_COUNTRIES = ["fr", "de", "es", "gb", "it", "nl", "be", "at", "pt", "pl", "ie", "lu", "cz", "dk", "fi", "se", "no"];
+var VAT_PATTERNS = {
+  at: /ATU\d{8}/i,
+  be: /BE0\d{9}/i,
+  bg: /BG\d{9,10}/i,
+  cy: /CY\d{8}[A-Z]/i,
+  cz: /CZ\d{8,10}/i,
+  de: /DE\d{9}/i,
+  dk: /DK\d{8}/i,
+  ee: /EE\d{9}/i,
+  el: /EL\d{9}/i,
+  es: /ES[A-Z0-9]\d{7}[A-Z0-9]/i,
+  fi: /FI\d{8}/i,
+  fr: /FR[0-9A-Z]{2}\d{9}/i,
+  hr: /HR\d{11}/i,
+  hu: /HU\d{8}/i,
+  ie: /IE\d[A-Z0-9+*]\d{5}[A-Z]{1,2}/i,
+  it: /IT\d{11}/i,
+  lt: /LT(?:\d{9}|\d{12})/i,
+  lu: /LU\d{8}/i,
+  lv: /LV\d{11}/i,
+  mt: /MT\d{8}/i,
+  nl: /NL\d{9}B\d{2}/i,
+  pl: /PL\d{10}/i,
+  pt: /PT\d{9}/i,
+  ro: /RO\d{2,10}/i,
+  se: /SE\d{12}/i,
+  si: /SI\d{8}/i,
+  sk: /SK\d{10}/i
+};
+function extractVatNumbers(text2) {
+  const out2 = [];
+  const seen = /* @__PURE__ */ new Set();
+  const compact = text2.replace(/[\s. -]+/g, "");
+  for (const [cc, re] of Object.entries(VAT_PATTERNS)) {
+    for (const m of compact.matchAll(new RegExp(re.source, "gi"))) {
+      const value = m[0].toUpperCase();
+      if (seen.has(value)) continue;
+      seen.add(value);
+      out2.push({ countryCode: cc, value });
+    }
+  }
+  return out2;
+}
+function extractHandelsregister(text2) {
+  const m = /\bHR([AB])\s*[:\s]?\s*(\d{1,7})\b/i.exec(text2);
+  if (!m) return void 0;
+  const value = `HR${m[1].toUpperCase()} ${m[2]}`;
+  const around = text2.slice(Math.max(0, m.index - 120), m.index + 160);
+  const court = /\b(?:Amtsgericht|Registergericht|Handelsregister\s+(?:des|beim)?)\s*:?\s*([A-ZÄÖÜ][\wÄÖÜäöüß.-]+(?:\s+[A-ZÄÖÜ][\wÄÖÜäöüß.-]+)?)/.exec(around);
+  return { value, court: court?.[1]?.trim() };
+}
+function extractUkCompanyNumber(text2) {
+  const m = /\b(?:compan(?:y|ies)\s+(?:reg(?:istration|istered)?\.?\s*)?(?:no\.?|number)|registered\s+in\s+England[^.]{0,40}?no\.?)\D{0,10}((?:[A-Z]{2})?\d{6,8})\b/i.exec(
+    text2
+  );
+  return m?.[1]?.toUpperCase();
+}
+function extractSirenSiret(text2) {
+  const siret = /\b(?:SIRET)\D{0,12}(\d[\d\s.]{12,17}\d)\b/i.exec(text2);
+  if (siret) return { kind: "siret", value: siret[1].replace(/\D/g, "") };
+  const siren = /\b(?:SIREN|RCS[^\d]{0,30})\D{0,6}(\d[\d\s.]{7,12}\d)\b/i.exec(text2);
+  if (siren) return { kind: "siren", value: siren[1].replace(/\D/g, "") };
+  return void 0;
+}
+function extractSpanishNif(text2) {
+  const m = /\b(?:CIF|NIF)\s*[:.]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])\b/i.exec(text2);
+  return m?.[1]?.toUpperCase();
+}
+function extractLegalIds(text2, countryCode, pageId) {
+  const cc = countryCode?.toLowerCase();
+  const out2 = [];
+  const push = (id) => {
+    if (!out2.some((x) => x.kind === id.kind && x.value === id.value)) out2.push(id);
+  };
+  if (cc === "fr" || !cc) {
+    const fr = extractSirenSiret(text2);
+    if (fr) push({ kind: fr.kind, value: fr.value, countryCode: "fr", from: pageId });
+  }
+  if (cc === "de" || !cc) {
+    const de = extractHandelsregister(text2);
+    if (de) push({ kind: "hrb", value: de.value, countryCode: "de", from: pageId, context: de.court });
+  }
+  if (cc === "gb") {
+    const gb = extractUkCompanyNumber(text2);
+    if (gb) push({ kind: "company-number", value: gb, countryCode: "gb", from: pageId });
+  }
+  if (cc === "es" || !cc) {
+    const es = extractSpanishNif(text2);
+    if (es) push({ kind: "nif", value: es, countryCode: "es", from: pageId });
+  }
+  for (const vat of extractVatNumbers(text2)) {
+    push({ kind: "vat", value: vat.value, countryCode: vat.countryCode, from: pageId });
+  }
+  return out2;
+}
+function extractLegalId(text2, countryCode) {
+  return extractLegalIds(text2, countryCode)[0]?.value;
+}
+function legalIdCoverage(countryCode) {
+  const cc = countryCode?.toLowerCase();
+  if (cc && LEGAL_NOTICE_COUNTRIES.includes(cc)) {
+    return { expected: true, note: `${cc}: company websites are legally required to publish a registration number` };
+  }
+  if (cc === "us") {
+    return {
+      expected: false,
+      note: "us: there is no federal company register and no published company number \u2014 an EIN is never disclosed. Identity here rests on address and name, not on a registration."
+    };
+  }
+  return { expected: false, note: `${cc ?? "this country"}: no legal-notice obligation is modelled, so no registration number is expected on company sites` };
+}
+
+// src/confirm.ts
+function needsConfirming(places) {
+  return places.filter((p) => !p.registry && Boolean(p.name?.trim()));
+}
+function localityOf(place, fallback) {
+  return place.address.commune ?? place.address.codePostal ?? fallback;
+}
+function namesOf(place) {
+  const names = [place.osm?.name, place.name].filter((n) => Boolean(n?.trim()));
+  return [...new Set(names)];
+}
+function scoreLookup(place, rec) {
+  let best = 0;
+  let matchedName;
+  for (const mine of namesOf(place)) {
+    for (const theirs of rec.names) {
+      const s = nameSimilarity(mine, theirs);
+      if (s > best) {
+        best = s;
+        matchedName = theirs;
+      }
+    }
+  }
+  const postcodeAgrees = Boolean(place.address.codePostal && rec.address.codePostal && place.address.codePostal === rec.address.codePostal);
+  return { score: postcodeAgrees ? Math.min(1, best + 0.1) : best, matchedName };
+}
+function toCandidate3(place, rec, score, matchedName) {
+  return {
+    osmId: place.id,
+    connectorId: rec.connectorId,
+    registryId: rec.establishmentId ?? rec.id,
+    legalId: rec.establishmentId ? rec.id : void 0,
+    registryName: rec.legalName ?? rec.names[0],
+    matchedName,
+    osmName: place.name,
+    score: Number(score.toFixed(4)),
+    // A name lookup has no coordinates to reason about, and saying "0 m apart"
+    // would be a claim rather than an absence. The parts a lookup cannot
+    // measure are reported as zero and `distanceM` as unknown-far.
+    parts: { distance: 0, name: Number(score.toFixed(4)), enseigne: 0, address: 0 },
+    distanceM: Number.POSITIVE_INFINITY
+  };
+}
+async function verify(id, connectors, ctx) {
+  for (const connector of connectors) {
+    if (!connector.verifyId) continue;
+    if (!connector.countries.includes("*") && !connector.countries.includes(id.countryCode)) continue;
+    try {
+      const rec = await connector.verifyId(id, ctx);
+      if (rec) return rec;
+    } catch {
+    }
+  }
+  return void 0;
+}
+async function runConfirm(runDir, places, opts = {}) {
+  const notes = [];
+  const note = (n) => {
+    notes.push(n);
+    opts.onNote?.(n);
+  };
+  const ctx = { keys: opts.keys, onNote: note };
+  const selection = connectorsFor(opts.countryCode, { only: opts.registryIds, ctx });
+  for (const bogus of unknownConnectorIds(opts.registryIds)) {
+    note(`--registry: no connector is called ${bogus} \u2014 run \`doctor\` for the list`);
+  }
+  for (const { connector, availability } of selection.unavailable) {
+    if (availability.available) continue;
+    note(`confirm: ${connector.id} covers this country but cannot run \u2014 ${availability.reason}${availability.how ? `. ${availability.how}` : ""}`);
+  }
+  const outcome = {
+    records: [],
+    verified: 0,
+    matched: 0,
+    undecided: [],
+    notFound: 0,
+    notes,
+    coverage: {
+      lane: "registry",
+      mode: "confirm",
+      requested: 0,
+      returned: 0,
+      truncated: false
+    }
+  };
+  if (!selection.confirm.length) {
+    outcome.coverage.reason = noSweepReason(opts.countryCode, selection);
+    note(`confirm: ${outcome.coverage.reason}`);
+    return outcome;
+  }
+  const coverage = legalIdCoverage(opts.countryCode);
+  note(`confirm: ${coverage.note}`);
+  const targets = needsConfirming(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
+  outcome.coverage.requested = targets.length;
+  const usedConnectors = /* @__PURE__ */ new Set();
+  let idsFound = 0;
+  let done = 0;
+  for (const place of targets) {
+    done++;
+    opts.onProgress?.(done, targets.length, place.name);
+    let attached;
+    for (const pageRel of place.pages) {
+      if (attached) break;
+      const text2 = readPageText(runDir, pageRel);
+      if (!text2) continue;
+      const pageId = pageIdOf(pageRel);
+      for (const id of extractLegalIds(text2, opts.countryCode, pageId)) {
+        idsFound++;
+        const rec = await verify(id, selection.confirm, ctx);
+        if (!rec) continue;
+        const { score } = scoreLookup(place, rec);
+        if (score < 0.3 && !sharesToken(place, rec)) {
+          note(`confirm: ${place.name} published ${id.value}, but the register returned "${rec.names[0]}" \u2014 not attached`);
+          continue;
+        }
+        attached = { rec, how: "verified-id", from: id.from, legalId: id.value };
+        break;
+      }
+    }
+    if (!attached) {
+      const query = {
+        names: namesOf(place),
+        countryCode: opts.countryCode ?? "",
+        locality: localityOf(place, opts.town),
+        postcode: place.address.codePostal,
+        limit: 5
+      };
+      for (const connector of selection.confirm) {
+        if (!connector.lookup || attached) continue;
+        let hits = [];
+        try {
+          hits = await connector.lookup(query, ctx);
+        } catch {
+          continue;
+        }
+        usedConnectors.add(connector.id);
+        let best;
+        for (const rec of hits) {
+          const { score, matchedName } = scoreLookup(place, rec);
+          if (!best || score > best.score) best = { rec, score, matchedName };
+        }
+        if (!best) continue;
+        if (best.score >= MERGE_HIGH) {
+          attached = { rec: best.rec, how: "name-lookup" };
+        } else if (best.score >= MERGE_LOW) {
+          outcome.undecided.push(toCandidate3(place, best.rec, best.score, best.matchedName));
+        }
+      }
+    }
+    if (attached) {
+      place.registry = attached.rec;
+      place.registryEvidence = { mode: "confirm", how: attached.how, from: attached.from, legalId: attached.legalId };
+      place.sources = [.../* @__PURE__ */ new Set([...place.sources, "registry"])];
+      place.address = { ...attached.rec.address, ...Object.fromEntries(Object.entries(place.address).filter(([, v]) => v !== void 0 && v !== "")) };
+      outcome.records.push(attached.rec);
+      usedConnectors.add(attached.rec.connectorId);
+      if (attached.how === "verified-id") outcome.verified++;
+      else outcome.matched++;
+    } else {
+      outcome.notFound++;
+    }
+  }
+  outcome.coverage.returned = outcome.records.length;
+  outcome.coverage.connectorId = [...usedConnectors].sort().join(",") || selection.confirm[0]?.id;
+  outcome.coverage.reason = `confirmed one company at a time: ${outcome.verified} by a published registration number, ${outcome.matched} by a name lookup, ${outcome.notFound} not found. This is NOT a sweep \u2014 companies absent from OSM are absent from this run.`;
+  if (coverage.expected && idsFound === 0 && targets.length > 0) {
+    note(
+      `confirm: not one of ${targets.length} site(s) published a registration number, though ${opts.countryCode} requires it. Either the legal pages were not fetched (run \`enrich --tier 1\` first) or they were not reachable.`
+    );
+  }
+  note(`confirm: ${outcome.verified} verified, ${outcome.matched} matched by name, ${outcome.undecided.length} undecided, ${outcome.notFound} not found`);
+  return outcome;
+}
+function pageIdOf(pageRel) {
+  const file = pageRel.split("/").pop() ?? "";
+  const m = /^(P\d+)/.exec(file);
+  return m?.[1] ?? void 0;
+}
+function sharesToken(place, rec) {
+  const mine = new Set([...tokenSet(normalizeName(place.name))].filter((t) => t.length >= 4));
+  if (mine.size === 0) return false;
+  for (const theirs of rec.names) {
+    for (const t of tokenSet(normalizeName(theirs))) if (t.length >= 4 && mine.has(t)) return true;
+  }
+  return false;
 }
 
 // src/pages.ts
@@ -4909,24 +5493,39 @@ function queriesFor(place, fallbackTown) {
   const town = place.address.commune ?? place.address.codePostal ?? fallbackTown ?? "";
   const names = /* @__PURE__ */ new Set();
   if (place.osm?.name) names.add(place.osm.name);
-  if (place.sirene?.enseignes[0]) names.add(place.sirene.enseignes[0]);
-  if (place.sirene?.nomComplet) names.add(place.sirene.nomComplet.replace(/\s*\([^)]*\)/g, "").trim());
+  for (const n of namesOf2(place)) names.add(n);
   const queries = [];
   for (const n of names) {
     queries.push(town ? `${n} ${town}` : n);
   }
-  if (place.sirene?.siren) queries.push(`"${place.sirene.siren}"`);
+  const legalId = place.registry?.establishmentId ?? place.registry?.id;
+  if (legalId) queries.push(`"${legalId}"`);
   return [...new Set(queries)].slice(0, 3);
+}
+function namesOf2(place) {
+  const rec = place.registry;
+  if (!rec) return [];
+  const out2 = [];
+  const first = rec.tradingNames?.[0];
+  if (first) out2.push(first);
+  if (rec.legalName) out2.push(rec.legalName.replace(/\s*\([^)]*\)/g, "").trim());
+  return out2.filter(Boolean);
 }
 function corroborate(place, pageText, pageTitle) {
   const haystack = foldAccents(`${pageTitle ?? ""}
 ${pageText}`).toLowerCase();
   const digits = haystack.replace(/[^0-9]/g, "");
   const evidence = [];
-  const siren = place.sirene?.siren;
-  const siret = place.sirene?.siret;
-  if (siret && digits.includes(siret)) evidence.push(`SIRET ${siret} on the page`);
-  else if (siren && digits.includes(siren)) evidence.push(`SIREN ${siren} on the page`);
+  const legalUnitId = place.registry?.id;
+  const establishmentId = place.registry?.establishmentId;
+  const carries = (id) => {
+    if (!id) return false;
+    const bare = id.replace(/\s+/g, "");
+    if (/^\d+$/.test(bare)) return bare.length >= 6 && digits.includes(bare);
+    return bare.length >= 6 && haystack.includes(bare.toLowerCase());
+  };
+  if (carries(establishmentId)) evidence.push(`registration ${establishmentId} on the page`);
+  else if (carries(legalUnitId)) evidence.push(`registration ${legalUnitId} on the page`);
   const street = place.address.libelleVoie;
   const postcode = place.address.codePostal;
   if (street && postcode) {
@@ -4935,7 +5534,7 @@ ${pageText}`).toLowerCase();
     const streetSeen = streetWords.length > 0 && streetWords.every((w) => haystack.includes(w));
     if (streetSeen && haystack.includes(postcode)) evidence.push(`address "${street} ${postcode}" on the page`);
   }
-  const candidateNames = [place.osm?.name, place.sirene?.enseignes[0], place.sirene?.nomComplet].filter((n) => Boolean(n));
+  const candidateNames = [place.osm?.name, ...namesOf2(place)].filter((n) => Boolean(n));
   for (const name of candidateNames) {
     const distinctive = [...tokenSet(normalizeName(name))].filter((t) => t.length >= 4);
     if (distinctive.length === 0) continue;
@@ -4977,7 +5576,7 @@ function groupHits(places, hits) {
     return byPlace;
   }
   for (const place of places) {
-    const names = [place.osm?.name, place.sirene?.enseignes[0], place.sirene?.nomComplet].filter((n) => Boolean(n));
+    const names = [place.osm?.name, ...namesOf2(place)].filter((n) => Boolean(n));
     const tokens = names.flatMap((n) => [...tokenSet(normalizeName(n))].filter((t) => t.length >= 4));
     if (tokens.length === 0) continue;
     for (const h of hits) {
@@ -5199,14 +5798,26 @@ async function fetchAllBoards(boards) {
 
 // src/signals.ts
 var ROLE_PATTERNS = [
-  { role: "careers", re: /(?:^|\/)(?:careers?|jobs?|emplois?|recrutement|nous-rejoindre|rejoignez|join-us|hiring|carriere|carrières?)(?:\/|$|\.)/i },
-  { role: "pricing", re: /(?:^|\/)(?:pricing|tarifs?|prix|nos-tarifs|abonnements?|plans?|devis)(?:\/|$|\.)/i },
-  { role: "about", re: /(?:^|\/)(?:about|about-us|a-propos|à-propos|qui-sommes-nous|notre-histoire|entreprise|company)(?:\/|$|\.)/i },
-  { role: "team", re: /(?:^|\/)(?:team|equipe|équipe|notre-equipe|people|staff|collaborateurs|direction)(?:\/|$|\.)/i },
-  { role: "contact", re: /(?:^|\/)(?:contact|contactez-nous|nous-contacter|contact-us)(?:\/|$|\.)/i },
+  {
+    role: "careers",
+    re: /(?:^|\/)(?:careers?|jobs?|emplois?|recrutement|nous-rejoindre|rejoignez|join-us|hiring|carriere|carrières?|karriere|stellen|stellenangebote|jobboerse|empleo|trabaja-con-nosotros|ofertas-de-empleo|lavora-con-noi)(?:\/|$|\.)/i
+  },
+  { role: "pricing", re: /(?:^|\/)(?:pricing|tarifs?|prix|nos-tarifs|abonnements?|plans?|devis|preise|preisliste|precios|tarifas|prezzi)(?:\/|$|\.)/i },
+  {
+    role: "about",
+    re: /(?:^|\/)(?:about|about-us|a-propos|à-propos|qui-sommes-nous|notre-histoire|entreprise|company|ueber-uns|über-uns|unternehmen|wir-ueber-uns|sobre-nosotros|quienes-somos|empresa|chi-siamo)(?:\/|$|\.)/i
+  },
+  {
+    role: "team",
+    re: /(?:^|\/)(?:team|equipe|équipe|notre-equipe|people|staff|collaborateurs|direction|mitarbeiter|ansprechpartner|equipo|nuestro-equipo)(?:\/|$|\.)/i
+  },
+  { role: "contact", re: /(?:^|\/)(?:contact|contactez-nous|nous-contacter|contact-us|kontakt|kontaktieren|contacto|contatti)(?:\/|$|\.)/i },
   {
     role: "legal",
-    re: /(?:^|\/)(?:mentions-legales|mentions-légales|legal|legal-notice|impressum|cgv|cgu|conditions-generales|privacy|confidentialite)(?:\/|$|\.)/i
+    // The legal page is the one this tool most depends on outside France: it is
+    // where German and Spanish law puts the registration number that `confirm`
+    // turns into a register record.
+    re: /(?:^|\/)(?:mentions-legales|mentions-légales|legal|legal-notice|legal-notices|impressum|imprint|anbieterkennzeichnung|aviso-legal|informacion-legal|note-legali|cgv|cgu|conditions-generales|privacy|confidentialite|datenschutz)(?:\/|$|\.)/i
   },
   { role: "services", re: /(?:^|\/)(?:services?|prestations?|expertises?|solutions?|savoir-faire|metiers?|métiers?)(?:\/|$|\.)/i },
   { role: "products", re: /(?:^|\/)(?:products?|produits?|boutique|shop|catalogue|collections?)(?:\/|$|\.)/i },
@@ -5301,15 +5912,6 @@ function extractSocials(html, pageId) {
   }
   return [...out2.values()];
 }
-function extractLegalId(text2) {
-  const vat = /\bFR\s?[0-9A-Z]{2}\s?(\d{3})\s?(\d{3})\s?(\d{3})\b/i.exec(text2);
-  if (vat) return vat[0].replace(/\s+/g, "").toUpperCase();
-  const siret = /\b(?:SIRET)\D{0,12}(\d[\d\s.]{12,17}\d)\b/i.exec(text2);
-  if (siret) return siret[1].replace(/\D/g, "");
-  const siren = /\b(?:SIREN|RCS[^\d]{0,30})\D{0,6}(\d[\d\s.]{7,12}\d)\b/i.exec(text2);
-  if (siren) return siren[1].replace(/\D/g, "");
-  return void 0;
-}
 function extractLanguages(html) {
   const langs = /* @__PURE__ */ new Set();
   const htmlLang = /<html[^>]*\slang=["']([a-z]{2})/i.exec(html);
@@ -5347,7 +5949,7 @@ function buildSignals(input) {
     hasEcommerce: ECOMMERCE_FINGERPRINTS.test(html),
     languages: extractLanguages(html),
     socialProfiles: [...new Set(input.pages.flatMap((p) => extractSocials(p.html ?? "", p.record.id).map((s) => s.value)))],
-    legalIdOnSite: input.pages.map((p) => extractLegalId(p.text)).find(Boolean)
+    legalIdOnSite: input.pages.map((p) => extractLegalId(p.text, input.countryCode)).find(Boolean)
   };
 }
 function sameOriginLinks(html, base) {
@@ -5375,7 +5977,24 @@ function sameOriginLinks(html, base) {
 // src/enrich.ts
 var TIER1_ROLES = ["home", "legal"];
 var TIER2_ROLES = ["about", "services", "products", "pricing", "careers", "team", "contact", "cases", "news"];
-var LEGAL_GUESSES = ["/mentions-legales", "/mentions-legales/", "/legal", "/impressum", "/cgv", "/legal-notice"];
+var LEGAL_GUESSES = [
+  "/mentions-legales",
+  "/mentions-legales/",
+  "/legal",
+  "/legal-notice",
+  "/cgv",
+  // Germany — § 5 DDG makes this page mandatory and two clicks from anywhere.
+  "/impressum",
+  "/impressum/",
+  "/imprint",
+  // Spain — Ley 34/2002 art. 10.
+  "/aviso-legal",
+  "/aviso-legal/",
+  "/informacion-legal",
+  // Italy, and the English fallback a lot of European sites use.
+  "/note-legali",
+  "/legal-notices"
+];
 function enrichable(places) {
   return places.filter((p) => p.website?.confidence === "corroborated");
 }
@@ -5575,14 +6194,13 @@ function scoreOf(place, weights = DEFAULT_WEIGHTS) {
     parts.hiring = weights.hiring;
     parts.openRoles = Math.min(weights.perRole * 5, weights.perRole * (s.openRoles ?? 0));
   }
-  const band = place.sirene?.company?.effectifTranche ?? place.sirene?.effectifTranche;
-  const floor = band ? EFFECTIF_FLOOR[band] : void 0;
+  const floor = place.registry ? employeeFloor(place.registry) : void 0;
   if (floor !== void 0 && floor >= 0) {
     parts.size = Math.round(weights.size * Math.min(1, Math.log10(Math.max(1, floor) + 1) / 3));
   }
-  const ca = place.sirene?.finances?.ca;
+  const ca = place.registry?.finances?.revenue;
   if (typeof ca === "number" && ca > 0) parts.revenue = Math.round(weights.revenue * Math.min(1, Math.log10(ca) / 8));
-  if (place.sirene?.siren) parts.registered = weights.registered;
+  if (place.registry?.id) parts.registered = weights.registered;
   const contactable = place.contacts.emails.length > 0 || place.contacts.phones.length > 0;
   if (contactable) parts.contactable = weights.contactable;
   if (s?.hasEcommerce) parts.ecommerce = weights.ecommerce;
@@ -5622,6 +6240,73 @@ function ranked(places) {
 // src/dossier.ts
 import { existsSync as existsSync7, readFileSync as readFileSync6 } from "fs";
 import { join as join10 } from "path";
+
+// src/classification/us-sic.ts
+var US_SIC_DIVISIONS = [
+  ["A", 1, 9],
+  ["B", 10, 14],
+  ["C", 15, 17],
+  ["D", 20, 39],
+  ["E", 40, 49],
+  ["F", 50, 51],
+  ["G", 52, 59],
+  ["H", 60, 67],
+  ["I", 70, 89],
+  ["J", 91, 97],
+  ["K", 99, 99]
+];
+var US_SIC_SECTIONS = US_SIC_DIVISIONS.map(([s]) => s);
+var US_SIC_LABELS = {
+  A: "Agriculture, forestry, fishing (US SIC)",
+  B: "Mining (US SIC)",
+  C: "Construction (US SIC)",
+  D: "Manufacturing (US SIC)",
+  E: "Transport, utilities, communications (US SIC)",
+  F: "Wholesale trade (US SIC)",
+  G: "Retail trade (US SIC)",
+  H: "Finance, insurance, real estate (US SIC)",
+  I: "Services (US SIC)",
+  J: "Public administration (US SIC)",
+  K: "Nonclassifiable (US SIC)"
+};
+function usSicDivision(code) {
+  const group = Number.parseInt(code.padStart(4, "0").slice(0, 2), 10);
+  if (!Number.isFinite(group)) return void 0;
+  return US_SIC_DIVISIONS.find(([, lo, hi]) => group >= lo && group <= hi)?.[0];
+}
+
+// src/classification/index.ts
+var NACE_VOCABULARY = {
+  scheme: "nace",
+  sectionTerm: "NACE section letter",
+  sections: NACE_SECTIONS,
+  sectionOf: naceSection,
+  label: (s) => NACE_SECTION_LABELS[s] ?? s
+};
+var US_SIC_VOCABULARY = {
+  scheme: "us-sic",
+  sectionTerm: "US SIC division letter",
+  sections: US_SIC_SECTIONS,
+  sectionOf: usSicDivision,
+  label: (s) => US_SIC_LABELS[s] ?? s
+};
+var NO_VOCABULARY = {
+  scheme: "none",
+  sectionTerm: "activity section",
+  sections: [],
+  sectionOf: () => void 0,
+  label: (s) => s
+};
+var VOCABULARIES = {
+  nace: NACE_VOCABULARY,
+  "us-sic": US_SIC_VOCABULARY,
+  none: NO_VOCABULARY
+};
+function vocabularyOf(scheme) {
+  return VOCABULARIES[scheme ?? "none"] ?? NO_VOCABULARY;
+}
+
+// src/dossier.ts
 function dossierPathFor(place) {
   return join10("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
 }
@@ -5632,9 +6317,10 @@ function streetLine(a) {
   const alreadyPrefixed = type ? new RegExp(`^${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name) : false;
   return [a.numero, alreadyPrefixed ? void 0 : type, name].filter(Boolean).join(" ");
 }
-function fmtMoney(n) {
+function fmtMoney(n, currency) {
   if (typeof n !== "number") return void 0;
-  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
+  if (!currency) return new Intl.NumberFormat("en", { maximumFractionDigits: 0 }).format(n);
+  return new Intl.NumberFormat("en", { style: "currency", currency, maximumFractionDigits: 0 }).format(n);
 }
 function factSheet(place) {
   const l = [];
@@ -5646,33 +6332,42 @@ function factSheet(place) {
   const addr = streetLine(a);
   if (addr || a.commune) l.push(`- address: ${[addr, a.codePostal, a.commune].filter(Boolean).join(", ")}`);
   if (place.category) l.push(`- category: ${place.category}`);
-  if (place.sirene) {
-    const s = place.sirene;
-    l.push(`- SIREN: ${s.siren}${s.siret ? ` \xB7 SIRET ${s.siret}` : ""}${s.estSiege ? " (head office)" : ""}`);
-    if (s.nafCode) l.push(`- NAF, this establishment: ${s.nafCode}${s.section ? ` (section ${s.section})` : ""}`);
-    if (s.company?.nafCode && s.company.nafCode !== s.nafCode) {
+  if (place.registry) {
+    const s = place.registry;
+    const scheme = vocabularyOf(s.activityScheme);
+    const schemeName = scheme.scheme === "none" ? s.connectorId : scheme.scheme.toUpperCase();
+    l.push(`- register: ${s.connectorId}${s.sourceUrl ? ` \xB7 ${s.sourceUrl}` : ""}`);
+    l.push(
+      `- identifier: ${s.id}${s.establishmentId && s.establishmentId !== s.id ? ` \xB7 establishment ${s.establishmentId}` : ""}${s.isHeadOffice ? " (head office)" : ""}`
+    );
+    if (s.legalName && s.legalName !== place.name) l.push(`- legal name: ${s.legalName}`);
+    if (s.legalForm) l.push(`- legal form: ${s.legalForm}`);
+    if (place.registryEvidence) {
+      const ev = place.registryEvidence;
+      l.push(`- how the register was matched: ${ev.mode} / ${ev.how}${ev.legalId ? ` (${ev.legalId}${ev.from ? ` read from [${ev.from}]` : ""})` : ""}`);
+    }
+    if (s.activityCode) l.push(`- activity, this establishment: ${s.activityCode}${s.section ? ` (${schemeName} section ${s.section})` : ""}`);
+    if (s.parent?.activityCode && s.parent.activityCode !== s.activityCode) {
       l.push(
-        `- NAF, the company as a whole: ${s.company.nafCode}${s.company.section ? ` (section ${s.company.section})` : ""} \u2014 the register filters matched on this`
+        `- activity, the company as a whole: ${s.parent.activityCode}${s.parent.section ? ` (${schemeName} section ${s.parent.section})` : ""} \u2014 the register filters matched on this`
       );
     }
-    if (s.effectifTranche) {
-      l.push(`- headcount, this establishment: ${EFFECTIF_LABELS[s.effectifTranche] ?? s.effectifTranche}${s.effectifAnnee ? ` (${s.effectifAnnee})` : ""}`);
+    const here = sizeBandLabel(s, s.sizeBand) ?? (s.employees != null ? `${s.employees} employees` : void 0);
+    if (here) l.push(`- headcount, this establishment: ${here}${s.sizeBandYear ? ` (${s.sizeBandYear})` : ""}`);
+    const whole = sizeBandLabel(s, s.parent?.sizeBand) ?? (s.parent?.employees != null ? `${s.parent.employees} employees` : void 0);
+    if (whole && whole !== here) {
+      l.push(`- headcount, the company as a whole: ${whole} \u2014 the filters matched on this, and it is what the score uses`);
     }
-    if (s.company?.effectifTranche && s.company.effectifTranche !== s.effectifTranche) {
+    if (s.dateCreated) l.push(`- registered since: ${s.dateCreated}`);
+    if (s.status && s.status !== "unknown") l.push(`- administrative state: ${s.status}`);
+    if (s.establishmentCount) l.push(`- establishments: ${s.establishmentCount}`);
+    if (s.finances?.revenue)
       l.push(
-        `- headcount, the company as a whole: ${EFFECTIF_LABELS[s.company.effectifTranche] ?? s.company.effectifTranche} \u2014 the filters matched on this, and it is what the score uses`
+        `- revenue (${s.finances.year}): ${fmtMoney(s.finances.revenue, s.finances.currency)}${s.finances.netIncome !== void 0 ? ` \xB7 net ${fmtMoney(s.finances.netIncome, s.finances.currency)}` : ""}`
       );
-    }
-    if (s.dateCreation) l.push(`- registered since: ${s.dateCreation}`);
-    if (s.etatAdministratif) l.push(`- administrative state: ${s.etatAdministratif === "A" ? "active" : "ceased"}`);
-    if (s.nombreEtablissements) l.push(`- establishments: ${s.nombreEtablissements}`);
-    if (s.finances?.ca)
+    if (s.officers.length) {
       l.push(
-        `- revenue (${s.finances.annee}): ${fmtMoney(s.finances.ca)}${s.finances.resultatNet !== void 0 ? ` \xB7 net ${fmtMoney(s.finances.resultatNet)}` : ""}`
-      );
-    if (s.dirigeants.length) {
-      l.push(
-        `- officers (open data, register): ${s.dirigeants.map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" \u2014 ")).join("; ")}`
+        `- officers (open data, register): ${s.officers.map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" \u2014 ")).join("; ")}`
       );
     }
   }
@@ -5849,7 +6544,7 @@ function runCheck(input) {
     ];
     for (const item of items) {
       contacts++;
-      if (item.lane === "sirene" || item.lane === "osm" || item.from === "osm" || item.from === "sirene") continue;
+      if (item.lane === "registry" || item.lane === "osm" || item.from === "osm" || item.from === "registry") continue;
       const text2 = pageText.get(item.from);
       if (!text2) {
         err(
@@ -5968,31 +6663,6 @@ function formatReport(report) {
   return lines.join("\n");
 }
 
-// src/naf-labels.ts
-var NAF_SECTION_LABELS = {
-  A: "Agriculture, forestry, fishing",
-  B: "Mining and quarrying",
-  C: "Manufacturing",
-  D: "Electricity and gas",
-  E: "Water, waste, remediation",
-  F: "Construction",
-  G: "Trade and vehicle repair",
-  H: "Transport and storage",
-  I: "Hospitality and food service",
-  J: "Information and communication",
-  K: "Finance and insurance",
-  L: "Real estate",
-  M: "Professional, scientific, technical",
-  N: "Administrative and support services",
-  O: "Public administration",
-  P: "Education",
-  Q: "Health and social work",
-  R: "Arts, entertainment, recreation",
-  S: "Other services",
-  T: "Household employers",
-  U: "Extraterritorial bodies"
-};
-
 // src/csv.ts
 var HEADER = [
   "id",
@@ -6002,16 +6672,21 @@ var HEADER = [
   "fit_why",
   "angle",
   "category",
-  "naf",
+  "registry",
+  "activity_code",
+  "activity_scheme",
   "section",
-  "company_naf",
+  "company_activity_code",
   "company_section",
   "headcount_band",
   "company_headcount_band",
-  "revenue_eur",
+  "revenue",
+  "revenue_currency",
   "revenue_year",
-  "siren",
-  "siret",
+  "registry_id",
+  "establishment_id",
+  "registry_url",
+  "registry_evidence",
   "is_head_office",
   "registered_since",
   "street",
@@ -6057,9 +6732,9 @@ function streetOf(place) {
 function toCsv(places, opts = {}) {
   const rows = [csvRow(HEADER)];
   for (const place of ranked(places).filter((p) => keep(p, opts))) {
-    const s = place.sirene;
+    const s = place.registry;
     const sg = place.signals;
-    const people = opts.noPeople ? "" : (s?.dirigeants ?? []).map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" \u2014 ")).join(" | ");
+    const people = opts.noPeople ? "" : (s?.officers ?? []).map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" \u2014 ")).join(" | ");
     rows.push(
       csvRow([
         place.id,
@@ -6069,21 +6744,32 @@ function toCsv(places, opts = {}) {
         place.score?.why ?? "",
         place.score?.angle ?? "",
         place.category ?? "",
-        s?.nafCode ?? "",
+        s?.connectorId ?? "",
+        s?.activityCode ?? "",
+        // The scheme travels with the code, always. NACE "D" and US SIC "D" are
+        // different economies, and a spreadsheet that lost the scheme would
+        // merge them without anyone noticing.
+        s?.activityScheme ?? "",
         s?.section ?? "",
         // The legal unit's, in its own columns: every register filter matched
         // on these, so a row that looks off-target can be explained instead of
         // looking like a bug.
-        s?.company?.nafCode ?? "",
-        s?.company?.section ?? "",
-        s?.effectifTranche ? EFFECTIF_LABELS[s.effectifTranche] ?? s.effectifTranche : "",
-        s?.company?.effectifTranche ? EFFECTIF_LABELS[s.company.effectifTranche] ?? s.company.effectifTranche : "",
-        s?.finances?.ca ?? "",
-        s?.finances?.annee ?? "",
-        s?.siren ?? "",
-        s?.siret ?? "",
-        s?.estSiege ? "yes" : s ? "no" : "",
-        s?.dateCreation ?? "",
+        s?.parent?.activityCode ?? "",
+        s?.parent?.section ?? "",
+        s ? sizeBandLabel(s, s.sizeBand) ?? (s.employees != null ? String(s.employees) : "") : "",
+        s ? sizeBandLabel(s, s.parent?.sizeBand) ?? (s.parent?.employees != null ? String(s.parent.employees) : "") : "",
+        s?.finances?.revenue ?? "",
+        s?.finances?.currency ?? "",
+        s?.finances?.year ?? "",
+        s?.id ?? "",
+        s?.establishmentId ?? "",
+        s?.sourceUrl ?? "",
+        // How the register record got attached: swept with the territory, or
+        // confirmed against an identifier read off the company's own site. Not
+        // equally strong, so the CSV says which.
+        place.registryEvidence ? `${place.registryEvidence.mode}:${place.registryEvidence.how}` : "",
+        s?.isHeadOffice ? "yes" : s ? "no" : "",
+        s?.dateCreated ?? "",
         streetOf(place),
         place.address.codePostal ?? "",
         place.address.commune ?? "",
@@ -6130,8 +6816,13 @@ function truncationBanner(manifest) {
   ];
 }
 function activityLabel(place) {
-  const section2 = place.sirene?.section;
-  if (section2) return `${NAF_SECTION_LABELS[section2] ?? section2} (NAF ${section2})`;
+  const rec = place.registry;
+  const section2 = rec?.section;
+  if (section2 && rec) {
+    const vocabulary = vocabularyOf(rec.activityScheme);
+    const scheme = vocabulary.scheme === "none" ? rec.connectorId : vocabulary.scheme.toUpperCase();
+    return `${vocabulary.label(section2)} (${scheme} ${section2})`;
+  }
   const key = place.category?.split("=")[0];
   return key ? `${key} (OSM tag)` : "unclassified";
 }
@@ -6142,9 +6833,15 @@ function distribution(places) {
     bySection.set(key, (bySection.get(key) ?? 0) + 1);
   }
   const byBand = [];
-  for (const band of EFFECTIF_BANDS) {
-    const n = places.filter((p) => p.sirene?.effectifTranche === band.code).length;
-    if (n > 0) byBand.push([band.label, n]);
+  const connectorIds = [...new Set(places.map((p) => p.registry?.connectorId).filter((id) => Boolean(id)))];
+  for (const id of connectorIds) {
+    const bands = connectorById(id)?.sizeBands;
+    if (!bands) continue;
+    const scoped = places.filter((p) => p.registry?.connectorId === id);
+    for (const band of bands) {
+      const n = scoped.filter((p) => p.registry?.sizeBand === band.code).length;
+      if (n > 0) byBand.push([connectorIds.length > 1 ? `${band.label} (${id})` : band.label, n]);
+    }
   }
   return { bySection: [...bySection.entries()].sort((a, b) => b[1] - a[1]), byBand };
 }
@@ -6251,7 +6948,7 @@ function buildHtml(places, manifest) {
   const rows = order.slice(0, 500).map((p) => {
     const h = p.signals?.isHiring === true ? `${p.signals.openRoles}` : p.signals?.isHiring === false ? "\u2014" : "?";
     const site = p.website?.url ? `<a href="${esc(p.website.url)}" rel="noreferrer nofollow">${esc(new URL(p.website.url).hostname)}</a>` : "";
-    return `<tr><td>${esc(p.name)}</td><td class="n">${p.score?.total ?? 0}</td><td>${esc(p.score?.fit ?? "")}</td><td class="n">${h}</td><td>${esc(p.sirene?.nafCode ?? p.category ?? "")}</td><td>${esc(p.address.commune ?? "")}</td><td>${site}</td></tr>`;
+    return `<tr><td>${esc(p.name)}</td><td class="n">${p.score?.total ?? 0}</td><td>${esc(p.score?.fit ?? "")}</td><td class="n">${h}</td><td>${esc(p.registry?.activityCode ?? p.category ?? "")}</td><td>${esc(p.address.commune ?? "")}</td><td>${site}</td></tr>`;
   }).join("\n");
   const banner = manifest.truncated ? `<div class="warn"><strong>This run does not cover the whole territory.</strong> ${manifest.lanes.filter((l) => l.truncated).map((l) => `${esc(l.lane)}: ${esc(l.reason ?? "capped")}`).join(" \xB7 ")} Every count below is a floor.</div>` : "";
   return `<!doctype html>
@@ -6321,7 +7018,7 @@ ${manifest.licences.map((x) => `<p>${esc(x)}</p>`).join("\n")}
 `;
 }
 function buildPrivacyNote(places, manifest) {
-  const withOfficers = places.filter((p) => (p.sirene?.dirigeants.length ?? 0) > 0);
+  const withOfficers = places.filter((p) => (p.registry?.officers.length ?? 0) > 0);
   const withPeople = places.filter((p) => p.contacts.people.length > 0);
   const namedEmails = places.flatMap((p) => p.contacts.emails.filter((e) => /^[a-z]+[._-][a-z]+@/i.test(e.value)));
   if (withOfficers.length === 0 && withPeople.length === 0 && namedEmails.length === 0) return void 0;
@@ -6336,7 +7033,7 @@ controller under the GDPR, and that is a role rather than a formality.
 
 | Category | Records | Source |
 |---|---:|---|
-| Company officers (name, role, sometimes year of birth) | ${withOfficers.reduce((n, p) => n + p.sirene.dirigeants.length, 0)} across ${withOfficers.length} companies | Registre national des entreprises, published open data |
+| Company officers (name, role, sometimes year of birth) | ${withOfficers.reduce((n, p) => n + p.registry.officers.length, 0)} across ${withOfficers.length} companies | the company registers listed in the manifest, published open data |
 | People named on a company's own website | ${withPeople.reduce((n, p) => n + p.contacts.people.length, 0)} across ${withPeople.length} companies | Fetched web pages, each recorded with its page id |
 | Personal-looking email addresses | ${namedEmails.length} | Published verbatim on a fetched page \u2014 never constructed |
 
@@ -6374,7 +7071,7 @@ function buildAll(places, manifest, opts = {}) {
 
 // src/watch.ts
 function identityOf(place) {
-  if (place.sirene?.siret) return `siret:${place.sirene.siret}`;
+  if (place.registry) return `${place.registry.connectorId}:${place.registry.establishmentId ?? place.registry.id}`;
   if (place.osm) return `osm:${place.osm.id}`;
   return place.id;
 }
@@ -6398,7 +7095,7 @@ function diffRuns(before, after) {
       delta.appeared.push(place);
       continue;
     }
-    if (old.sirene?.etatAdministratif === "A" && place.sirene?.etatAdministratif === "C") delta.closed.push(place);
+    if (old.registry?.status === "active" && place.registry?.status === "ceased") delta.closed.push(place);
     const wasHiring = old.signals?.isHiring === true;
     const isHiring = place.signals?.isHiring === true;
     if (!wasHiring && isHiring) delta.startedHiring.push({ place, roles: place.signals?.openRoles ?? 0 });
@@ -6458,7 +7155,7 @@ function buildDelta(delta, before, after) {
   l.push(
     ...section(
       "Now marked ceased by the register",
-      delta.closed.map((p) => `- **${p.name}** \u2014 SIRET ${p.sirene?.siret ?? "?"}`)
+      delta.closed.map((p) => `- **${p.name}** \u2014 ${p.registry?.connectorId ?? "register"} ${p.registry?.establishmentId ?? p.registry?.id ?? "?"}`)
     )
   );
   l.push(
@@ -6529,8 +7226,8 @@ var TOOLS = [
         query: { type: "string", description: "A town, a street, an address." },
         country: { type: "string" },
         radius: { type: "string", description: "For a point search: 800, 800m, 2km." },
-        section: { type: "string", description: "NAF section letters, comma-separated, e.g. J,M." },
-        minEffectif: { type: "number", description: "Keep companies with at least this many employees." },
+        section: { type: "string", description: "Activity section letters in the country's own scheme, comma-separated. NACE A-U across Europe, e.g. J,M." },
+        minEmployees: { type: "number", description: "Keep companies with at least this many employees, where the register publishes size." },
         maxResults: { type: "number", description: "Register rows before the lane declares itself partial." },
         out: { type: "string", description: "Run root. Defaults to ./.ultraprospect" }
       },
@@ -6582,7 +7279,7 @@ function createAdapter() {
     capAdvice: {
       ultraprospect_places: "pass a smaller `limit`, or `withWebsiteOnly: true`.",
       ultraprospect_dossier: "pass `factSheetOnly: true` to skip the page texts.",
-      ultraprospect_scan: "narrow with `section` or `minEffectif`, or lower `maxResults`."
+      ultraprospect_scan: "narrow with `section` or `minEmployees`, or lower `maxResults`."
     },
     async callTool(name, args) {
       switch (name) {
@@ -6605,7 +7302,7 @@ function createAdapter() {
           if (!resolved.ok) throw new ToolError(`${resolved.reason}. Call ultraprospect_where first, then pass its pick.`);
           const outcome = await runScan(resolved.target, {
             sections: typeof args.section === "string" ? args.section.split(",").map((s) => s.trim()) : void 0,
-            minEffectif: typeof args.minEffectif === "number" ? args.minEffectif : void 0,
+            minEmployees: typeof args.minEmployees === "number" ? args.minEmployees : void 0,
             maxResults: typeof args.maxResults === "number" ? clampInt(args.maxResults, 1, 1e4, 3e3) : void 0
           });
           const run = newRun(typeof args.out === "string" ? args.out : DEFAULT_OUT, resolved.target.label);
@@ -6636,8 +7333,10 @@ function createAdapter() {
                   name: p.name,
                   score: p.score?.total ?? 0,
                   fit: p.score?.fit,
-                  naf: p.sirene?.nafCode,
-                  headcount: p.sirene?.effectifTranche,
+                  registry: p.registry?.connectorId,
+                  activityCode: p.registry?.activityCode,
+                  activityScheme: p.registry?.activityScheme,
+                  headcount: p.registry?.sizeBand ?? p.registry?.employees,
                   website: p.website?.url,
                   websiteConfidence: p.website?.confidence,
                   openRoles: p.signals?.openRoles,
@@ -6700,10 +7399,11 @@ var MATCH_SCHEMA = {
       type: "array",
       items: {
         type: "object",
-        required: ["osmId", "merge", "why"],
+        required: ["osmId", "registryId", "merge", "why"],
         properties: {
           osmId: { type: "string" },
-          siret: { type: "string" },
+          registryId: { type: "string", description: "Copy `registryId` from the pair verbatim." },
+          connectorId: { type: "string", description: "Copy `connectorId` from the pair. Required when two registers cover the country." },
           merge: { type: "boolean", description: "true only when the evidence shows one business. When unsure, false." },
           why: { type: "string", description: "The evidence you decided on, in one sentence." }
         }
@@ -6748,7 +7448,7 @@ var PHASES = [
     // Twenty pairs is about a page of evidence: enough to be worth a subagent,
     // small enough that one bad batch is cheap to redo.
     batchSize: 20,
-    ids: (parsed) => Array.isArray(parsed?.pairs) ? parsed.pairs.map((p) => `${p.osmId}|${p.siret ?? p.siren ?? "?"}`) : void 0,
+    ids: (parsed) => Array.isArray(parsed?.pairs) ? parsed.pairs.map((p) => `${p.osmId}|${p.connectorId}:${p.registryId}`) : void 0,
     prerequisite: (run, engineAbs) => `node ${engineAbs} scan --where "<place>" --out ${run}`,
     description: (n) => `Decide ${n} OSM-to-register pairs the matcher would not merge on its own`,
     applyHint: (run, engineAbs) => [
@@ -6876,7 +7576,7 @@ pairs it refused to decide, and refusing was the right call.
   is usually NOT the legal name. Judge on this one: "Cr\xE8che Jean Burgeat" against
   the legal name "COMMUNE DE VINCENNES" reads as an obvious no, and against the
   enseigne "CRECHE BURGEAT" as an obvious yes. Same pair.
-- \`sireneName\` \u2014 the legal name, for context.
+- \`registryName\` \u2014 the legal name, for context.
 - \`distanceM\` and \`parts\` \u2014 how far apart, and which signal carried the score.
 
 ## Decide
@@ -6888,11 +7588,11 @@ inside twenty metres.
 
 **When you cannot tell, answer \`false\`.** Two rows are recoverable by anyone
 looking at the list. One wrong merge produces a single plausible company holding
-somebody else's SIREN, and nothing downstream will ever flag it.
+somebody else's registration number, and nothing downstream will ever flag it.
 
 ## Return
 
-\`{"verdicts": [{"osmId": "...", "siret": "...", "merge": true, "why": "..."}]}\`
+\`{"verdicts": [{"osmId": "...", "registryId": "...", "connectorId": "...", "merge": true, "why": "..."}]}\`
 
 One \`why\` sentence per pair, naming the evidence. Do not write to the run \u2014
 the orchestrator folds your verdicts with \`node ${engineAbs} match --run ${run} --apply\`.
@@ -6942,6 +7642,7 @@ var COMMANDS = [
   "where",
   "scan",
   "match",
+  "confirm",
   "resolve",
   "enrich",
   "score",
@@ -6966,10 +7667,12 @@ var VALUE_FLAGS = [
   "out",
   "run",
   "osm-groups",
-  "naf",
+  "activity",
   "section",
-  "effectif",
-  "min-effectif",
+  "size-band",
+  "min-employees",
+  "registry",
+  "companies-house-key",
   "max-results",
   "overpass",
   "apply",
@@ -6994,7 +7697,7 @@ var VALUE_FLAGS = [
 var BOOL_FLAGS = [
   "json",
   "no-osm",
-  "no-sirene",
+  "no-registry",
   "include-ceased",
   "no-people",
   "queries",
@@ -7012,8 +7715,9 @@ USAGE
 
 COMMANDS
   where <query>          Resolve a place name to a search area. Refuses to guess when ambiguous.
-  scan                   Discover every company in the area, from OSM and the French register.
+  scan                   Discover every company in the area, from OSM and the country's register.
   match --apply <file>   Fold the agent's adjudication of MATCH.todo.json back into places.json.
+  confirm                Check each company against its country's register, outside France's sweep.
   resolve                Find each company's own website and prove it is theirs.
   enrich --tier 1|2      Read those websites: tier 1 on all of them, tier 2 on the ones you pick.
   score                  Rank by measured signals; fold your ICP verdicts in with --apply.
@@ -7021,9 +7725,9 @@ COMMANDS
   check                  The gate: citations resolve, claims are cited, contacts were observed.
   render                 CSV, JSON, report and a self-contained HTML page.
   watch --since <run>    Diff this run against an earlier one: who opened, closed, started hiring.
-  orchestrate            Emit the fan-out for the two judgement phases: match and dossier.
+  orchestrate            Emit the fan-out: one search phase and two judgement phases.
   mcp                    Serve the run over MCP: where, scan, places, dossier, check.
-  doctor                 Check node, network and the health of every upstream.
+  doctor                 Check node, network and the health of every upstream this run needs.
   version                Print the version.
 
 TARGETING (scan, where)
@@ -7037,14 +7741,15 @@ TARGETING (scan, where)
 
 FILTERS (scan)
   --osm-groups <list>    OSM catalogue groups: shop,office,craft,healthcare,amenity,tourism,leisure,club.
-  --naf <list>           Full NAF codes, e.g. 62.01Z,70.22Z. Prefixes are rejected by the register.
-  --section <list>       NAF section letters, e.g. J,M.
-  --effectif <list>      INSEE employee-band codes, e.g. 11,12,21.
-  --min-effectif <n>     Keep companies with at least n employees.
+  --activity <list>      Activity codes in the register's own scheme, e.g. 62.01Z,70.22Z (NAF, France).
+  --section <list>       Section letters in the country's own scheme, e.g. J,M (NACE across Europe).
+  --size-band <list>     The register's own headcount band codes, e.g. 11,12,21 (INSEE, France).
+  --min-employees <n>    Keep companies with at least n employees, where the register publishes size.
   --include-ceased       Include companies the register marks as ceased. Off by default.
   --max-results <n>      Cap on register rows before the lane declares itself partial (default 3000).
   --no-osm               Skip the OpenStreetMap lane.
-  --no-sirene            Skip the French register lane.
+  --no-registry          Skip the register lane entirely.
+  --registry <ids>       Only these register connectors, e.g. fr-sirene. doctor lists them.
   --overpass <url>       Override the Overpass endpoint instead of rotating mirrors.
   --fixture <dir>        Replay a recorded sweep instead of calling the live lanes. Offline.
   --record <dir>         Write this run's raw lane output as a replayable fixture.
@@ -7069,7 +7774,11 @@ DOSSIER
   --id <place id>        Which company's packet to print. Use --json for the list of ids.
 
 ADJUDICATION (match)
-  --apply <file>         A JSON array of {osmId, siret|siren, merge, why}. "-" reads stdin.
+  --apply <file>         A JSON array of {osmId, registryId, connectorId?, merge, why}. "-" reads stdin.
+
+REGISTER CONFIRMATION (confirm)
+  --limit <n>            Only confirm this many places.
+  --companies-house-key <key>   UK Companies House key. Free, email only. Or set the env var.
 
 DELIVERABLES (render)
   --min-score <n>        Only rows at or above this measured score.
@@ -7100,8 +7809,10 @@ ENVIRONMENT
   ULTRAPROSPECT_CACHE_DIR      Where fetched pages are cached. Default <tmpdir>/ultraprospect.
   ULTRAPROSPECT_NO_WRITE=1     Same as --stdout.
   ULTRAPROSPECT_POLITE_DELAY_MS  Per-host delay between requests. Default 400.
+  ULTRAPROSPECT_COMPANIES_HOUSE_KEY  UK register key. Free, email only. Same as --companies-house-key.
 
-Data: \xA9 OpenStreetMap contributors (ODbL); base Sirene / RNE via data.gouv.fr (Licence Ouverte 2.0).
+Data: \xA9 OpenStreetMap contributors (ODbL). Register attributions travel per run \u2014
+the manifest lists the ones this run actually owes.
 `;
 var SPEC = { commands: COMMANDS, valueFlags: VALUE_FLAGS, boolFlags: BOOL_FLAGS };
 function say(message) {
@@ -7116,6 +7827,81 @@ function list(raw) {
   if (!raw) return void 0;
   const items = raw.split(",").map((s) => s.trim()).filter(Boolean);
   return items.length ? items : void 0;
+}
+async function cmdConfirm(values, bools) {
+  if (!values.run) throw new UsageError("confirm needs --run <dir>");
+  const runDir = resolveRun(values.run);
+  const manifest = requireManifest(runDir);
+  const places = readPlaces(runDir);
+  const country = manifest.target.countryCode;
+  const targets = needsConfirming(places);
+  if (targets.length === 0) {
+    say("confirm: every place already carries a register record \u2014 nothing to do");
+    if (bools.has("json")) out(jsonLine({ run: runDir, verified: 0, matched: 0, undecided: 0, notFound: 0 }));
+    return EXIT_OK;
+  }
+  const withPages = targets.filter((p) => p.pages.length > 0).length;
+  if (withPages === 0) {
+    say(`confirm: none of the ${targets.length} place(s) has a fetched page, so no legal notice can be read.`);
+    say(`  run: ultraprospect resolve --run ${runDir} --web-results hits.json`);
+    say(`  then: ultraprospect enrich --run ${runDir} --tier 1`);
+    throw Object.assign(new Error("no pages to read a legal notice from"), { exitCode: EXIT_USAGE, handled: true });
+  }
+  say(`ultraprospect: confirming ${targets.length} place(s) against the register for ${country ?? "an unknown country"}`);
+  const outcome = await runConfirm(runDir, places, {
+    countryCode: country,
+    town: manifest.target.label,
+    limit: values.limit ? clampInt(values.limit, 1, 1e5, 200) : void 0,
+    registryIds: list(values.registry),
+    keys: connectorKeys(values),
+    onNote: (n) => say(`  ${n}`),
+    onProgress: (done, total, name) => {
+      if (done % 10 === 0 || done === total) say(`  confirm: ${done}/${total} \u2014 ${name}`);
+    }
+  });
+  writePlaces(runDir, places);
+  writeJson(runDir, "registry.json", mergeRegistryRecords(runDir, outcome.records));
+  if (outcome.undecided.length) {
+    const existing = readJsonSafe(join12(runDir, "MATCH.todo.json"))?.pairs ?? [];
+    writeJson(runDir, "MATCH.todo.json", buildMatchTodo([...existing, ...outcome.undecided]));
+  }
+  manifest.lanes = [...manifest.lanes.filter((l) => l.lane !== "registry" || l.mode === "sweep"), outcome.coverage];
+  manifest.counts.registry += outcome.records.length;
+  manifest.counts.confirmed = outcome.verified + outcome.matched;
+  manifest.counts.undecided += outcome.undecided.length;
+  for (const rec of outcome.records) manifest.counts.byConnector[rec.connectorId] = (manifest.counts.byConnector[rec.connectorId] ?? 0) + 1;
+  manifest.licences = licencesFor(manifest.lanes);
+  manifest.notes.push(...outcome.notes);
+  writeRunManifest(runDir, manifest);
+  if (bools.has("json")) {
+    out(jsonLine({ run: runDir, verified: outcome.verified, matched: outcome.matched, undecided: outcome.undecided.length, notFound: outcome.notFound }));
+  }
+  say("");
+  say(`  verified by a published number   ${outcome.verified}`);
+  say(`  matched by a name lookup         ${outcome.matched}`);
+  say(`  undecided (in MATCH.todo.json)   ${outcome.undecided.length}`);
+  say(`  no register record found         ${outcome.notFound}`);
+  say("");
+  say("  This is a per-company confirmation, not a territory sweep: a company");
+  say("  that is not in OpenStreetMap is not in this run at all.");
+  if (outcome.undecided.length) say(`next: ultraprospect orchestrate --run ${runDir} --phase match`);
+  else say(`next: ultraprospect score --run ${runDir}`);
+  return EXIT_OK;
+}
+function connectorKeys(values) {
+  const keys = {};
+  for (const connector of CONNECTORS) {
+    if (!connector.needsKey) continue;
+    const flag = connector.needsKey.flag.replace(/^--/, "");
+    keys[connector.id] = values[flag] ?? process.env[connector.needsKey.env];
+  }
+  return keys;
+}
+function mergeRegistryRecords(runDir, fresh) {
+  const existing = readJsonSafe(join12(runDir, "registry.json")) ?? [];
+  const byKey = /* @__PURE__ */ new Map();
+  for (const rec of [...existing, ...fresh]) byKey.set(`${rec.connectorId}:${rec.establishmentId ?? rec.id}`, rec);
+  return [...byKey.values()];
 }
 async function targetFrom(values, positional) {
   const radiusM = values.radius ? parseDistanceM(values.radius) : void 0;
@@ -7190,13 +7976,15 @@ async function cmdScan(values, bools, positional) {
   say(`ultraprospect: scanning ${target.label}`);
   const outcome = await runScan(target, {
     osmGroups: list(values["osm-groups"]),
-    naf: list(values.naf),
+    activityCodes: list(values.activity),
     sections: list(values.section),
-    effectif: list(values.effectif),
-    minEffectif: values["min-effectif"] ? clampInt(values["min-effectif"], 0, 1e5, 0) : void 0,
+    sizeBands: list(values["size-band"]),
+    minEmployees: values["min-employees"] ? clampInt(values["min-employees"], 0, 1e5, 0) : void 0,
     includeCeased: bools.has("include-ceased"),
     noOsm: bools.has("no-osm"),
-    noSirene: bools.has("no-sirene"),
+    noRegistry: bools.has("no-registry"),
+    registryIds: list(values.registry),
+    keys: connectorKeys(values),
     maxResults: values["max-results"] ? clampInt(values["max-results"], 1, 1e4, 3e3) : void 0,
     overpass: values.overpass,
     fixture: values.fixture,
@@ -7215,16 +8003,22 @@ async function cmdScan(values, bools, positional) {
   } else {
     out(run.dir);
   }
+  const registerLane = outcome.manifest.lanes.find((l) => l.lane === "registry");
   say("");
   say(`  OSM              ${c.osm}`);
-  say(`  register         ${c.sirene}`);
-  say(`  fused places     ${c.places}  (${c.merged} matched across both lanes)`);
+  if (registerLane?.mode === "sweep") {
+    say(`  register         ${c.registry}  (${registerLane.connectorId})`);
+    say(`  fused places     ${c.places}  (${c.merged} matched across both lanes)`);
+  } else {
+    say(`  register         not swept \u2014 ${registerLane?.reason ?? "no connector"}`);
+    say(`  places           ${c.places}  (OSM only, so far)`);
+  }
   say(`  with a website   ${c.withWebsite}`);
   if (outcome.manifest.truncated) {
     say("");
     say("  \u26A0 TRUNCATED \u2014 this run does NOT cover the whole territory:");
     for (const lane of outcome.manifest.lanes.filter((l) => l.truncated)) say(`      ${lane.lane}: ${lane.reason}`);
-    say("      narrow with --section / --naf / --min-effectif, or raise --max-results");
+    say("      narrow with --section / --activity / --min-employees, or raise --max-results");
   }
   say("");
   say(`next: ultraprospect resolve --run ${run.dir}`);
@@ -7232,7 +8026,7 @@ async function cmdScan(values, bools, positional) {
 }
 async function cmdMatch(values, bools) {
   if (!values.run) throw new UsageError("match needs --run <dir>");
-  if (!values.apply) throw new UsageError('match needs --apply <file> (a JSON array of {osmId, siret, merge}), or "-" for stdin');
+  if (!values.apply) throw new UsageError('match needs --apply <file> (a JSON array of {osmId, registryId, merge}), or "-" for stdin');
   const runDir = resolveRun(values.run);
   const raw = values.apply === "-" ? readFileSync8(0, "utf8") : readFileSync8(values.apply, "utf8");
   let verdicts;
@@ -7243,7 +8037,7 @@ async function cmdMatch(values, bools) {
     throw new UsageError(`--apply ${values.apply} is not valid JSON: ${e.message}`);
   }
   if (!Array.isArray(verdicts) || verdicts.length === 0) {
-    throw new UsageError("--apply contained no verdicts \u2014 expected [{osmId, siret, merge, why}, ...]");
+    throw new UsageError("--apply contained no verdicts \u2014 expected [{osmId, registryId, merge, why}, ...]");
   }
   const places = readPlaces(runDir);
   const before = places.length;
@@ -7424,7 +8218,7 @@ async function cmdDossier(values, bools) {
   const runDir = resolveRun(values.run);
   const places = readPlaces(runDir);
   if (!values.id) {
-    const order = ranked(places).filter((p) => p.pages.length > 0 || p.sirene);
+    const order = ranked(places).filter((p) => p.pages.length > 0 || p.registry);
     if (bools.has("json")) out(jsonLine(order.map((p) => ({ id: p.id, name: p.name, pages: p.pages.length, total: p.score?.total ?? 0 }))));
     else for (const p of order.slice(0, 40)) out(`${p.id}	${p.pages.length} page(s)	${p.name}`);
     say("");
@@ -7571,6 +8365,8 @@ async function main(argv) {
       return cmdScan(values, bools, text2);
     case "match":
       return cmdMatch(values, bools);
+    case "confirm":
+      return cmdConfirm(values, bools);
     case "resolve":
       return cmdResolve(values, bools);
     case "enrich":

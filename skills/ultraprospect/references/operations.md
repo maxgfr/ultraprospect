@@ -30,7 +30,7 @@ skill runs far from the user's project.
 <out>/runs/<slug>-<id>/
   manifest.json      target, filters, per-lane coverage, counts, notes, licences, timings
   osm.json           raw OSM lane output
-  sirene.json        raw register lane output
+  registry.json        raw register lane output
   places.json        the fused entities — the only input later stages read
   MATCH.todo.json    pairs the matcher would not decide
 ```
@@ -75,7 +75,7 @@ and the manifest keeps them apart; describe them differently.
 
 The register is paced at 5 req/s against an allowed 7. A whole French commune
 without filters is roughly 1 500 requests and several minutes, which is why
-`--max-results` defaults to 3 000 and why `--min-effectif` / `--section` are the
+`--max-results` defaults to 3 000 and why `--min-employees` / `--section` are the
 normal way to run it.
 
 Overpass is the slow half. A single town query is one request that can take two
@@ -102,7 +102,7 @@ live, which is what makes the pipeline testable without five live services.
 | `0/4 Overpass mirrors answering` | All instances busy. `doctor` again in a few minutes. |
 | An Overpass mirror reports "regional extract" | It serves a country subset, not the planet. It is excluded automatically. |
 | OSM lane `truncated` | A tile failed after the split budget. Re-run; a different mirror will usually answer. |
-| Register lane `truncated` at 10 000 | The territory exceeds the API's ceiling even split by NAF division. Add `--naf` or `--min-effectif`. |
+| Register lane `truncated` at 10 000 | The territory exceeds the API's ceiling even split by NAF division. Add `--activity` or `--min-employees`. |
 | Register lane returned far more than expected | Ceased companies are excluded by default; check whether `--include-ceased` was passed. |
 | A run wrote nothing | `--stdout` or `ULTRAPROSPECT_NO_WRITE=1` is set. |
 | `places.json is missing` | The `--run` path points at a directory that is not a run. |

@@ -7,36 +7,45 @@
 //     `manifest.truncated`. Every renderer leads with that flag. A prospect file
 //     that quietly covers 40% of a town is worse than no file, because nobody
 //     downstream can tell.
-//   * The register lane only runs where the register applies. Outside France it
-//     is not "unavailable", it is not applicable, and the manifest says which.
+//   * The register lane runs whatever register the country actually has. Exactly
+//     one of them — France's — can enumerate a territory without a key, so
+//     everywhere else this stage covers the ground with OSM alone and `confirm`
+//     does the register work per company afterwards. The manifest records WHICH
+//     of the two happened; a reader who cannot tell a swept territory from a
+//     confirmed one will read every number here as complete.
 //   * Fusion never invents. A pair the matcher is unsure about produces two
 //     entities plus a to-do, not one entity and a shrug.
 import { poiCategory, poiWebsite } from "./overpass.js";
 import { fetchOsmPois } from "./overpass.js";
 import { buildMatchTodo, matchLanes } from "./match.js";
-import { EFFECTIF_BANDS, fetchSirene } from "./sirene.js";
-import type { GeoTarget, LaneCoverage, MatchCandidate, OsmPoi, Place, RunManifest, SireneRecord } from "./types.js";
-import { emptyManifest, writeJson, writePlaces, writeRunManifest } from "./run.js";
+import { bandsAtLeast } from "./registry/fr-sirene.js";
+import { connectorById, connectorsFor, noSweepReason, unknownConnectorIds } from "./registry/index.js";
+import { recordKey } from "./registry/types.js";
+import type { ConnectorContext, RegistryRecord } from "./registry/types.js";
+import type { GeoTarget, LaneCoverage, MatchCandidate, OsmPoi, Place, RunManifest } from "./types.js";
+import { emptyManifest, licencesFor, writeJson, writePlaces, writeRunManifest } from "./run.js";
 import { loadFixture } from "./fixture.js";
 import { firstText } from "./util.js";
 
 export interface ScanFilters {
   /** OSM catalogue groups to keep. Empty means every group. */
   osmGroups?: string[];
-  /** Full NAF codes. */
-  naf?: string[];
-  /** NAF section letters. */
+  /** Activity codes in the register's own scheme: NAF in France, SIC in the UK. */
+  activityCodes?: string[];
+  /** Section letters, in the country's own vocabulary. NACE A-U in Europe. */
   sections?: string[];
-  /** INSEE employee-band codes to keep. */
-  effectif?: string[];
+  /** The register's own headcount band codes to keep. */
+  sizeBands?: string[];
   /** Minimum headcount; expanded into the band list that satisfies it. */
-  minEffectif?: number;
+  minEmployees?: number;
   /** Include companies the register marks as ceased. Off by default. */
   includeCeased?: boolean;
   /** Skip the OSM lane. */
   noOsm?: boolean;
-  /** Skip the register lane. */
-  noSirene?: boolean;
+  /** Skip the register lane entirely. */
+  noRegistry?: boolean;
+  /** Restrict the register lane to these connector ids. */
+  registryIds?: string[];
   /** Cap on register rows before the lane declares itself partial. */
   maxResults?: number;
   /** Pin the Overpass endpoint instead of rotating the built-in mirrors. */
@@ -45,6 +54,8 @@ export interface ScanFilters {
   fixture?: string;
   /** Keep no named individuals in the run at all. */
   noPeople?: boolean;
+  /** Credentials for the connectors that need one, by connector id. */
+  keys?: Record<string, string | undefined>;
 }
 
 export interface ScanOptions extends ScanFilters {
@@ -55,22 +66,10 @@ export interface ScanOutcome {
   places: Place[];
   manifest: RunManifest;
   osm: OsmPoi[];
-  sirene: SireneRecord[];
+  registry: RegistryRecord[];
   /** Pairs the matcher scored into the middle band and refused to decide. */
   undecided: MatchCandidate[];
   notes: string[];
-}
-
-/**
- * Expand `--min-effectif 10` into every INSEE band that satisfies it.
- *
- * "NN" (undetermined) is excluded: a company whose headcount the register does
- * not know is not evidence of a company with at least ten people. Including it
- * would silently reinstate most of the micro-entrepreneurs the filter exists to
- * remove.
- */
-export function bandsAtLeast(minHeadcount: number): string[] {
-  return EFFECTIF_BANDS.filter((b) => b.floor >= 0 && b.floor >= minHeadcount).map((b) => b.code);
 }
 
 function placeFromPoi(poi: OsmPoi): Place {
@@ -99,25 +98,41 @@ function placeFromPoi(poi: OsmPoi): Place {
   };
 }
 
-function placeFromRecord(rec: SireneRecord): Place {
+function placeFromRecord(rec: RegistryRecord): Place {
   return {
-    id: `sirene:${rec.siret ?? rec.siren}`,
-    name: firstText(rec.enseignes[0], rec.nomComplet, rec.nomRaisonSociale, rec.sigle) ?? rec.siren,
-    sources: ["sirene"],
-    sirene: rec,
+    id: recordKey(rec),
+    name: firstText(...rec.names) ?? rec.id,
+    sources: ["registry"],
+    registry: rec,
+    registryEvidence: { mode: "sweep", how: "sweep-match" },
     address: rec.address,
     lat: rec.lat,
     lon: rec.lon,
-    category: rec.nafCode ? `naf=${rec.nafCode}` : undefined,
+    // Namespaced by scheme, not by country: "naf=62.01Z" and "sic=62012" are
+    // both activity codes and neither is comparable with "shop=bakery".
+    category: rec.activityCode ? `${activityPrefix(rec)}=${rec.activityCode}` : undefined,
     contacts: { emails: [], phones: [], socials: [], people: [] },
     jobs: [],
     pages: [],
   };
 }
 
-function mergeInto(poiPlace: Place, rec: SireneRecord, confidence: number, by: string): void {
-  poiPlace.sirene = rec;
-  poiPlace.sources = [...new Set([...poiPlace.sources, "sirene" as const])];
+/**
+ * The namespace a record's activity code lives in: "naf=62.01Z", "sic=62012".
+ *
+ * Read off the connector, which declares it. Deriving it from the connector id
+ * was tried and produced `sirene=62.01Z` — a namespace named after a service
+ * rather than after a nomenclature, which is exactly the confusion the prefix
+ * exists to prevent.
+ */
+function activityPrefix(rec: RegistryRecord): string {
+  return connectorById(rec.connectorId)?.activityPrefix ?? "activity";
+}
+
+function mergeInto(poiPlace: Place, rec: RegistryRecord, confidence: number, by: string): void {
+  poiPlace.registry = rec;
+  poiPlace.registryEvidence = { mode: "sweep", how: "sweep-match" };
+  poiPlace.sources = [...new Set([...poiPlace.sources, "registry" as const])];
   poiPlace.matchConfidence = Number(confidence.toFixed(3));
   poiPlace.matchedBy = by;
   // OSM's address is what is written on the street; the register's is what was
@@ -139,7 +154,12 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
   const lanes: LaneCoverage[] = [];
   const timings: Record<string, number> = {};
 
-  const effectifBands = opts.effectif?.length ? opts.effectif : opts.minEffectif ? bandsAtLeast(opts.minEffectif) : undefined;
+  // `--min-employees` is expressed in people; a register that files bands needs
+  // it expressed in bands. Only the French connector publishes bands today, so
+  // only it needs the translation — a connector that files an exact headcount
+  // filters on the number directly.
+  const sizeBands = opts.sizeBands?.length ? opts.sizeBands : opts.minEmployees ? bandsAtLeast(opts.minEmployees) : undefined;
+  const ctx: ConnectorContext = { keys: opts.keys, onNote: note };
 
   // ---- Replay ---------------------------------------------------------------
   // A recorded sweep short-circuits both lanes. Everything after this point —
@@ -148,7 +168,16 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
   if (replay) {
     note(`fixture: replaying a recorded sweep from ${opts.fixture}`);
     lanes.push({ lane: "osm", requested: 0, returned: replay.osm.length, truncated: false, reason: "replayed from a fixture", partitions: 1 });
-    lanes.push({ lane: "sirene", requested: 0, returned: replay.sirene.length, truncated: false, reason: "replayed from a fixture", partitions: 1 });
+    lanes.push({
+      lane: "registry",
+      mode: "sweep",
+      connectorId: replay.connectorId,
+      requested: 0,
+      returned: replay.registry.length,
+      truncated: false,
+      reason: "replayed from a fixture",
+      partitions: 1,
+    });
   }
 
   // ---- OSM lane -----------------------------------------------------------
@@ -173,37 +202,57 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
   }
 
   // ---- Register lane ------------------------------------------------------
-  let records: SireneRecord[] = replay?.sirene ?? [];
-  const registerApplies = target.countryCode === "fr";
-  if (!replay && !opts.noSirene && registerApplies) {
+  //
+  // Only a connector that declares `sweep` can run here, and today exactly one
+  // does. Everywhere else this is not a failure and not an absence of data: it
+  // is a different shape of answer, delivered later by `confirm`. The coverage
+  // entry says so in words a report can print verbatim.
+  let records: RegistryRecord[] = replay?.registry ?? [];
+  let sweepConnectorId = replay?.connectorId;
+  const selection = connectorsFor(target.countryCode, { only: opts.registryIds, ctx });
+  const bogus = unknownConnectorIds(opts.registryIds);
+  if (bogus.length) note(`--registry: no connector is called ${bogus.join(", ")} — run \`doctor\` for the list`);
+  for (const { connector, availability } of selection.unavailable) {
+    if (availability.available) continue;
+    note(`registry: ${connector.id} covers this country but cannot run — ${availability.reason}${availability.how ? `. ${availability.how}` : ""}`);
+  }
+
+  if (!replay && !opts.noRegistry && selection.sweep?.sweep) {
+    const connector = selection.sweep;
     const t0 = Date.now();
-    const result = await fetchSirene(
+    const result = await connector.sweep!(
+      target,
       {
-        // A commune code searches the real boundary; a radius is the fallback
-        // when the geocoder gave us a point rather than an administrative area.
-        codeCommune: target.codeCommune && !target.radiusM ? [target.codeCommune] : undefined,
-        point: target.radiusM || !target.codeCommune ? { lat: target.lat, lon: target.lon, radiusKm: (target.radiusM ?? 1000) / 1000 } : undefined,
         sections: opts.sections,
-        activitePrincipale: opts.naf,
-        tranchesEffectif: effectifBands,
-        etatAdministratif: opts.includeCeased ? undefined : "A",
+        activityCodes: opts.activityCodes,
+        sizeBands,
+        includeCeased: opts.includeCeased,
+        maxResults: opts.maxResults,
       },
-      { maxResults: opts.maxResults, onNote: note },
+      ctx,
     );
-    timings.sirene = Date.now() - t0;
+    timings.registry = Date.now() - t0;
     records = result.records;
+    sweepConnectorId = connector.id;
     for (const n of result.notes) notes.push(n);
     lanes.push(result.coverage);
   } else if (!replay) {
     lanes.push({
-      lane: "sirene",
+      lane: "registry",
+      connectorId: selection.sweep?.id,
       requested: 0,
       returned: 0,
       truncated: false,
-      // Not applicable is not the same as failed, and the manifest must not blur
-      // them: one is a property of the territory, the other of the run.
-      reason: opts.noSirene ? "skipped (--no-sirene)" : `not applicable outside France (country=${target.countryCode ?? "unknown"})`,
+      // Skipped, not-sweepable and not-covered are three different facts and the
+      // manifest must not blur them: one is a property of the run, one of the
+      // world's open data, one of the territory.
+      reason: opts.noRegistry ? "skipped (--no-registry)" : noSweepReason(target.countryCode, selection),
     });
+    if (!opts.noRegistry && selection.confirm.length) {
+      note(
+        `registry: ${target.countryCode ?? "this country"} has no sweepable register — run \`confirm\` after \`enrich --tier 1\` to check each company against ${selection.confirm.map((c) => c.id).join(", ")}`,
+      );
+    }
   }
 
   // ---- Fusion -------------------------------------------------------------
@@ -220,7 +269,7 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
   }
   const claimed = new Set<string>();
   for (const rec of records) {
-    const key = rec.siret ?? `siren:${rec.siren}`;
+    const key = recordKey(rec);
     const decision = merged.get(key);
     const host = decision ? poiPlaces.get(decision.osmId) : undefined;
     if (host && decision) {
@@ -240,9 +289,9 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
   if (opts.noPeople) {
     let stripped = 0;
     for (const p of places) {
-      if (p.sirene?.dirigeants.length) {
-        stripped += p.sirene.dirigeants.length;
-        p.sirene = { ...p.sirene, dirigeants: [] };
+      if (p.registry?.officers.length) {
+        stripped += p.registry.officers.length;
+        p.registry = { ...p.registry, officers: [] };
       }
       p.contacts.people = [];
     }
@@ -253,33 +302,36 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
   manifest.target = target;
   manifest.filters = {
     osmGroups: opts.osmGroups ?? "all",
-    naf: opts.naf ?? null,
+    activityCodes: opts.activityCodes ?? null,
     sections: opts.sections ?? null,
-    effectif: effectifBands ?? null,
+    sizeBands: sizeBands ?? null,
     includeCeased: Boolean(opts.includeCeased),
     maxResults: opts.maxResults ?? null,
+    registryIds: opts.registryIds ?? null,
   };
   manifest.lanes = lanes;
   manifest.timings = timings;
   manifest.counts = {
     ...manifest.counts,
     osm: pois.length,
-    sirene: records.length,
+    registry: records.length,
+    byConnector: sweepConnectorId && records.length ? { [sweepConnectorId]: records.length } : {},
     places: places.length,
     merged: claimed.size,
     undecided: undecided.length,
     withWebsite: places.filter((p) => p.website?.url).length,
   };
+  manifest.licences = licencesFor(lanes);
   manifest.truncated = lanes.some((l) => l.truncated);
   manifest.notes = notes;
 
-  return { places, manifest, osm: pois, sirene: records, undecided, notes };
+  return { places, manifest, osm: pois, registry: records, undecided, notes };
 }
 
 /** Persist a scan outcome, raw lanes included. */
 export function writeScan(runDir: string, outcome: ScanOutcome): void {
   writeJson(runDir, "osm.json", outcome.osm);
-  writeJson(runDir, "sirene.json", outcome.sirene);
+  writeJson(runDir, "registry.json", outcome.registry);
   writePlaces(runDir, outcome.places);
   writeJson(runDir, "MATCH.todo.json", buildMatchTodo(outcome.undecided));
   writeRunManifest(runDir, outcome.manifest);

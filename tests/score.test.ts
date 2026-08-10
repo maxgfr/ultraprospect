@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyFit, ranked, scoreOf } from "../src/score.js";
 import { DOSSIER_TEMPLATE, dossierPathFor, factSheet } from "../src/dossier.js";
 import type { Place, Signals } from "../src/types.js";
+import { rec } from "./factories.js";
 
 function signals(over: Partial<Signals> = {}): Signals {
   return {
@@ -79,15 +80,15 @@ describe("scoreOf", () => {
   });
 
   it("treats an undetermined headcount as unknown, not as zero", () => {
-    const unknown = scoreOf(place({ sirene: { siren: "1", enseignes: [], dirigeants: [], address: {}, effectifTranche: "NN" } }));
-    const zero = scoreOf(place({ sirene: { siren: "1", enseignes: [], dirigeants: [], address: {}, effectifTranche: "00" } }));
+    const unknown = scoreOf(place({ registry: rec({ sizeBand: "NN" }) }));
+    const zero = scoreOf(place({ registry: rec({ sizeBand: "00" }) }));
     expect(unknown.parts.size).toBeUndefined();
     expect(zero.parts.size).toBeDefined();
   });
 
   it("grows with headcount but sub-linearly", () => {
-    const small = scoreOf(place({ sirene: { siren: "1", enseignes: [], dirigeants: [], address: {}, effectifTranche: "11" } })).parts.size ?? 0;
-    const large = scoreOf(place({ sirene: { siren: "1", enseignes: [], dirigeants: [], address: {}, effectifTranche: "42" } })).parts.size ?? 0;
+    const small = scoreOf(place({ registry: rec({ sizeBand: "11" }) })).parts.size ?? 0;
+    const large = scoreOf(place({ registry: rec({ sizeBand: "42" }) })).parts.size ?? 0;
     // 100x the headcount is worth ~3x the points, not 100x: the term saturates
     // at its weight so the ranking does not become a list of large employers.
     expect(large).toBeGreaterThan(small);

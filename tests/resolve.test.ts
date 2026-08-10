@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { classifyHost, corroborate, groupHits, needsResolving, queriesFor } from "../src/resolve.js";
 import type { Place } from "../src/types.js";
+import { rec } from "./factories.js";
 
 function place(over: Partial<Place> = {}): Place {
   return {
@@ -45,7 +46,7 @@ describe("classifyHost", () => {
 
 describe("corroborate", () => {
   it("accepts a page carrying the SIREN", () => {
-    const p = place({ sirene: { siren: "302474648", enseignes: [], dirigeants: [], address: {} } });
+    const p = place({ registry: rec({ id: "302474648" }) });
     const r = corroborate(p, "Mentions légales — SIREN 302 474 648 — tous droits réservés");
     expect(r.ok).toBe(true);
     expect(r.evidence[0]).toContain("302474648");
@@ -88,21 +89,21 @@ describe("corroborate", () => {
   });
 
   it("ignores accents and spacing in a SIREN", () => {
-    const p = place({ sirene: { siren: "794598813", enseignes: [], dirigeants: [], address: {} } });
+    const p = place({ registry: rec({ id: "794598813" }) });
     expect(corroborate(p, "RCS Paris 794.598.813").ok).toBe(true);
   });
 });
 
 describe("queriesFor", () => {
   it("pairs each known name with the town", () => {
-    const p = place({ sirene: { siren: "1", nomComplet: "AUX BARREZIENS", enseignes: ["L'AVENUE"], dirigeants: [], address: {} } });
+    const p = place({ registry: rec({ id: "1", legalName: "AUX BARREZIENS", tradingNames: ["L'AVENUE"] }) });
     const q = queriesFor(p);
     expect(q).toContain("Les Officiers VINCENNES");
     expect(q.some((x) => x.includes("AVENUE"))).toBe(true);
   });
 
   it("includes the SIREN as its own query — the highest-precision one there is", () => {
-    const p = place({ sirene: { siren: "302474648", enseignes: [], dirigeants: [], address: {} } });
+    const p = place({ registry: rec({ id: "302474648" }) });
     expect(queriesFor(p).some((q) => q.includes("302474648"))).toBe(true);
   });
 

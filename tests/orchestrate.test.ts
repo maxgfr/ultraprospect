@@ -31,7 +31,7 @@ function writeRun(pairs: number, placesWithPages: number, toResolve = 3): void {
     JSON.stringify({
       version: 1,
       generatedAt: "",
-      pairs: Array.from({ length: pairs }, (_, i) => ({ osmId: `n${i}`, siret: `S${i}`, score: 0.5, parts: {}, distanceM: 10 })),
+      pairs: Array.from({ length: pairs }, (_, i) => ({ osmId: `n${i}`, connectorId: "fr-sirene", registryId: `S${i}`, score: 0.5, parts: {}, distanceM: 10 })),
     }),
   );
   writeFileSync(

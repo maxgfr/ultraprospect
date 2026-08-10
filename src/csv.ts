@@ -10,7 +10,7 @@
 // the URL was proved or merely claimed; `contact_source` names the page each
 // email came from. A CRM row that has lost its provenance cannot be audited,
 // and this file exists precisely so that it can be.
-import { EFFECTIF_LABELS } from "./sirene.js";
+import { sizeBandLabel } from "./registry/index.js";
 import { ranked } from "./score.js";
 import type { Place } from "./types.js";
 import { csvRow } from "./util.js";
@@ -32,16 +32,21 @@ const HEADER = [
   "fit_why",
   "angle",
   "category",
-  "naf",
+  "registry",
+  "activity_code",
+  "activity_scheme",
   "section",
-  "company_naf",
+  "company_activity_code",
   "company_section",
   "headcount_band",
   "company_headcount_band",
-  "revenue_eur",
+  "revenue",
+  "revenue_currency",
   "revenue_year",
-  "siren",
-  "siret",
+  "registry_id",
+  "establishment_id",
+  "registry_url",
+  "registry_evidence",
   "is_head_office",
   "registered_since",
   "street",
@@ -94,11 +99,11 @@ export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
   const rows: string[] = [csvRow(HEADER)];
 
   for (const place of ranked(places).filter((p) => keep(p, opts))) {
-    const s = place.sirene;
+    const s = place.registry;
     const sg = place.signals;
     const people = opts.noPeople
       ? ""
-      : (s?.dirigeants ?? []).map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" — ")).join(" | ");
+      : (s?.officers ?? []).map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" — ")).join(" | ");
 
     rows.push(
       csvRow([
@@ -109,21 +114,32 @@ export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
         place.score?.why ?? "",
         place.score?.angle ?? "",
         place.category ?? "",
-        s?.nafCode ?? "",
+        s?.connectorId ?? "",
+        s?.activityCode ?? "",
+        // The scheme travels with the code, always. NACE "D" and US SIC "D" are
+        // different economies, and a spreadsheet that lost the scheme would
+        // merge them without anyone noticing.
+        s?.activityScheme ?? "",
         s?.section ?? "",
         // The legal unit's, in its own columns: every register filter matched
         // on these, so a row that looks off-target can be explained instead of
         // looking like a bug.
-        s?.company?.nafCode ?? "",
-        s?.company?.section ?? "",
-        s?.effectifTranche ? (EFFECTIF_LABELS[s.effectifTranche] ?? s.effectifTranche) : "",
-        s?.company?.effectifTranche ? (EFFECTIF_LABELS[s.company.effectifTranche] ?? s.company.effectifTranche) : "",
-        s?.finances?.ca ?? "",
-        s?.finances?.annee ?? "",
-        s?.siren ?? "",
-        s?.siret ?? "",
-        s?.estSiege ? "yes" : s ? "no" : "",
-        s?.dateCreation ?? "",
+        s?.parent?.activityCode ?? "",
+        s?.parent?.section ?? "",
+        s ? (sizeBandLabel(s, s.sizeBand) ?? (s.employees != null ? String(s.employees) : "")) : "",
+        s ? (sizeBandLabel(s, s.parent?.sizeBand) ?? (s.parent?.employees != null ? String(s.parent.employees) : "")) : "",
+        s?.finances?.revenue ?? "",
+        s?.finances?.currency ?? "",
+        s?.finances?.year ?? "",
+        s?.id ?? "",
+        s?.establishmentId ?? "",
+        s?.sourceUrl ?? "",
+        // How the register record got attached: swept with the territory, or
+        // confirmed against an identifier read off the company's own site. Not
+        // equally strong, so the CSV says which.
+        place.registryEvidence ? `${place.registryEvidence.mode}:${place.registryEvidence.how}` : "",
+        s?.isHeadOffice ? "yes" : s ? "no" : "",
+        s?.dateCreated ?? "",
         streetOf(place),
         place.address.codePostal ?? "",
         place.address.commune ?? "",

@@ -147,7 +147,7 @@ node scripts/ultraprospect.mjs --help
 
 ```bash
 ultraprospect where   "Vincennes" --country fr             # or refuse, and list the candidates
-RUN=$(ultraprospect scan --where "Vincennes" --country fr --min-effectif 20)
+RUN=$(ultraprospect scan --where "Vincennes" --country fr --min-employees 20)
 ultraprospect resolve --run "$RUN" --queries                # the queries for YOU to search
 ultraprospect resolve --run "$RUN" --web-results hits.json  # ingest, fetch, corroborate
 ultraprospect enrich  --run "$RUN" --tier 1
@@ -159,9 +159,9 @@ ultraprospect render  --run "$RUN"
 ```
 
 ```bash
-ultraprospect scan --where "Lyon" --section M --min-effectif 20
+ultraprospect scan --where "Lyon" --section M --min-employees 20
 ultraprospect scan --lat 48.8566 --long 2.3522 --radius 500m
-ultraprospect scan --where "Berlin" --no-sirene          # outside France, OSM only
+ultraprospect scan --where "Berlin" --no-registry          # outside France, OSM only
 ultraprospect scan --where "Nantes" --no-people          # organisation data only
 ultraprospect scan --record ./fixtures/x                 # record a replayable sweep
 ultraprospect scan --fixture ./fixtures/x                # replay it, fully offline
@@ -175,7 +175,7 @@ ultraprospect scan --fixture ./fixtures/x                # replay it, fully offl
 .ultraprospect/runs/<slug>-<id>/
   manifest.json      target, filters, per-lane coverage, counts, notes, licences
   osm.json           raw OSM lane output, kept beside the fused result
-  sirene.json        raw register lane output
+  registry.json        raw register lane output
   places.json        the fused entities
   MATCH.todo.json    pairs the matcher would not decide alone
 ```
