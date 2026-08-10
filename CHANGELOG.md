@@ -2,6 +2,31 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [2.0.0](https://github.com/maxgfr/ultraprospect/compare/v1.4.4...v2.0.0) (2026-08-10)
+
+
+* feat!: connectors with declared capabilities, in place of one line of France ([258ef8a](https://github.com/maxgfr/ultraprospect/commit/258ef8a83f40673918fb7acec15f0f01832289a7))
+
+
+### Features
+
+* **confirm:** the register identity a company is legally required to publish ([ed05dda](https://github.com/maxgfr/ultraprospect/commit/ed05ddafc0dd4dba0d617b88c243d33d3aa62a7d))
+* **evals,doctor:** canaries that come from the connector table, not from a list ([0f6f910](https://github.com/maxgfr/ultraprospect/commit/0f6f910d07dcd31a401f93b653502afc4f99e35d))
+* **registry:** eight connectors, and what each of them cannot do ([6facdd8](https://github.com/maxgfr/ultraprospect/commit/6facdd8ad615cf452d2177932fa73bf5486fac15))
+* **resolve:** search the territory's language, and pool every angle ([b4672d7](https://github.com/maxgfr/ultraprospect/commit/b4672d7f90e8ef90cf35b51e8a1e1bb9e99d331e))
+
+
+### BREAKING CHANGES
+
+* `Lane` is now "osm" | "registry" | "web" | "agent";
+`Place.sirene` is `Place.registry` (a `RegistryRecord`); `sirene.json` is
+`registry.json`; `counts.sirene` is `counts.registry` plus `counts.byConnector`.
+Flags: `--no-sirene` -> `--no-registry`, `--naf` -> `--activity`, `--effectif` ->
+`--size-band`, `--min-effectif` -> `--min-employees`. Match verdicts take
+`{osmId, registryId, connectorId?}` instead of `{osmId, siret|siren}`. Place ids
+from the register are `<connectorId>:<establishmentId>`. CSV columns are renamed
+and `revenue_eur` is now `revenue` + `revenue_currency`.
+
 ## [1.4.4](https://github.com/maxgfr/ultraprospect/compare/v1.4.3...v1.4.4) (2026-08-10)
 
 
