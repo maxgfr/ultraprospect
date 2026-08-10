@@ -56,6 +56,7 @@ gate. Read it rather than guessing a flag.
 | List every company in a town, street or radius | `scan --where "<place>"` |
 | Same, narrowed to an industry or a company size | `scan --where "<place>" --section J,M --min-effectif 10` |
 | Answer the pairs the matcher would not decide | `match --run <dir> --apply verdicts.json` |
+| Find each company's website, and prove it is theirs | `resolve --run <dir> --queries` then `--web-results` |
 | Find out why a run came back thin | `doctor` |
 
 ## Cheat sheet
@@ -68,6 +69,8 @@ ultraprospect scan --lat 48.8566 --long 2.3522 --radius 500m  # a point and a ra
 ultraprospect scan --where "Lyon" --section M --min-effectif 20 --out ./runs
 ultraprospect scan --where "Berlin" --no-sirene               # outside France, OSM only
 ultraprospect match --run <dir> --apply verdicts.json         # fold your adjudication back in
+ultraprospect resolve --run <dir> --queries                   # the queries for YOU to search
+ultraprospect resolve --run <dir> --web-results hits.json     # ingest your hits, fetch, corroborate
 ultraprospect scan --fixture <dir>                            # replay a recorded sweep, offline
 ```
 
@@ -99,9 +102,21 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    files under an enseigne. When you cannot tell, say `merge: false` — two rows
    are recoverable, one wrong merge is not.
 
-5. **Write from `places.json`.** Every field carries where it came from. A place
+5. **Find the websites — you are the search engine.** Four in five places arrive
+   without one, and everything downstream grows from that URL. Run `resolve
+   --queries`: it prints the queries, sized and phrased, for the places that
+   need one. **Run your own WebSearch once per query**, pool every hit into ONE
+   JSON array — duplicates and all, `[{"url","title","snippet","placeId"}]` —
+   and pass it back with `--web-results`. The engine then FETCHES each candidate
+   and keeps it only if the page carries the company's SIREN, its street
+   address, or the distinctive part of its name. A domain that ranked first and
+   corroborates nothing is recorded as `unverified`, never as the website.
+
+6. **Write from `places.json`.** Every field carries where it came from. A place
    with `sources: ["osm","sirene"]` has both records attached; a place with one
    source has one, and the other half is not "missing data" you may fill in.
+   `website.confidence` is `corroborated`, `unverified` or `declared` (a mapper
+   typed it into OSM and nobody has checked) — say which when it matters.
 
 ## When the run looks wrong
 
@@ -113,6 +128,7 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | Register lane returned 0 outside France | Expected. The register is French; only the OSM lane applies. |
 | A merged place looks like two companies | Adjudication was skipped or answered too generously. Check `matchConfidence` and the raw lanes in `osm.json` / `sirene.json`. |
 | Thousands of dormant one-person companies | Add `--min-effectif`; ceased companies are already excluded unless `--include-ceased`. |
+| `resolve` found almost nothing | It was run without `--web-results`. Only OSM's own tags were tried. Run `--queries` first and do the searching. |
 
 ## Do not
 
@@ -124,6 +140,8 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 - Never strip the ODbL and Licence Ouverte notices from a deliverable.
 - Never re-run a sweep to "check" a number the manifest already reports — the
   upstreams move, and a second run answers a different question.
+- Never treat a search result as a company's website. Rank is not evidence of
+  ownership; only the fetched page corroborating itself is.
 
 ## Scope notes
 

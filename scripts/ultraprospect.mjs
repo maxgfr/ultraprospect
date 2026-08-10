@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 
 // src/cli.ts
-import { readFileSync as readFileSync2 } from "fs";
+import { readFileSync as readFileSync5 } from "fs";
 
 // src/vendor/webindex-engine.mjs
+import { inflateSync, inflateRawSync } from "zlib";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import { spawn } from "child_process";
+import { existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync3, readdirSync as readdirSync2, rmSync as rmSync3, statSync as statSync2, writeFileSync as writeFileSync4 } from "fs";
 import { join as join4 } from "path";
 import { tmpdir as tmpdir4 } from "os";
 import { mkdirSync as mkdirSync3, renameSync, unlinkSync, writeFileSync as writeFileSync3 } from "fs";
@@ -59,7 +65,273 @@ function envInt(suffix, def, min = 0, max = Number.MAX_SAFE_INTEGER) {
   if (!Number.isFinite(n)) return def;
   return Math.min(max, Math.max(min, Math.trunc(n)));
 }
+function decodePdfString(tok) {
+  if (tok[0] !== "(") return "";
+  const inner = tok.slice(1, -1);
+  const simple = { n: "\n", r: "\r", t: "	", b: "\b", f: "\f", "(": "(", ")": ")", "\\": "\\" };
+  return inner.replace(/\\([nrtbf()\\])/g, (_m, c) => simple[c] ?? c).replace(/\\([0-7]{1,3})/g, (_m, o) => String.fromCharCode(parseInt(o, 8) & 255));
+}
+function decodeHexString(tok) {
+  const hex = tok.slice(1, -1).replace(/\s+/g, "");
+  let out2 = "";
+  for (let i = 0; i + 1 < hex.length; i += 2) out2 += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16));
+  if (hex.length % 2) out2 += String.fromCharCode(parseInt(hex[hex.length - 1] + "0", 16));
+  return out2;
+}
+function decodeString(tok) {
+  return tok[0] === "<" ? decodeHexString(tok) : decodePdfString(tok);
+}
+function decodeTJArray(tok) {
+  let out2 = "";
+  const re = /\((?:\\.|[^\\()])*\)|<[0-9A-Fa-f\s]*>|-?\d+(?:\.\d+)?/g;
+  let m;
+  while (m = re.exec(tok)) {
+    const t = m[0];
+    if (t[0] === "(" || t[0] === "<") out2 += decodeString(t);
+    else if (Number(t) <= -100) out2 += " ";
+  }
+  return out2;
+}
+var TOKEN_RE = /\((?:\\.|[^\\()])*\)|<[0-9A-Fa-f\s]*>|\[(?:\((?:\\.|[^\\()])*\)|<[0-9A-Fa-f\s]*>|[^\]])*\]|\bT\*|\bTd\b|\bTD\b|\bTj\b|\bTJ\b|'|"/g;
+function extractTextOps(content) {
+  let out2 = "";
+  let operands = [];
+  const take = () => {
+    for (let i = operands.length - 1; i >= 0; i--) {
+      const t = operands[i];
+      if (t[0] === "(" || t[0] === "<") return decodeString(t);
+      if (t[0] === "[") return decodeTJArray(t);
+    }
+    return "";
+  };
+  TOKEN_RE.lastIndex = 0;
+  let m;
+  while (m = TOKEN_RE.exec(content)) {
+    const tok = m[0];
+    const c = tok[0];
+    if (c === "(" || c === "<" || c === "[") {
+      operands.push(tok);
+      continue;
+    }
+    if (tok === "Tj" || tok === "TJ") out2 += take() + " ";
+    else if (tok === "'" || tok === '"') out2 += "\n" + take() + " ";
+    else if (tok === "T*") out2 += "\n";
+    operands = [];
+  }
+  return out2;
+}
+function extractStreams(buf) {
+  const out2 = [];
+  const s = buf.toString("latin1");
+  const re = /stream\r?\n/g;
+  let m;
+  while (m = re.exec(s)) {
+    const start = m.index + m[0].length;
+    const end = s.indexOf("endstream", start);
+    if (end < 0) continue;
+    let stop = end;
+    if (s[stop - 1] === "\n") stop--;
+    if (s[stop - 1] === "\r") stop--;
+    const chunk = buf.subarray(start, stop);
+    let data;
+    try {
+      data = inflateSync(chunk);
+    } catch {
+      try {
+        data = inflateRawSync(chunk);
+      } catch {
+        data = chunk;
+      }
+    }
+    out2.push(data.toString("latin1"));
+  }
+  return out2;
+}
+function pdfToText(buf) {
+  let out2 = "";
+  try {
+    for (const stream of extractStreams(buf)) {
+      if (/\b(Tj|TJ)\b/.test(stream) || /\)\s*'/.test(stream)) out2 += extractTextOps(stream) + "\n";
+    }
+  } catch {
+  }
+  return out2.replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+var MIN_CHARS_FOR_SHAPE_CHECKS = 200;
+var CONTROL_RATIO_MAX = 5e-3;
+var REPLACEMENT_RATIO_MAX = 5e-3;
+var LONGEST_RUN_MAX = 300;
+var LETTER_RATIO_MIN = 0.5;
+function isControlCode(c) {
+  if (c === 9 || c === 10 || c === 13) return false;
+  return c < 32 || c >= 127 && c <= 159;
+}
+var REPLACEMENT_CODE = 65533;
+function scanRatios(t) {
+  let control = 0;
+  let replacement = 0;
+  for (let i = 0; i < t.length; i++) {
+    const c = t.charCodeAt(i);
+    if (c === REPLACEMENT_CODE) replacement++;
+    else if (isControlCode(c)) control++;
+  }
+  return { control: control / t.length, replacement: replacement / t.length };
+}
+function assessPdfText(text) {
+  return assessExtractedText(text, "no text layer (scanned or image-only PDF?)");
+}
+function assessExtractedText(text, emptyReason) {
+  const t = text.trim();
+  if (!t) return { ok: false, reason: emptyReason };
+  const { control, replacement } = scanRatios(t);
+  if (control > CONTROL_RATIO_MAX) {
+    return { ok: false, reason: "binary/control characters in the text (undecodable PDF stream)" };
+  }
+  if (replacement > REPLACEMENT_RATIO_MAX) {
+    return { ok: false, reason: "replacement characters throughout (wrong character map)" };
+  }
+  if (t.length < MIN_CHARS_FOR_SHAPE_CHECKS) return { ok: true };
+  let longestRun = 0;
+  for (const w of t.split(/\s+/)) if (w.length > longestRun) longestRun = w.length;
+  const letters = (t.match(new RegExp("\\p{L}|\\p{N}", "gu"))?.length ?? 0) / t.replace(/\s+/g, "").length;
+  if (longestRun > LONGEST_RUN_MAX && letters < LETTER_RATIO_MIN) {
+    return { ok: false, reason: "unreadable text layer (garbled glyph encoding)" };
+  }
+  return { ok: true };
+}
+var PDF_INSPECTOR_SPEC = "@firecrawl/pdf-inspector@1";
+var ANYDOC_SPEC = "@firecrawl/anydoc@0.1";
 var MAX_STDOUT_BYTES = 24 * 1024 * 1024;
+function binaryName(name) {
+  return process.platform === "win32" && name === "npx" ? "npx.cmd" : name;
+}
+function runWithInput(cmd, args, input, timeoutMs) {
+  return new Promise((resolve4) => {
+    let child;
+    try {
+      child = spawn(binaryName(cmd), args, { stdio: ["pipe", "pipe", "pipe"] });
+    } catch (e) {
+      resolve4({ ok: false, stdout: "", error: e.message });
+      return;
+    }
+    const chunks = [];
+    let size = 0;
+    let settled = false;
+    const done = (r) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve4(r);
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      done({ ok: false, stdout: "", error: `timed out after ${Math.round(timeoutMs / 1e3)}s` });
+    }, timeoutMs);
+    child.stdout?.on("data", (d) => {
+      if (size >= MAX_STDOUT_BYTES) return;
+      size += d.length;
+      chunks.push(d);
+    });
+    child.stderr?.on("data", () => {
+    });
+    child.on("error", (e) => {
+      done({ ok: false, stdout: "", error: e.code === "ENOENT" ? "not installed" : e.message });
+    });
+    child.on("close", (code) => {
+      const stdout = Buffer.concat(chunks).subarray(0, MAX_STDOUT_BYTES).toString("utf8");
+      if (code === 0) done({ ok: true, stdout });
+      else done({ ok: false, stdout, error: `exit ${code}` });
+    });
+    child.stdin?.on("error", () => {
+    });
+    child.stdin?.end(input);
+  });
+}
+var DEFAULT_TIMEOUT_MS = 3e5;
+var DEFAULT_MAX_DOCS = 3;
+var DEFAULT_LANG = "eng";
+var spent = 0;
+function ocrBudgetLeft() {
+  return Math.max(0, envInt("OCR_MAX", DEFAULT_MAX_DOCS) - spent);
+}
+async function ocrTools() {
+  const probe = async (cmd, args) => (await runWithInput(cmd, args, Buffer.alloc(0), 2e4)).ok;
+  const [copyablePdf, tesseract] = await Promise.all([probe("copyable-pdf", ["--help"]), probe("tesseract", ["--version"])]);
+  return { copyablePdf, tesseract };
+}
+async function ocrPdf(bytes) {
+  if (ocrBudgetLeft() <= 0) return void 0;
+  const { copyablePdf, tesseract } = await ocrTools();
+  if (!copyablePdf || !tesseract) return void 0;
+  const dir = mkdtempSync(join(tmpdir(), `${brand().name}-ocr-`));
+  try {
+    const input = join(dir, "in.pdf");
+    const output = join(dir, "out.pdf");
+    writeFileSync(input, bytes);
+    const lang = env("OCR_LANG") || DEFAULT_LANG;
+    const r = await runWithInput("copyable-pdf", ["-o", output, "-m", "-l", lang, input], Buffer.alloc(0), envInt("OCR_TIMEOUT_MS", DEFAULT_TIMEOUT_MS));
+    spent++;
+    if (!r.ok) return void 0;
+    const md = output.replace(/\.pdf$/, ".md");
+    return existsSync(md) ? readFileSync(md, "utf8") : void 0;
+  } catch {
+    return void 0;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+var PDF_EXTRACTORS = ["pdf-inspector", "anydoc", "firecrawl", "pdftotext", "native", "ocr"];
+var NPX_TIMEOUT_MS = 9e4;
+var PDFTOTEXT_TIMEOUT_MS = 6e4;
+var dead = /* @__PURE__ */ new Set();
+function enabledExtractors(engines) {
+  if (engines) return engines;
+  const forced = env("PDF_ENGINE");
+  if (forced && PDF_EXTRACTORS.includes(forced)) return [forced];
+  if (envFlag("NO_NPX")) return PDF_EXTRACTORS.filter((e) => e !== "pdf-inspector" && e !== "anydoc");
+  return PDF_EXTRACTORS;
+}
+async function viaAnydoc(bytes) {
+  const r = await runWithInput("npx", ["-y", "--prefer-offline", ANYDOC_SPEC, "-", "--format", "pdf"], bytes, NPX_TIMEOUT_MS);
+  return r.ok ? r.stdout : void 0;
+}
+async function viaPdfInspector(bytes) {
+  const r = await runWithInput("npx", ["-y", "--prefer-offline", PDF_INSPECTOR_SPEC, "-"], bytes, NPX_TIMEOUT_MS);
+  return r.ok ? r.stdout : void 0;
+}
+async function viaPdftotext(bytes) {
+  const r = await runWithInput("pdftotext", ["-layout", "-", "-"], bytes, PDFTOTEXT_TIMEOUT_MS);
+  return r.ok ? r.stdout : void 0;
+}
+async function extractPdf(bytes, opts = {}) {
+  let lastReason;
+  for (const id of enabledExtractors(opts.engines)) {
+    if (dead.has(id)) continue;
+    if (id === "ocr" && ocrBudgetLeft() <= 0) {
+      lastReason = `scanned PDF, and this run's OCR budget is spent (raise ${envName("OCR_MAX")})`;
+      continue;
+    }
+    let text;
+    try {
+      if (id === "pdf-inspector") text = await viaPdfInspector(bytes);
+      else if (id === "anydoc") text = await viaAnydoc(bytes);
+      else if (id === "pdftotext") text = await viaPdftotext(bytes);
+      else if (id === "firecrawl") text = opts.firecrawl ? await opts.firecrawl() : void 0;
+      else if (id === "ocr") text = await ocrPdf(bytes);
+      else text = pdfToText(bytes);
+    } catch {
+      text = void 0;
+    }
+    if (text === void 0) {
+      if (id !== "firecrawl") dead.add(id);
+      continue;
+    }
+    const verdict = assessPdfText(text);
+    if (verdict.ok) return { text: text.trim(), via: id };
+    lastReason = verdict.reason;
+  }
+  return { text: "", reason: lastReason ?? "no PDF extractor available" };
+}
 var BINARY = { textFallback: false };
 var CSV = { format: "csv", textFallback: true };
 var BY_EXTENSION = {
@@ -88,7 +360,70 @@ var BY_EXTENSION = {
   epub: BINARY,
   csv: CSV
 };
+var BY_CONTENT_TYPE = {
+  "application/msword": BINARY,
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": BINARY,
+  "application/vnd.ms-word.document.macroenabled.12": BINARY,
+  "application/vnd.oasis.opendocument.text": BINARY,
+  "application/rtf": BINARY,
+  "text/rtf": BINARY,
+  "application/vnd.ms-powerpoint": BINARY,
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": BINARY,
+  "application/vnd.oasis.opendocument.presentation": BINARY,
+  "application/vnd.ms-excel": BINARY,
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": BINARY,
+  "application/vnd.ms-excel.sheet.binary.macroenabled.12": BINARY,
+  "application/vnd.oasis.opendocument.spreadsheet": BINARY,
+  "application/epub+zip": BINARY,
+  "text/csv": CSV
+};
 var DOC_EXTENSIONS = Object.keys(BY_EXTENSION);
+function docFormatForUrl(url) {
+  const m = /\.([a-z0-9]{2,5})(?:$|[?#])/i.exec(url);
+  return m ? BY_EXTENSION[m[1].toLowerCase()] : void 0;
+}
+function docFormatForContentType(contentType) {
+  const type = contentType.split(";")[0]?.trim().toLowerCase();
+  return type ? BY_CONTENT_TYPE[type] : void 0;
+}
+var DOC_EXTRACTORS = ["anydoc", "firecrawl"];
+var NPX_TIMEOUT_MS2 = 9e4;
+var dead2 = /* @__PURE__ */ new Set();
+function enabledDocExtractors(engines) {
+  if (engines) return engines;
+  const forced = env("DOC_ENGINE");
+  if (forced === "none") return [];
+  if (forced && DOC_EXTRACTORS.includes(forced)) return [forced];
+  if (envFlag("NO_NPX")) return DOC_EXTRACTORS.filter((e) => e !== "anydoc");
+  return DOC_EXTRACTORS;
+}
+async function viaAnydoc2(bytes, format) {
+  const args = ["-y", "--prefer-offline", ANYDOC_SPEC, "-"];
+  if (format) args.push("--format", format);
+  const r = await runWithInput("npx", args, bytes, NPX_TIMEOUT_MS2);
+  return r.ok ? r.stdout : void 0;
+}
+async function extractDocument(bytes, fmt, opts = {}) {
+  let lastReason;
+  for (const id of enabledDocExtractors(opts.engines)) {
+    if (dead2.has(id)) continue;
+    let text;
+    try {
+      if (id === "anydoc") text = await viaAnydoc2(bytes, fmt.format);
+      else text = opts.firecrawl ? await opts.firecrawl() : void 0;
+    } catch {
+      text = void 0;
+    }
+    if (text === void 0) {
+      if (id !== "firecrawl") dead2.add(id);
+      continue;
+    }
+    const verdict = assessExtractedText(text, "the converter produced no text");
+    if (verdict.ok) return { text: text.trim(), via: id };
+    lastReason = verdict.reason;
+  }
+  return { text: "", reason: lastReason ?? "no document converter available" };
+}
 function bomEncoding(bytes) {
   if (bytes.length >= 3 && bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191) return { encoding: "utf-8", skip: 3 };
   if (bytes.length >= 2 && bytes[0] === 255 && bytes[1] === 254) return { encoding: "utf-16le", skip: 2 };
@@ -201,7 +536,137 @@ function slugify(input, opts = {}) {
   const s = input.toLowerCase().replace(/^https?:\/\//, "").replace(/^git@/, "").replace(/\.git$/, "").replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, opts.max ?? 120);
   return s || (opts.fallback ?? "");
 }
+var FIRECRAWL_DEFAULT_BASE = "http://localhost:3002";
+var PROBE_TIMEOUT_MS = 2e3;
+var SCRAPE_TIMEOUT_MS = 45e3;
+var SEARCH_TIMEOUT_MS = 3e4;
 var SCRAPE_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
+function firecrawlBase(opts = {}) {
+  const raw = (opts.firecrawl ?? env("FIRECRAWL") ?? FIRECRAWL_DEFAULT_BASE).trim();
+  if (!raw || raw.toLowerCase() === "off") return null;
+  return raw.replace(/\/+$/, "");
+}
+function firecrawlIsExplicit(opts = {}) {
+  return !!(opts.firecrawl ?? env("FIRECRAWL"));
+}
+function authHeaders() {
+  const key = env("FIRECRAWL_KEY");
+  return key ? { authorization: `Bearer ${key}` } : void 0;
+}
+var probeCache = /* @__PURE__ */ new Map();
+function looksLikeFirecrawl(contentType, body) {
+  if (/firecrawl/i.test(body.slice(0, 4096))) return true;
+  return !/^\s*text\/html/i.test(contentType ?? "");
+}
+function probeFirecrawl(base, explicit = false) {
+  const key = `${base}|${explicit}`;
+  let p = probeCache.get(key);
+  if (!p) {
+    p = (async () => {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
+      try {
+        const res = await fetch(`${base}/`, { signal: ctrl.signal });
+        const body = await res.text().catch(() => "");
+        return explicit || looksLikeFirecrawl(res.headers.get("content-type"), body);
+      } catch {
+        return false;
+      } finally {
+        clearTimeout(t);
+      }
+    })();
+    probeCache.set(key, p);
+  }
+  return p;
+}
+var prefixCache = /* @__PURE__ */ new Map();
+function apiPrefix(base) {
+  return prefixCache.get(base) ?? "/v2";
+}
+async function postJson(base, path, body, timeoutMs) {
+  const headers = authHeaders();
+  const first = await httpJson("POST", `${base}${apiPrefix(base)}${path}`, body, { timeoutMs, headers });
+  if (first.status !== 404 || apiPrefix(base) !== "/v2") return first;
+  prefixCache.set(base, "/v1");
+  return httpJson("POST", `${base}/v1${path}`, body, { timeoutMs, headers });
+}
+function mapScrapeResponse(json) {
+  if (!json || typeof json !== "object" || Array.isArray(json)) return null;
+  if (json.success === false) return null;
+  const data = json.data;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const markdown = typeof data.markdown === "string" ? data.markdown.trim() : "";
+  if (!markdown) return null;
+  const meta = data.metadata && typeof data.metadata === "object" ? data.metadata : {};
+  const rawTitle = typeof meta.title === "string" ? cleanInline(meta.title) : "";
+  const src = typeof meta.sourceURL === "string" ? meta.sourceURL : typeof meta.url === "string" ? meta.url : void 0;
+  const status = typeof meta.statusCode === "number" ? meta.statusCode : void 0;
+  return {
+    markdown,
+    ...rawTitle ? { title: rawTitle } : {},
+    ...src ? { sourceURL: src } : {},
+    ...status !== void 0 ? { statusCode: status } : {}
+  };
+}
+function mapSearchResponse(json) {
+  if (!json || typeof json !== "object") return [];
+  if (json.success === false) return [];
+  const data = json.data;
+  const web = Array.isArray(data) ? data : Array.isArray(data?.web) ? data.web : Array.isArray(data?.results) ? data.results : [];
+  const out2 = [];
+  for (const x of web) {
+    if (!x || typeof x.url !== "string" || !x.url) continue;
+    out2.push({
+      url: x.url,
+      // `||` (not `??`): an empty title degrades to the URL, never blank.
+      title: cleanInline(String(x.title || x.url)),
+      description: cleanInline(String(x.description ?? x.snippet ?? "")).slice(0, 360),
+      ...typeof x.markdown === "string" && x.markdown.trim() ? { markdown: x.markdown } : {}
+    });
+  }
+  return out2;
+}
+async function scrapeViaFirecrawl(url, opts = {}) {
+  const base = firecrawlBase(opts);
+  if (!base) return {};
+  if (!await probeFirecrawl(base, firecrawlIsExplicit(opts))) {
+    return firecrawlIsExplicit(opts) ? { why: `Firecrawl not reachable at ${base} \u2014 used the built-in extractor.` } : {};
+  }
+  const r = await postJson(
+    base,
+    "/scrape",
+    {
+      url,
+      formats: ["markdown"],
+      onlyMainContent: true,
+      blockAds: true,
+      removeBase64Images: true,
+      maxAge: SCRAPE_MAX_AGE_MS,
+      timeout: SCRAPE_TIMEOUT_MS
+    },
+    SCRAPE_TIMEOUT_MS
+  );
+  if (!r.ok) {
+    const why = r.status ? `status ${r.status}` : r.error ?? "no response";
+    return { why: `Firecrawl could not scrape ${url} (${why}) \u2014 fell back to the built-in extractor.` };
+  }
+  const data = mapScrapeResponse(r.data);
+  if (!data) return { why: `Firecrawl returned no markdown for ${url} \u2014 fell back to the built-in extractor.` };
+  return { data };
+}
+async function searchViaFirecrawl(query, limit, opts = {}) {
+  const base = firecrawlBase(opts);
+  if (!base) return { why: `Firecrawl disabled (--firecrawl off / ${envName("FIRECRAWL")}=off). Skipping.` };
+  if (!await probeFirecrawl(base, firecrawlIsExplicit(opts))) {
+    return { why: `Firecrawl not reachable at ${base} (bring it up with \`${brand().cli} firecrawl up\`). Skipping.` };
+  }
+  const r = await postJson(base, "/search", { query, limit, sources: ["web"] }, SEARCH_TIMEOUT_MS);
+  if (!r.ok) {
+    const why = r.status === 429 || r.status === 503 ? `rate-limited (HTTP ${r.status})` : `unreachable (status ${r.status || 0})`;
+    return { why: `Firecrawl search ${why} at ${base}.` };
+  }
+  return { hits: mapSearchResponse(r.data) };
+}
 var DEFAULT_BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 function browserUa() {
   return env("UA") || DEFAULT_BROWSER_UA;
@@ -216,6 +681,9 @@ function defaultUa() {
 var RETRY_STATUS = /* @__PURE__ */ new Set([429, 503, 502, 504]);
 var maxAttempts = () => envInt("MAX_ATTEMPTS", 2, 1, 5);
 var defaultRetryMs = () => envInt("RETRY_MS", 600, 0, 5e3);
+function pageDelayMs() {
+  return envInt("PAGE_DELAY_MS", 350, 0, 5e3);
+}
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -460,10 +928,547 @@ var ENTITIES = {
   "&Uuml;": "\xDC"
 };
 var ENTITY_BY_NAME = new Map(Object.entries(ENTITIES).map(([k, v]) => [k.slice(1, -1), v]));
+var ENTITY_RE = /&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]*);/g;
+function decodeEntities(s) {
+  return s.replace(ENTITY_RE, (m, ref) => {
+    if (ref[0] === "#") {
+      const n = ref[1] === "x" || ref[1] === "X" ? Number.parseInt(ref.slice(2), 16) : Number(ref.slice(1));
+      try {
+        return Number.isFinite(n) ? String.fromCodePoint(n) : " ";
+      } catch {
+        return " ";
+      }
+    }
+    return ENTITY_BY_NAME.get(ref) ?? m;
+  });
+}
+function cleanInline(s) {
+  return decodeEntities(String(s)).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+function htmlToText(html) {
+  let s = html;
+  s = s.replace(/<!--[\s\S]*?-->/g, " ");
+  s = s.replace(/<(script|style|noscript|head|nav|footer|svg|template)[\s\S]*?<\/\1>/gi, " ");
+  s = s.replace(/<h([1-6])(?:\s[^>]*)?>/gi, (_m, n) => "\n" + "#".repeat(Number(n)) + " ");
+  s = s.replace(/<\/(p|div|section|article|li|tr|td|th|ul|ol|h[1-6]|pre|blockquote|br)>/gi, "\n");
+  s = s.replace(/<(p|div|section|article|li|tr|td|th|ul|ol|pre|blockquote|table)\b[^>]*>/gi, "\n");
+  s = s.replace(/<(br|hr)\s*\/?>/gi, "\n");
+  s = s.replace(/<[^>]+>/g, " ");
+  s = decodeEntities(s);
+  s = s.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n");
+  return s.split("\n").map((l) => l.trim()).filter((l) => l.length > 0).join("\n");
+}
+function htmlTitle(html) {
+  const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+  if (!m) return void 0;
+  const t = decodeEntities(m[1].replace(/\s+/g, " ").trim());
+  return t || void 0;
+}
+function htmlCanonicalUrl(html) {
+  const head = html.slice(0, 6e4);
+  const canonical = /<link\b[^>]*\brel=["']?canonical["']?[^>]*>/i.exec(head)?.[0];
+  const og = /<meta\b[^>]*\bproperty=["']?og:url["']?[^>]*>/i.exec(head)?.[0];
+  for (const tag of [canonical, og]) {
+    const href = tag && /\b(?:href|content)=["']([^"']+)["']/i.exec(tag)?.[1];
+    if (href?.trim()) return decodeEntities(href.trim());
+  }
+  return void 0;
+}
+function sliceToMatchingClose(html, start, tag) {
+  const re = new RegExp(`<${tag}\\b|</${tag}\\s*>`, "gi");
+  re.lastIndex = start;
+  let depth = 1;
+  let m;
+  while (m = re.exec(html)) {
+    if (m[0][1] === "/") {
+      if (--depth === 0) return html.slice(start, m.index);
+    } else {
+      depth++;
+    }
+  }
+  return null;
+}
+function extractMainHtml(html) {
+  const visible = (h) => h.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
+  const tiers = [
+    /<(main)\b[^>]*>/gi,
+    /<(article)\b[^>]*>/gi,
+    /<(div|section)\b[^>]*\b(?:id|class)="[^"]*\b(?:content|article|post|entry|story|markdown-body|main|prose)\b[^"]*"[^>]*>/gi
+  ];
+  let candidates = [];
+  for (const re of tiers) {
+    const found = [];
+    re.lastIndex = 0;
+    let m;
+    while (m = re.exec(html)) {
+      const inner = sliceToMatchingClose(html, re.lastIndex, m[1].toLowerCase());
+      if (inner !== null) found.push(inner);
+    }
+    if (found.length) {
+      candidates = found;
+      break;
+    }
+  }
+  if (!candidates.length) return html;
+  let best = candidates[0];
+  let bestLen = visible(best);
+  for (const c of candidates.slice(1)) {
+    const len = visible(c);
+    if (len > bestLen) {
+      best = c;
+      bestLen = len;
+    }
+  }
+  const fullLen = visible(html);
+  if (bestLen < 500 && bestLen < fullLen * 0.3) return html;
+  return best;
+}
+var PDF_URL_RE = /\.pdf($|[?#])/i;
+var PDF_ROUTE_RE = /\/pdf\/[^/?#]+($|[?#])/i;
+var NON_PDF_TAIL_RE = /\.(html?|php|aspx?|jsp|json|xml|txt|md|csv)($|[?#])/i;
+function looksLikePdfUrl(url) {
+  if (PDF_URL_RE.test(url)) return true;
+  return PDF_ROUTE_RE.test(url) && !NON_PDF_TAIL_RE.test(url);
+}
 var PDF_FETCH_OPTS = { accept: "application/pdf,*/*", binary: true, maxBytes: 16 * 1024 * 1024 };
 var DOC_FETCH_OPTS = { accept: "*/*", binary: true, maxBytes: 16 * 1024 * 1024 };
+async function fetchAndExtract(url, opts = {}) {
+  const wantsPdf = looksLikePdfUrl(url);
+  const wantsDoc = wantsPdf ? void 0 : docFormatForUrl(url);
+  let firecrawlNote;
+  if (!wantsPdf && !wantsDoc) {
+    const fc = await scrapeViaFirecrawl(url, opts);
+    if (fc.data && (fc.data.statusCode ?? 200) < 400) {
+      return {
+        text: fc.data.markdown,
+        title: fc.data.title,
+        finalUrl: fc.data.sourceURL || url,
+        status: fc.data.statusCode ?? 200,
+        extractor: "firecrawl"
+      };
+    }
+    firecrawlNote = fc.data ? `Firecrawl got HTTP ${fc.data.statusCode} for ${url} \u2014 fell back to the built-in extractor.` : fc.why;
+  }
+  const base = wantsPdf ? PDF_FETCH_OPTS : wantsDoc ? DOC_FETCH_OPTS : { accept: "text/html,text/plain,*/*", acceptLanguage: opts.acceptLanguage };
+  const fetchOpts = opts.headers ? { ...base, headers: opts.headers } : base;
+  let res = await httpGet(url, fetchOpts);
+  if (!res.ok && brand().defaultUa === "contact" && (res.status === 403 || res.status === 429)) {
+    res = await httpGet(url, { ...fetchOpts, userAgent: browserUa(), acceptLanguage: opts.acceptLanguage ?? "en-US,en;q=0.9" });
+  }
+  if (res.status === 304) {
+    return { text: "", finalUrl: res.url, status: 304, etag: res.etag ?? opts.headers?.["if-none-match"], lastModified: res.lastModified };
+  }
+  if (!res.ok) {
+    const why = res.status === 429 ? "rate-limited (HTTP 429)" : `status ${res.status}${res.error ? ", " + res.error : ""}`;
+    return { text: "", finalUrl: res.url, status: res.status, note: `Could not fetch ${url} (${why}).` };
+  }
+  const validators = res.etag || res.lastModified ? { etag: res.etag, lastModified: res.lastModified } : {};
+  if (wantsPdf || /application\/pdf/i.test(res.contentType)) {
+    const bytes = res.bytes ?? (await httpGet(url, PDF_FETCH_OPTS)).bytes;
+    const got = bytes ? await extractPdf(bytes, {
+      firecrawl: async () => {
+        const fc = await scrapeViaFirecrawl(url, opts);
+        return fc.data && (fc.data.statusCode ?? 200) < 400 ? fc.data.markdown : void 0;
+      }
+    }) : { text: "", reason: "empty response body" };
+    return {
+      text: got.text,
+      finalUrl: res.url,
+      status: res.status,
+      // `native` keeps reporting as absent, which is what the cache key and every
+      // existing dossier already assume.
+      extractor: got.via && got.via !== "native" ? got.via : void 0,
+      note: got.text ? firecrawlNote : `Fetched ${url} but could not extract text \u2014 ${got.reason}.`,
+      ...validators
+    };
+  }
+  const docFmt = wantsDoc ?? docFormatForContentType(res.contentType);
+  if (docFmt) {
+    const bytes = res.bytes ?? (await httpGet(url, DOC_FETCH_OPTS)).bytes;
+    const got = bytes ? await extractDocument(bytes, docFmt, {
+      firecrawl: async () => {
+        const fc = await scrapeViaFirecrawl(url, opts);
+        return fc.data && (fc.data.statusCode ?? 200) < 400 ? fc.data.markdown : void 0;
+      }
+    }) : { text: "", reason: "empty response body" };
+    if (!got.text && docFmt.textFallback && bytes?.length) {
+      return { text: bytes.toString("utf8"), finalUrl: res.url, status: res.status, note: firecrawlNote, ...validators };
+    }
+    return {
+      text: got.text,
+      finalUrl: res.url,
+      status: res.status,
+      extractor: got.via,
+      note: got.text ? firecrawlNote : `Fetched ${url} but could not extract text \u2014 ${got.reason}.`,
+      ...validators
+    };
+  }
+  const isHtml = /html/i.test(res.contentType) || /^\s*</.test(res.body);
+  const stripped = isHtml ? htmlToText(extractMainHtml(res.body)) : res.body;
+  const text = isHtml && opts.stripConsent ? stripConsentBoilerplate(stripped).text : stripped;
+  const title = isHtml ? htmlTitle(res.body) : void 0;
+  const canonical = isHtml ? htmlCanonicalUrl(res.body) : void 0;
+  const metaDescription = isHtml ? metaDescriptionOf(res.body) : void 0;
+  return {
+    text,
+    title,
+    canonical,
+    metaDescription,
+    ...opts.keepHtml && isHtml ? { html: res.body } : {},
+    finalUrl: res.url,
+    status: res.status,
+    note: firecrawlNote,
+    ...validators
+  };
+}
+var CONSENT_PATTERNS = [
+  /\bcookies?\b/i,
+  /\bconsent\b/i,
+  /\bgdpr\b/i,
+  /\bccpa\b/i,
+  /accept all\b/i,
+  /reject all\b/i,
+  /manage (?:preferences|choices|cookies|settings)/i,
+  /privacy (?:policy|preferences|choices)/i,
+  /tracking technolog/i,
+  /advertising partners/i,
+  /legitimate interest/i
+];
+function stripConsentBoilerplate(text) {
+  let dropped = 0;
+  const kept = text.split("\n").filter((line) => {
+    const hits = CONSENT_PATTERNS.reduce((n, re) => n + (re.test(line) ? 1 : 0), 0);
+    const isBanner = hits >= 2 || hits === 1 && line.trim().length < 120;
+    if (isBanner) dropped++;
+    return !isBanner;
+  });
+  return { text: kept.join("\n"), dropped };
+}
+function metaDescriptionOf(html) {
+  const m = /<meta[^>]+name=["']description["'][^>]*content=["']([^"']+)["']/i.exec(html) || /<meta[^>]+content=["']([^"']+)["'][^>]*name=["']description["']/i.exec(html) || /<meta[^>]+property=["']og:description["'][^>]*content=["']([^"']+)["']/i.exec(html);
+  const d = m?.[1]?.replace(/\s+/g, " ").trim();
+  return d ? decodeEntities(d) : void 0;
+}
+var TRACKING_PARAMS = /^(utm_|fbclid$|gclid$|mc_|ref$|ref_src$|ref_url$|spm$|_hsenc$|_hsmi$|igshid$)/i;
+function canonicalizeUrl(raw) {
+  try {
+    const u = new URL(raw.trim());
+    const proto = u.protocol.toLowerCase();
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    let port = u.port;
+    if (proto === "http:" && port === "80" || proto === "https:" && port === "443") port = "";
+    const path = u.pathname.replace(/\/+$/, "");
+    const keep = [];
+    for (const [k, v] of u.searchParams) {
+      if (!TRACKING_PARAMS.test(k)) keep.push([k, v]);
+    }
+    keep.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+    const search2 = keep.length ? "?" + keep.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&") : "";
+    return `${proto}//${host}${port ? ":" + port : ""}${path}${search2}`.replace(/\/$/, "");
+  } catch {
+    return raw.trim().replace(/#.*$/, "").replace(/\/$/, "");
+  }
+}
+function domainOf(raw) {
+  try {
+    const u = new URL(raw);
+    if (u.protocol === "file:") return LOCAL_FILE_DOMAIN;
+    return u.hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+var LOCAL_FILE_DOMAIN = "local file";
+var FNV_OFFSET = 0xcbf29ce484222325n;
+var FNV_PRIME = 0x100000001b3n;
 var MASK64 = (1n << 64n) - 1n;
+function fnv1a64(s) {
+  let h = FNV_OFFSET;
+  for (let i = 0; i < s.length; i++) {
+    h ^= BigInt(s.charCodeAt(i));
+    h = h * FNV_PRIME & MASK64;
+  }
+  return h;
+}
+var LANG_COUNTRY = {
+  en: "us",
+  pt: "br",
+  ja: "jp",
+  zh: "cn",
+  ko: "kr",
+  sv: "se",
+  da: "dk",
+  cs: "cz",
+  el: "gr",
+  uk: "ua",
+  // Ukrainian language → Ukraine
+  ar: "xa",
+  // DuckDuckGo's "Arabia" region
+  he: "il",
+  hi: "in"
+};
+var REGION_ALIASES = {
+  gb: "uk",
+  en: "us"
+};
+function baseLang(lang) {
+  return (lang || "en").split("-")[0].toLowerCase();
+}
+function resolveRegion(lang, region) {
+  if (region?.trim()) return region.trim().toLowerCase();
+  const parts = (lang || "en").split("-");
+  if (parts.length > 1 && parts[1]) return parts[1].toLowerCase();
+  const l = baseLang(lang);
+  return LANG_COUNTRY[l] ?? l;
+}
+function ddgRegion(lang, region) {
+  const l = baseLang(lang);
+  let r = resolveRegion(lang, region);
+  r = REGION_ALIASES[r] ?? r;
+  return `${r}-${l}`;
+}
+function acceptLanguageHeader(lang, region) {
+  const l = baseLang(lang);
+  const R = resolveRegion(lang, region).toUpperCase();
+  if (l === "en") return `${l}-${R},${l};q=0.9`;
+  return `${l}-${R},${l};q=0.9,en;q=0.5`;
+}
 var STDOUT_CAP = 24 * 1024 * 1024;
+var KEYLESS_ENGINES = ["ddg", "ddglite", "mojeek"];
+function isKeylessEngine(v) {
+  return KEYLESS_ENGINES.includes(v);
+}
+function keylessEngines(opts = {}) {
+  if (opts.engines) return opts.engines;
+  const raw = env("ENGINES");
+  if (raw === void 0) return KEYLESS_ENGINES;
+  if (raw.toLowerCase() === "off") return [];
+  return raw.split(",").map((s) => s.trim().toLowerCase()).filter(isKeylessEngine);
+}
+function stripTags(s) {
+  return decodeEntities(s.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+}
+function ddgRedirectTarget(href) {
+  const uddg = /[?&]uddg=([^&]+)/.exec(href);
+  if (uddg) {
+    try {
+      return decodeURIComponent(uddg[1]);
+    } catch {
+    }
+  }
+  return href.startsWith("//") ? `https:${href}` : href;
+}
+function throttleReason(status) {
+  if (status === 429 || status === 503) return { throttled: true, why: `rate-limited (HTTP ${status})` };
+  return { throttled: false, why: `unreachable (status ${status})` };
+}
+function parseBlocks(body, limit, blockRe, snippetRe, reject, resolveHref) {
+  const found = [];
+  let m;
+  blockRe.lastIndex = 0;
+  while ((m = blockRe.exec(body)) && found.length < limit) {
+    const href0 = /\bhref="([^"]+)"/.exec(m[1]);
+    if (!href0) continue;
+    const href = resolveHref(href0[1]);
+    if (!/^https?:\/\//.test(href) || reject.test(href)) continue;
+    const snip = snippetRe.exec(m[3]);
+    snippetRe.lastIndex = 0;
+    found.push({ url: href, title: stripTags(m[2]) || href, snippet: snip ? stripTags(snip[1]) : "" });
+  }
+  return found;
+}
+function parseDdgHtml(body, limit = 50) {
+  return parseBlocks(
+    body,
+    limit,
+    /<a\b([^>]*\bresult__a\b[^>]*)>([\s\S]*?)<\/a>([\s\S]*?)(?=<a\b[^>]*\bresult__a\b|$)/gi,
+    /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i,
+    /duckduckgo\.com/,
+    ddgRedirectTarget
+  );
+}
+function parseDdgLite(body, limit = 50) {
+  return parseBlocks(
+    body,
+    limit,
+    /<a\b([^>]*\bresult-link\b[^>]*)>([\s\S]*?)<\/a>([\s\S]*?)(?=<a\b[^>]*\bresult-link\b|$)/gi,
+    /class="result-snippet"[^>]*>([\s\S]*?)<\/td>/i,
+    /duckduckgo\.com/,
+    ddgRedirectTarget
+  );
+}
+function parseMojeek(body, limit = 50) {
+  return parseBlocks(
+    body,
+    limit,
+    /<a\b([^>]*\bclass="[^"]*\btitle\b[^"]*"[^>]*)>([\s\S]*?)<\/a>([\s\S]*?)(?=<a\b[^>]*\bclass="[^"]*\btitle\b|$)/gi,
+    /<p\b[^>]*\bclass="[^"]*\bs\b[^"]*"[^>]*>([\s\S]*?)<\/p>/i,
+    /mojeek\.com/,
+    (h) => h.startsWith("//") ? `https:${h}` : h
+  );
+}
+var SPECS = {
+  // `s` is a 0-based result offset, ~30 per page.
+  ddg: {
+    label: "DuckDuckGo",
+    url: (q, p, kl) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}&kl=${encodeURIComponent(kl)}${p > 0 ? `&s=${p * 30}` : ""}`,
+    parse: parseDdgHtml
+  },
+  ddglite: {
+    label: "DuckDuckGo Lite",
+    url: (q, p, kl) => `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}&kl=${encodeURIComponent(kl)}${p > 0 ? `&s=${p * 30}` : ""}`,
+    parse: parseDdgLite
+  },
+  // Mojeek's `s` is the 1-BASED index of the first result, 10 per page — so
+  // page 2 starts at 11, not 10. Its own crawler and index, which is why it is
+  // worth asking at all: it surfaces pages the DDG family does not have.
+  mojeek: {
+    label: "Mojeek",
+    url: (q, p) => `https://www.mojeek.com/search?q=${encodeURIComponent(q)}${p > 0 ? `&s=${p * 10 + 1}` : ""}`,
+    parse: parseMojeek
+  }
+};
+async function searchViaKeyless(engine, query, opts = {}) {
+  const spec = SPECS[engine];
+  const q = query.trim();
+  if (!q) return { hits: [], note: "Empty query." };
+  const pages = Math.max(1, opts.pages ?? 1);
+  const limit = Math.max(1, opts.limit ?? 10);
+  const kl = ddgRegion(opts.lang, opts.region);
+  const acceptLanguage = acceptLanguageHeader(opts.lang, opts.region);
+  const seen = /* @__PURE__ */ new Set();
+  const hits = [];
+  for (let p = 0; p < pages && hits.length < limit; p++) {
+    const r = await httpGet(spec.url(q, p, kl), { accept: "text/html", acceptLanguage, timeoutMs: opts.timeoutMs ?? 12e3 });
+    if (!r.ok || !r.body) {
+      if (p > 0) break;
+      const { throttled, why } = throttleReason(r.status);
+      return { hits: [], note: `${spec.label} ${why}.`, throttled };
+    }
+    const before = hits.length;
+    for (const f of spec.parse(r.body, limit * 2)) {
+      const key = canonicalizeUrl(f.url);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      hits.push(f);
+      if (hits.length >= limit) break;
+    }
+    if (hits.length === before) break;
+    if (p < pages - 1 && pageDelayMs()) await sleep(pageDelayMs());
+  }
+  return hits.length ? { hits } : { hits: [], note: `${spec.label} returned no results.` };
+}
+var SEARXNG_DEFAULT_BASE = "http://localhost:8888";
+var PROBE_TIMEOUT_MS2 = 2e3;
+var QUERY_TIMEOUT_MS = 8e3;
+function searxngBase(opts = {}) {
+  const raw = (opts.searxng ?? env("SEARXNG") ?? SEARXNG_DEFAULT_BASE).trim();
+  if (!raw || raw.toLowerCase() === "off") return null;
+  return raw.replace(/\/+$/, "");
+}
+function searxngIsExplicit(opts = {}) {
+  return !!(opts.searxng ?? env("SEARXNG"));
+}
+var probeCache2 = /* @__PURE__ */ new Map();
+function probeSearxng(base) {
+  let p = probeCache2.get(base);
+  if (!p) {
+    p = (async () => {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS2);
+      try {
+        const res = await fetch(`${base}/healthz`, { signal: ctrl.signal });
+        await res.text().catch(() => "");
+        return true;
+      } catch {
+        return false;
+      } finally {
+        clearTimeout(t);
+      }
+    })();
+    probeCache2.set(base, p);
+  }
+  return p;
+}
+async function searchViaSearxng(query, opts = {}) {
+  const base = searxngBase(opts);
+  if (!base) return { hits: [], notes: [`SearXNG disabled (${envName("SEARXNG")}=off).`] };
+  if (!await probeSearxng(base)) {
+    return {
+      hits: [],
+      notes: [
+        searxngIsExplicit(opts) ? `SearXNG not reachable at ${base}.` : `SearXNG not running at ${base} \u2014 start it with \`${brand().cli} searxng up\` for local, keyless discovery.`
+      ]
+    };
+  }
+  const pages = Math.max(1, opts.pages ?? 1);
+  const limit = Math.max(1, opts.limit ?? 10);
+  const acceptLanguage = acceptLanguageHeader(opts.lang, opts.region);
+  const root = `${base}/search?q=${encodeURIComponent(query)}&format=json&safesearch=1` + (opts.lang ? `&language=${encodeURIComponent(opts.lang)}` : "");
+  const notes = [];
+  const seen = /* @__PURE__ */ new Set();
+  const hits = [];
+  const suspended = /* @__PURE__ */ new Map();
+  for (let p = 0; p < pages && hits.length < limit; p++) {
+    const r = await httpGet(root + (p > 0 ? `&pageno=${p + 1}` : ""), { accept: "application/json", acceptLanguage, timeoutMs: QUERY_TIMEOUT_MS });
+    if (!r.ok) {
+      if (p === 0) notes.push(r.status === 429 || r.status === 503 ? `SearXNG rate-limited (HTTP ${r.status}).` : `SearXNG unreachable (status ${r.status}).`);
+      break;
+    }
+    let data;
+    try {
+      data = JSON.parse(r.body);
+    } catch {
+      if (p === 0) notes.push("SearXNG returned a non-JSON body \u2014 is `format: json` enabled on that instance?");
+      break;
+    }
+    for (const e of data.unresponsive_engines ?? []) {
+      const pair = Array.isArray(e) ? e : [];
+      if (typeof pair[0] === "string") suspended.set(pair[0], typeof pair[1] === "string" ? pair[1] : "unavailable");
+    }
+    const before = hits.length;
+    for (const raw of data.results ?? []) {
+      const it = raw;
+      if (typeof it.url !== "string") continue;
+      const key = canonicalizeUrl(it.url);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      hits.push({
+        url: it.url,
+        title: typeof it.title === "string" && it.title.trim() ? it.title.trim() : it.url,
+        snippet: typeof it.content === "string" ? it.content.trim() : "",
+        via: "searxng"
+      });
+      if (hits.length >= limit) break;
+    }
+    if (hits.length === before) break;
+    if (p < pages - 1 && pageDelayMs()) await sleep(pageDelayMs());
+  }
+  if (suspended.size) {
+    notes.push(`SearXNG upstreams throttled: ${[...suspended].map(([e, why]) => `${e} (${why})`).join(", ")} \u2014 fewer results than usual, not an empty web.`);
+  }
+  if (!hits.length && !notes.length) notes.push("SearXNG returned no results.");
+  return { hits, notes };
+}
+async function search(query, opts = {}) {
+  const q = query.trim();
+  if (!q) return { hits: [], notes: ["Empty query."] };
+  const viaSearxng = await searchViaSearxng(q, opts);
+  if (viaSearxng.hits.length) return viaSearxng;
+  const notes = [...viaSearxng.notes];
+  for (const engine of keylessEngines(opts)) {
+    const r = await searchViaKeyless(engine, q, { limit: opts.limit, pages: opts.pages, lang: opts.lang, region: opts.region });
+    if (r.hits.length) {
+      return { hits: r.hits.map((h) => ({ ...h, via: engine })), notes };
+    }
+    if (r.throttled && r.note) notes.push(r.note);
+  }
+  const fc = await searchViaFirecrawl(q, opts.limit ?? 10, opts);
+  const hits = (fc.hits ?? []).map((h) => ({ url: h.url, title: h.title, snippet: h.description, via: "firecrawl" }));
+  if (fc.why) notes.push(fc.why);
+  if (!hits.length) notes.push(`No results from any engine. \`${brand().cli} stack up\` starts SearXNG and Firecrawl locally.`);
+  return { hits, notes };
+}
 var MODEL_PULL_TIMEOUT_MS = 6e5;
 function embedModel() {
   return env("EMBED_MODEL") ?? "nomic-embed-text";
@@ -552,6 +1557,111 @@ function writeFileAtomic(path, content) {
 var DEFAULT_TTL_MS = 24 * 60 * 60 * 1e3;
 function cacheDir() {
   return env("CACHE_DIR") ?? brand().cacheDir ?? join4(tmpdir4(), brand().name, "cache");
+}
+function cachePath(url, acceptLanguage = "", extractor = "native") {
+  const canon = canonicalizeUrl(url);
+  const domain = domainOf(url).replace(/[^a-z0-9.-]/gi, "_") || "url";
+  return join4(cacheDir(), `${domain}-${fnv1a64(`${canon}\0${acceptLanguage}\0${extractor}`).toString(16)}.json`);
+}
+var PDF_CACHE_NS = "pdf";
+var DOC_CACHE_NS = "doc";
+async function currentExtractor(opts, url) {
+  if (looksLikePdfUrl(url)) return PDF_CACHE_NS;
+  if (docFormatForUrl(url)) return DOC_CACHE_NS;
+  const base = firecrawlBase(opts);
+  return base && await probeFirecrawl(base, firecrawlIsExplicit(opts)) ? "firecrawl" : "native";
+}
+var WRITTEN_NAMESPACES = ["native", "firecrawl", PDF_CACHE_NS, DOC_CACHE_NS];
+function readAnyNamespace(url, acceptLanguage) {
+  let best;
+  for (const ns of WRITTEN_NAMESPACES) {
+    const hit = readCache(url, acceptLanguage, ns);
+    if (hit && (!best || hit.cachedAt > best.cachedAt)) best = hit;
+  }
+  return best;
+}
+function ttlMs() {
+  const fallback = brand().cacheTtlMs ?? DEFAULT_TTL_MS;
+  if (env("CACHE_TTL_HOURS") !== void 0) return envInt("CACHE_TTL_HOURS", fallback / 36e5, 0) * 36e5;
+  return envInt("CACHE_TTL_MS", fallback);
+}
+var mode = { refresh: false, offline: false };
+function isCacheFresh(entry, now = Date.now()) {
+  return typeof entry.cachedAt === "number" && now - entry.cachedAt < ttlMs();
+}
+function revalidationHeaders(entry) {
+  const h = {};
+  if (entry.etag) h["if-none-match"] = entry.etag;
+  if (entry.lastModified) h["if-modified-since"] = entry.lastModified;
+  return h;
+}
+function entryPaths(url, acceptLanguage, extractor) {
+  const meta = cachePath(url, acceptLanguage, extractor);
+  return { meta, body: meta.replace(/\.json$/, ".body") };
+}
+function readCache(url, acceptLanguage = "", extractor = "native") {
+  const { meta, body } = entryPaths(url, acceptLanguage, extractor);
+  if (!existsSync4(meta)) return void 0;
+  try {
+    const entry = JSON.parse(readFileSync3(meta, "utf8"));
+    if (typeof entry.cachedAt !== "number") return void 0;
+    const text = existsSync4(body) ? readFileSync3(body, "utf8") : entry.text;
+    if (!text?.trim()) return void 0;
+    return { ...entry, text };
+  } catch {
+    return void 0;
+  }
+}
+function writeCache(url, res, now, acceptLanguage = "", extractor = "native") {
+  if (isNoWrite()) return;
+  try {
+    mkdirSync4(cacheDir(), { recursive: true });
+    const { meta, body } = entryPaths(url, acceptLanguage, extractor);
+    const { text, ...rest } = res;
+    writeFileSync4(body, text ?? "");
+    writeFileSync4(meta, JSON.stringify({ ...rest, cachedAt: now }));
+  } catch {
+  }
+}
+function touchCache(url, entry, now, acceptLanguage = "", extractor = "native") {
+  writeCache(url, entry, now, acceptLanguage, extractor);
+}
+async function cachedFetchAndExtract(url, opts = {}, enabled = false, now = Date.now()) {
+  const { refresh, offline } = mode;
+  if (!enabled && !offline) return fetchAndExtract(url, opts);
+  const lang = opts.acceptLanguage ?? "";
+  const served = (entry, note) => {
+    countFetch(Buffer.byteLength(entry.text), true);
+    return { ...entry, cached: true, ...note ? { note } : {} };
+  };
+  if (offline) {
+    const stored = readAnyNamespace(url, lang);
+    if (stored) return served(stored);
+    return { text: "", finalUrl: url, status: 0, note: `Offline: ${url} is not in the cache (drop --offline, or warm it with a normal run).` };
+  }
+  const ns = await currentExtractor(opts, url);
+  const hit = refresh ? void 0 : readCache(url, lang, ns);
+  if (hit && isCacheFresh(hit, now)) return served(hit);
+  const revalidate = hit ? revalidationHeaders(hit) : {};
+  if (hit && Object.keys(revalidate).length) {
+    const probe = await fetchAndExtract(url, { ...opts, headers: revalidate });
+    if (probe.status === 304) {
+      touchCache(url, hit, now, lang, ns);
+      return served(hit);
+    }
+    if (probe.text?.trim()) {
+      writeCache(url, probe, now, lang, ns === PDF_CACHE_NS || ns === DOC_CACHE_NS ? ns : probe.extractor ?? "native");
+      return probe;
+    }
+  }
+  const res = await fetchAndExtract(url, opts);
+  if (res.text?.trim()) {
+    writeCache(url, res, now, lang, ns === PDF_CACHE_NS || ns === DOC_CACHE_NS ? ns : res.extractor ?? "native");
+    return res;
+  }
+  const stale = hit ?? readAnyNamespace(url, lang);
+  if (stale) return served(stale, `${url} returned ${res.status || "no response"}; served the cached copy from ${new Date(stale.cachedAt).toISOString()}.`);
+  return res;
 }
 function pad(n) {
   return String(n).padStart(2, "0");
@@ -2433,8 +3543,8 @@ async function fetchSirene(query, opts = {}) {
 }
 
 // src/run.ts
-import { existsSync, mkdirSync, readFileSync, readdirSync } from "fs";
-import { join, resolve } from "path";
+import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync2, readdirSync } from "fs";
+import { join as join2, resolve } from "path";
 var DEFAULT_OUT = ".ultraprospect";
 function shortLabel(label) {
   const first = label.split(",")[0]?.trim();
@@ -2444,38 +3554,38 @@ function newRun(outRoot, label) {
   const slug = slugify(shortLabel(label)) || "run";
   const id = runId();
   const root = resolve(outRoot);
-  const dir = join(root, "runs", `${slug}-${id}`);
+  const dir = join2(root, "runs", `${slug}-${id}`);
   mkdirSync(dir, { recursive: true });
   return { root, dir, slug, id };
 }
 function resolveRun(pathOrRoot) {
   const p = resolve(pathOrRoot);
-  if (existsSync(join(p, "manifest.json"))) return p;
-  const runsDir = existsSync(join(p, "runs")) ? join(p, "runs") : p;
-  if (!existsSync(runsDir)) throw new Error(`no run directory at ${p}`);
-  const candidates = readdirSync(runsDir, { withFileTypes: true }).filter((e) => e.isDirectory() && existsSync(join(runsDir, e.name, "manifest.json"))).map((e) => e.name).sort();
+  if (existsSync2(join2(p, "manifest.json"))) return p;
+  const runsDir = existsSync2(join2(p, "runs")) ? join2(p, "runs") : p;
+  if (!existsSync2(runsDir)) throw new Error(`no run directory at ${p}`);
+  const candidates = readdirSync(runsDir, { withFileTypes: true }).filter((e) => e.isDirectory() && existsSync2(join2(runsDir, e.name, "manifest.json"))).map((e) => e.name).sort();
   const newest = candidates.at(-1);
   if (!newest) throw new Error(`no run with a manifest.json under ${runsDir}`);
-  return join(runsDir, newest);
+  return join2(runsDir, newest);
 }
 function requireManifest(runDir) {
   const m = readManifest(runDir);
-  if (!m) throw new Error(`${join(runDir, "manifest.json")} is missing or unreadable \u2014 is this a run directory?`);
+  if (!m) throw new Error(`${join2(runDir, "manifest.json")} is missing or unreadable \u2014 is this a run directory?`);
   return m;
 }
 function writeRunManifest(runDir, manifest) {
   writeManifest(runDir, manifest);
 }
 function readPlaces(runDir) {
-  const places = readJsonSafe(join(runDir, "places.json"));
-  if (!places) throw new Error(`${join(runDir, "places.json")} is missing \u2014 run \`ultraprospect scan\` first`);
+  const places = readJsonSafe(join2(runDir, "places.json"));
+  if (!places) throw new Error(`${join2(runDir, "places.json")} is missing \u2014 run \`ultraprospect scan\` first`);
   return places;
 }
 function writePlaces(runDir, places) {
-  writeArtifact(join(runDir, "places.json"), JSON.stringify(places, null, 2) + "\n");
+  writeArtifact(join2(runDir, "places.json"), JSON.stringify(places, null, 2) + "\n");
 }
 function writeJson(runDir, file, value) {
-  writeArtifact(join(runDir, file), JSON.stringify(value, null, 2) + "\n");
+  writeArtifact(join2(runDir, file), JSON.stringify(value, null, 2) + "\n");
 }
 var LICENCES = [
   "Places and tags: \xA9 OpenStreetMap contributors, ODbL (https://www.openstreetmap.org/copyright)",
@@ -2501,25 +3611,25 @@ function emptyManifest(slug) {
 }
 
 // src/fixture.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync2 } from "fs";
-import { join as join2 } from "path";
+import { existsSync as existsSync3, mkdirSync as mkdirSync2 } from "fs";
+import { join as join3 } from "path";
 function loadFixture(dir) {
-  const target = readJsonSafe(join2(dir, "target.json"));
-  if (!target) throw new Error(`${join2(dir, "target.json")} is missing \u2014 a fixture needs the geocoded target it was recorded for`);
+  const target = readJsonSafe(join3(dir, "target.json"));
+  if (!target) throw new Error(`${join3(dir, "target.json")} is missing \u2014 a fixture needs the geocoded target it was recorded for`);
   for (const file of ["osm.json", "sirene.json"]) {
-    if (!existsSync2(join2(dir, file))) throw new Error(`${join2(dir, file)} is missing \u2014 record it with \`ultraprospect scan --record <dir>\``);
+    if (!existsSync3(join3(dir, file))) throw new Error(`${join3(dir, file)} is missing \u2014 record it with \`ultraprospect scan --record <dir>\``);
   }
   return {
     target,
-    osm: readJsonSafe(join2(dir, "osm.json")) ?? [],
-    sirene: readJsonSafe(join2(dir, "sirene.json")) ?? []
+    osm: readJsonSafe(join3(dir, "osm.json")) ?? [],
+    sirene: readJsonSafe(join3(dir, "sirene.json")) ?? []
   };
 }
 function recordFixture(dir, outcome, target) {
   mkdirSync2(dir, { recursive: true });
-  writeArtifact(join2(dir, "target.json"), JSON.stringify(target, null, 2) + "\n");
-  writeArtifact(join2(dir, "osm.json"), JSON.stringify(outcome.osm, null, 2) + "\n");
-  writeArtifact(join2(dir, "sirene.json"), JSON.stringify(outcome.sirene, null, 2) + "\n");
+  writeArtifact(join3(dir, "target.json"), JSON.stringify(target, null, 2) + "\n");
+  writeArtifact(join3(dir, "osm.json"), JSON.stringify(outcome.osm, null, 2) + "\n");
+  writeArtifact(join3(dir, "sirene.json"), JSON.stringify(outcome.sirene, null, 2) + "\n");
 }
 
 // src/scan.ts
@@ -2707,8 +3817,256 @@ function writeScan(runDir, outcome) {
   writeRunManifest(runDir, outcome.manifest);
 }
 
+// src/pages.ts
+import { mkdirSync as mkdirSync5 } from "fs";
+import { join as join6 } from "path";
+function pageDirFor(placeId) {
+  return join6("pages", placeId.replace(/[^a-zA-Z0-9._-]/g, "_"));
+}
+function newPageStore(existing = []) {
+  const highest = existing.reduce((max, p) => Math.max(max, Number.parseInt(p.id.slice(1), 10) || 0), 0);
+  return { next: highest + 1 };
+}
+async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
+  let result;
+  try {
+    result = opts.keepHtml ? await fetchAndExtract(url, { keepHtml: true }) : await cachedFetchAndExtract(url);
+  } catch {
+    return void 0;
+  }
+  const text = (result.text ?? "").trim();
+  if (text.length < 120) return void 0;
+  const id = `P${store.next++}`;
+  const dir = pageDirFor(placeId);
+  const extract = join6(dir, `${id}.md`);
+  const fetchedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const header = [
+    `# ${id} \u2014 ${result.title ?? url}`,
+    "",
+    `- url: ${result.finalUrl ?? url}`,
+    `- role: ${role}`,
+    `- fetched: ${fetchedAt}`,
+    `- extractor: ${result.extractor ?? "native"}`,
+    `- status: ${result.status ?? 200}`,
+    "",
+    "---",
+    ""
+  ].join("\n");
+  if (!isNoWrite()) mkdirSync5(join6(runDir, dir), { recursive: true });
+  writeArtifact(join6(runDir, extract), header + text + "\n");
+  return {
+    record: {
+      id,
+      url: result.finalUrl ?? url,
+      role,
+      title: result.title,
+      fetchedAt,
+      extractor: result.extractor,
+      status: result.status,
+      chars: text.length,
+      extract
+    },
+    text,
+    title: result.title,
+    html: result.html
+  };
+}
+
+// src/resolve.ts
+var DIRECTORY_HOSTS = [
+  "pagesjaunes.fr",
+  "societe.com",
+  "verif.com",
+  "infogreffe.fr",
+  "annuaire-entreprises.data.gouv.fr",
+  "bodacc.fr",
+  "manageo.fr",
+  "kompass.com",
+  "europages.fr",
+  "yelp.",
+  "tripadvisor.",
+  "mappy.com",
+  "petitfute.com",
+  "justacote.com",
+  "cylex-france.fr",
+  "118712.fr",
+  "hoodspot.fr",
+  "dirigeants.bfmtv.com",
+  "pappers.fr",
+  "score3.fr",
+  "leboncoin.fr",
+  "amazon.",
+  "ebay.",
+  "doctolib.fr",
+  "ubereats.com",
+  "deliveroo.fr",
+  "thefork.",
+  "lafourchette.",
+  "booking.com",
+  "airbnb.",
+  "indeed.com",
+  "glassdoor."
+];
+var SOCIAL_HOSTS = ["facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "youtube.com", "tiktok.com", "pinterest.", "wa.me"];
+function classifyHost(url) {
+  let host;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return "directory";
+  }
+  if (SOCIAL_HOSTS.some((h) => host.includes(h))) return "social";
+  if (DIRECTORY_HOSTS.some((h) => host.includes(h))) return "directory";
+  return "own";
+}
+function queriesFor(place) {
+  const town = place.address.commune ?? place.address.codePostal ?? "";
+  const names = /* @__PURE__ */ new Set();
+  if (place.osm?.name) names.add(place.osm.name);
+  if (place.sirene?.enseignes[0]) names.add(place.sirene.enseignes[0]);
+  if (place.sirene?.nomComplet) names.add(place.sirene.nomComplet.replace(/\s*\([^)]*\)/g, "").trim());
+  const queries = [];
+  for (const n of names) {
+    queries.push(town ? `${n} ${town}` : n);
+  }
+  if (place.sirene?.siren) queries.push(`"${place.sirene.siren}"`);
+  return [...new Set(queries)].slice(0, 3);
+}
+function corroborate(place, pageText, pageTitle) {
+  const haystack = foldAccents(`${pageTitle ?? ""}
+${pageText}`).toLowerCase();
+  const digits = haystack.replace(/[^0-9]/g, "");
+  const evidence = [];
+  const siren = place.sirene?.siren;
+  const siret = place.sirene?.siret;
+  if (siret && digits.includes(siret)) evidence.push(`SIRET ${siret} on the page`);
+  else if (siren && digits.includes(siren)) evidence.push(`SIREN ${siren} on the page`);
+  const street = place.address.libelleVoie;
+  const postcode = place.address.codePostal;
+  if (street && postcode) {
+    const streetNorm = foldAccents(street).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const streetWords = streetNorm.split(" ").filter((w) => w.length > 3);
+    const streetSeen = streetWords.length > 0 && streetWords.every((w) => haystack.includes(w));
+    if (streetSeen && haystack.includes(postcode)) evidence.push(`address "${street} ${postcode}" on the page`);
+  }
+  const candidateNames = [place.osm?.name, place.sirene?.enseignes[0], place.sirene?.nomComplet].filter((n) => Boolean(n));
+  for (const name of candidateNames) {
+    const distinctive = [...tokenSet(normalizeName(name))].filter((t) => t.length >= 4);
+    if (distinctive.length === 0) continue;
+    if (distinctive.every((t) => haystack.includes(t))) {
+      evidence.push(`name "${name}" on the page`);
+      break;
+    }
+  }
+  if (evidence.length === 0) {
+    return { ok: false, evidence: [], reason: "the page carries neither the company's name, its address nor its SIREN" };
+  }
+  return { ok: true, evidence };
+}
+function needsResolving(places) {
+  return places.filter((p) => !p.website || p.website.confidence === "declared");
+}
+function candidateUrlsFor(place, hits) {
+  const urls = [];
+  if (place.website?.url) urls.push(place.website.url);
+  for (const h of hits) urls.push(h.url);
+  return [...new Set(urls)].slice(0, 3);
+}
+function groupHits(places, hits) {
+  const byPlace = /* @__PURE__ */ new Map();
+  const tagged = hits.filter((h) => h.placeId);
+  if (tagged.length) {
+    for (const h of tagged) {
+      const list2 = byPlace.get(h.placeId) ?? [];
+      list2.push(h);
+      byPlace.set(h.placeId, list2);
+    }
+    return byPlace;
+  }
+  for (const place of places) {
+    const names = [place.osm?.name, place.sirene?.enseignes[0], place.sirene?.nomComplet].filter((n) => Boolean(n));
+    const tokens = names.flatMap((n) => [...tokenSet(normalizeName(n))].filter((t) => t.length >= 4));
+    if (tokens.length === 0) continue;
+    for (const h of hits) {
+      const hay = foldAccents(`${h.title ?? ""} ${h.snippet ?? ""} ${h.url}`).toLowerCase();
+      if (tokens.some((t) => hay.includes(t))) {
+        const list2 = byPlace.get(place.id) ?? [];
+        list2.push(h);
+        byPlace.set(place.id, list2);
+      }
+    }
+  }
+  return byPlace;
+}
+async function runResolve(runDir, places, store, opts = {}) {
+  const notes = [];
+  const note = (n) => {
+    notes.push(n);
+    opts.onNote?.(n);
+  };
+  const outcome = { pages: /* @__PURE__ */ new Map(), corroborated: 0, rejected: 0, unchanged: 0, socials: 0, notes };
+  const targets = needsResolving(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
+  const grouped = groupHits(targets, opts.webResults ?? []);
+  if (opts.webResults?.length) note(`resolve: ${opts.webResults.length} supplied web result(s) attributed to ${grouped.size} place(s)`);
+  else note("resolve: no --web-results supplied; only OSM-declared sites and the keyless fallback will be tried");
+  let done = 0;
+  for (const place of targets) {
+    done++;
+    opts.onProgress?.(done, targets.length, place.name);
+    let hits = grouped.get(place.id) ?? [];
+    if (hits.length === 0 && opts.useEngineSearch) {
+      const query = queriesFor(place)[0];
+      if (query) {
+        try {
+          const res = await search(query, { limit: 3 });
+          hits = (res.hits ?? []).map((h) => ({ url: h.url, title: h.title, snippet: h.snippet }));
+        } catch {
+        }
+      }
+    }
+    const candidates = candidateUrlsFor(place, hits);
+    if (candidates.length === 0) {
+      outcome.unchanged++;
+      continue;
+    }
+    let settled = false;
+    for (const url of candidates) {
+      const kind = classifyHost(url);
+      if (kind === "social") {
+        if (!place.contacts.socials.some((s) => s.value === url)) {
+          place.contacts.socials.push({ value: url, from: "web", lane: "web", note: "found while resolving the website" });
+          outcome.socials++;
+        }
+        continue;
+      }
+      if (kind === "directory") continue;
+      const page = await fetchPage2(runDir, place.id, url, "home", store);
+      if (!page) continue;
+      const check = corroborate(place, page.text, page.title);
+      const list2 = outcome.pages.get(place.id) ?? [];
+      list2.push(page.record);
+      outcome.pages.set(place.id, list2);
+      place.pages = [.../* @__PURE__ */ new Set([...place.pages, page.record.id])];
+      if (check.ok) {
+        place.website = { url: page.record.url, confidence: "corroborated", evidence: [page.record.id, ...check.evidence] };
+        outcome.corroborated++;
+        settled = true;
+        break;
+      }
+      place.website = { url: page.record.url, confidence: "unverified", evidence: [page.record.id, check.reason ?? "no corroboration"] };
+      outcome.rejected++;
+      settled = true;
+    }
+    if (!settled) outcome.unchanged++;
+  }
+  note(
+    `resolve: ${outcome.corroborated} corroborated, ${outcome.rejected} fetched but unverified, ${outcome.socials} social profile(s), ${outcome.unchanged} left without a site`
+  );
+  return outcome;
+}
+
 // src/cli.ts
-var COMMANDS = ["where", "scan", "match", "doctor", "version"];
+var COMMANDS = ["where", "scan", "match", "resolve", "doctor", "version"];
 var VALUE_FLAGS = [
   "where",
   "lat",
@@ -2729,9 +4087,11 @@ var VALUE_FLAGS = [
   "overpass",
   "apply",
   "fixture",
-  "record"
+  "record",
+  "web-results",
+  "limit"
 ];
-var BOOL_FLAGS = ["json", "no-osm", "no-sirene", "include-ceased", "no-people", "stdout", "help", "version"];
+var BOOL_FLAGS = ["json", "no-osm", "no-sirene", "include-ceased", "no-people", "queries", "engine-search", "stdout", "help", "version"];
 var HELP = `ultraprospect ${VERSION} \u2014 turn a place into a qualified prospect list
 
 USAGE
@@ -2741,6 +4101,7 @@ COMMANDS
   where <query>          Resolve a place name to a search area. Refuses to guess when ambiguous.
   scan                   Discover every company in the area, from OSM and the French register.
   match --apply <file>   Fold the agent's adjudication of MATCH.todo.json back into places.json.
+  resolve                Find each company's own website and prove it is theirs.
   doctor                 Check node, network and the health of every upstream.
   version                Print the version.
 
@@ -2766,6 +4127,12 @@ FILTERS (scan)
   --overpass <url>       Override the Overpass endpoint instead of rotating mirrors.
   --fixture <dir>        Replay a recorded sweep instead of calling the live lanes. Offline.
   --record <dir>         Write this run's raw lane output as a replayable fixture.
+
+WEBSITE DISCOVERY (resolve)
+  --queries              Print the search queries to run, one per line, and stop.
+  --web-results <file>   Hits from your own WebSearch: [{url,title,snippet,placeId?}]. "-" reads stdin.
+  --engine-search        Fall back to the keyless search engine when no hits were supplied.
+  --limit <n>            Only resolve this many places.
 
 ADJUDICATION (match)
   --apply <file>         A JSON array of {osmId, siret|siren, merge, why}. "-" reads stdin.
@@ -2917,7 +4284,7 @@ async function cmdMatch(values, bools) {
   if (!values.run) throw new UsageError("match needs --run <dir>");
   if (!values.apply) throw new UsageError('match needs --apply <file> (a JSON array of {osmId, siret, merge}), or "-" for stdin');
   const runDir = resolveRun(values.run);
-  const raw = values.apply === "-" ? readFileSync2(0, "utf8") : readFileSync2(values.apply, "utf8");
+  const raw = values.apply === "-" ? readFileSync5(0, "utf8") : readFileSync5(values.apply, "utf8");
   let verdicts;
   try {
     const parsedJson = JSON.parse(raw);
@@ -2949,6 +4316,55 @@ async function cmdMatch(values, bools) {
   say(`next: ultraprospect resolve --run ${runDir}`);
   return EXIT_OK;
 }
+async function cmdResolve(values, bools) {
+  if (!values.run) throw new UsageError("resolve needs --run <dir>");
+  const runDir = resolveRun(values.run);
+  const places = readPlaces(runDir);
+  const limit = values.limit ? clampInt(values.limit, 1, 1e5, 50) : void 0;
+  const targets = needsResolving(places).slice(0, limit ?? Number.POSITIVE_INFINITY);
+  if (bools.has("queries")) {
+    const plan = targets.map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p) }));
+    if (bools.has("json")) out(jsonLine(plan));
+    else for (const item of plan) for (const q of item.queries) out(q);
+    say("");
+    say(`resolve: ${targets.length} place(s) need a website, ${plan.reduce((n, p) => n + p.queries.length, 0)} quer(y|ies) to run.`);
+    say("  Run your own WebSearch once per query. Pool EVERY hit into ONE JSON array,");
+    say('  duplicates and all: [{"url": "\u2026", "title": "\u2026", "snippet": "\u2026", "placeId": "\u2026"}]');
+    say(`next: ultraprospect resolve --run ${runDir} --web-results <file>`);
+    return EXIT_OK;
+  }
+  let webResults;
+  if (values["web-results"]) {
+    const raw = values["web-results"] === "-" ? readFileSync5(0, "utf8") : readFileSync5(values["web-results"], "utf8");
+    try {
+      const parsed = JSON.parse(raw);
+      webResults = Array.isArray(parsed) ? parsed : parsed?.hits ?? [];
+    } catch (e) {
+      throw new UsageError(`--web-results is not valid JSON: ${e.message}`);
+    }
+  }
+  const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }))));
+  const outcome = await runResolve(runDir, places, store, {
+    webResults,
+    limit,
+    useEngineSearch: bools.has("engine-search"),
+    onNote: (n) => say(`  ${n}`),
+    onProgress: (done, total, name) => {
+      if (done % 10 === 0 || done === total) say(`  resolve: ${done}/${total} \u2014 ${name}`);
+    }
+  });
+  writePlaces(runDir, places);
+  const manifest = requireManifest(runDir);
+  manifest.counts.withWebsite = places.filter((p) => p.website?.confidence === "corroborated").length;
+  manifest.notes.push(...outcome.notes);
+  writeRunManifest(runDir, manifest);
+  if (bools.has("json")) {
+    out(jsonLine({ run: runDir, corroborated: outcome.corroborated, rejected: outcome.rejected, socials: outcome.socials, unchanged: outcome.unchanged }));
+  }
+  say("");
+  say(`next: ultraprospect enrich --run ${runDir} --tier 1`);
+  return outcome.corroborated > 0 || outcome.unchanged === 0 ? EXIT_OK : EXIT_FAILURE;
+}
 async function main(argv) {
   brandEngine();
   const parsed = parseArgs(argv, SPEC);
@@ -2970,6 +4386,8 @@ async function main(argv) {
       return cmdScan(values, bools, text);
     case "match":
       return cmdMatch(values, bools);
+    case "resolve":
+      return cmdResolve(values, bools);
     case "doctor":
       return runDoctor({ json: bools.has("json"), out, say });
     case "version":

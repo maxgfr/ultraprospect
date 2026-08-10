@@ -24,11 +24,13 @@ import { resolveWhere } from "./geocode.js";
 import { runScan, writeScan } from "./scan.js";
 import { loadFixture, recordFixture } from "./fixture.js";
 import { applyVerdicts, type MatchVerdict } from "./match.js";
+import { needsResolving, queriesFor, runResolve, type WebHit } from "./resolve.js";
+import { newPageStore } from "./pages.js";
 import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, writePlaces, writeRunManifest } from "./run.js";
 import { clampInt, parseBbox, parseDistanceM } from "./util.js";
 import { VERSION } from "./version.js";
 
-export const COMMANDS = ["where", "scan", "match", "doctor", "version"] as const;
+export const COMMANDS = ["where", "scan", "match", "resolve", "doctor", "version"] as const;
 
 export const VALUE_FLAGS = [
   "where",
@@ -51,9 +53,11 @@ export const VALUE_FLAGS = [
   "apply",
   "fixture",
   "record",
+  "web-results",
+  "limit",
 ] as const;
 
-export const BOOL_FLAGS = ["json", "no-osm", "no-sirene", "include-ceased", "no-people", "stdout", "help", "version"] as const;
+export const BOOL_FLAGS = ["json", "no-osm", "no-sirene", "include-ceased", "no-people", "queries", "engine-search", "stdout", "help", "version"] as const;
 
 export const HELP = `ultraprospect ${VERSION} — turn a place into a qualified prospect list
 
@@ -64,6 +68,7 @@ COMMANDS
   where <query>          Resolve a place name to a search area. Refuses to guess when ambiguous.
   scan                   Discover every company in the area, from OSM and the French register.
   match --apply <file>   Fold the agent's adjudication of MATCH.todo.json back into places.json.
+  resolve                Find each company's own website and prove it is theirs.
   doctor                 Check node, network and the health of every upstream.
   version                Print the version.
 
@@ -89,6 +94,12 @@ FILTERS (scan)
   --overpass <url>       Override the Overpass endpoint instead of rotating mirrors.
   --fixture <dir>        Replay a recorded sweep instead of calling the live lanes. Offline.
   --record <dir>         Write this run's raw lane output as a replayable fixture.
+
+WEBSITE DISCOVERY (resolve)
+  --queries              Print the search queries to run, one per line, and stop.
+  --web-results <file>   Hits from your own WebSearch: [{url,title,snippet,placeId?}]. "-" reads stdin.
+  --engine-search        Fall back to the keyless search engine when no hits were supplied.
+  --limit <n>            Only resolve this many places.
 
 ADJUDICATION (match)
   --apply <file>         A JSON array of {osmId, siret|siren, merge, why}. "-" reads stdin.
@@ -301,6 +312,64 @@ async function cmdMatch(values: Record<string, string>, bools: ReadonlySet<strin
   return EXIT_OK;
 }
 
+async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
+  if (!values.run) throw new UsageError("resolve needs --run <dir>");
+  const runDir = resolveRun(values.run);
+  const places = readPlaces(runDir);
+  const limit = values.limit ? clampInt(values.limit, 1, 100_000, 50) : undefined;
+  const targets = needsResolving(places).slice(0, limit ?? Number.POSITIVE_INFINITY);
+
+  // The queries lane: the engine sizes the sweep, the agent runs its own
+  // WebSearch, and the hits come back through --web-results. The engine never
+  // pretends to be a search engine.
+  if (bools.has("queries")) {
+    const plan = targets.map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p) }));
+    if (bools.has("json")) out(jsonLine(plan));
+    else for (const item of plan) for (const q of item.queries) out(q);
+    say("");
+    say(`resolve: ${targets.length} place(s) need a website, ${plan.reduce((n, p) => n + p.queries.length, 0)} quer(y|ies) to run.`);
+    say("  Run your own WebSearch once per query. Pool EVERY hit into ONE JSON array,");
+    say('  duplicates and all: [{"url": "…", "title": "…", "snippet": "…", "placeId": "…"}]');
+    say(`next: ultraprospect resolve --run ${runDir} --web-results <file>`);
+    return EXIT_OK;
+  }
+
+  let webResults: WebHit[] | undefined;
+  if (values["web-results"]) {
+    const raw = values["web-results"] === "-" ? readFileSync(0, "utf8") : readFileSync(values["web-results"], "utf8");
+    try {
+      const parsed = JSON.parse(raw);
+      webResults = Array.isArray(parsed) ? parsed : (parsed?.hits ?? []);
+    } catch (e) {
+      throw new UsageError(`--web-results is not valid JSON: ${(e as Error).message}`);
+    }
+  }
+
+  const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }) as any)));
+  const outcome = await runResolve(runDir, places, store, {
+    webResults,
+    limit,
+    useEngineSearch: bools.has("engine-search"),
+    onNote: (n) => say(`  ${n}`),
+    onProgress: (done, total, name) => {
+      if (done % 10 === 0 || done === total) say(`  resolve: ${done}/${total} — ${name}`);
+    },
+  });
+
+  writePlaces(runDir, places);
+  const manifest = requireManifest(runDir);
+  manifest.counts.withWebsite = places.filter((p) => p.website?.confidence === "corroborated").length;
+  manifest.notes.push(...outcome.notes);
+  writeRunManifest(runDir, manifest);
+
+  if (bools.has("json")) {
+    out(jsonLine({ run: runDir, corroborated: outcome.corroborated, rejected: outcome.rejected, socials: outcome.socials, unchanged: outcome.unchanged }));
+  }
+  say("");
+  say(`next: ultraprospect enrich --run ${runDir} --tier 1`);
+  return outcome.corroborated > 0 || outcome.unchanged === 0 ? EXIT_OK : EXIT_FAILURE;
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   brandEngine();
   const parsed = parseArgs(argv, SPEC);
@@ -324,6 +393,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return cmdScan(values, bools, text);
     case "match":
       return cmdMatch(values, bools);
+    case "resolve":
+      return cmdResolve(values, bools);
     case "doctor":
       return runDoctor({ json: bools.has("json"), out, say });
     case "version":
