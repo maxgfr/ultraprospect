@@ -1,8 +1,13 @@
 # Reading the websites
 
+Outside France this is not an enrichment step, it is the identity step: the
+legal-notice page tier 1 fetches carries the registration number that `confirm`
+turns into a register record. Skipping tier 1 there does not produce a thinner
+dossier, it produces a run with no legal identities at all.
+
 ## Why there are two tiers
 
-A small French town holds around a thousand mapped businesses, two hundred of
+A small European town holds around a thousand mapped businesses, two hundred of
 them with a website. Fetching eight pages each, at the per-host pacing that
 keeps this tool welcome, is six thousand requests and several hours — to produce
 a file whose reader will look at twenty rows.
@@ -12,7 +17,7 @@ So enrichment is split by what a request buys you.
 **Tier 1** runs on everything with a corroborated site: `robots.txt`, the
 sitemap, the homepage, the legal notice. Four requests, and they answer the
 questions that decide whether a company deserves more: is the site alive, what
-does it say it does, does it run a hiring pipeline, is its SIREN published there
+does it say it does, does it run a hiring pipeline, is its registration published there
 (which independently confirms the register match).
 
 **Tier 2** runs on the ones you chose. It walks the site by page ROLE and reads
@@ -30,7 +35,8 @@ was earned.
 
 ## Page roles
 
-URLs are classified by path, in French and English, and one page is taken per
+URLs are classified by path — French, English, German, Spanish and Italian —
+and one page is taken per
 role, preferring the section's landing page over an article inside it:
 
 | Role | Matches |
@@ -90,7 +96,11 @@ Everything in `signals` is a count or a presence. The engine does not conclude:
 - `pageCount`, `sitemapUrls`, `lastContentAt` (newest sitemap `lastmod`)
 - `cms`, `analytics[]`, `techStack[]`, `hasEcommerce`, `hasPricingPage`
 - `languages[]` from `<html lang>` and hreflang
-- `legalIdOnSite` — a SIREN, SIRET or VAT number published on the site itself
+- `legalIdOnSite` — a registration number published on the site itself: a SIREN
+  or SIRET in France, a Handelsregister number in Germany, a CIF in Spain, a
+  company number in the UK, or an intra-community VAT number anywhere in the EU.
+  `confirm` turns these into a register identity where an authority will name
+  the holder
 - `socialProfiles[]` — profiles, not embedded videos and not share buttons
 
 `lastContentAt` is a signal, not a guarantee: some generators stamp every page

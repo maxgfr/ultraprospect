@@ -1,9 +1,15 @@
-# The five upstreams
+# The upstreams
 
-None of these belong to us. All are free, keyless and public; three are
+None of these belong to us. Almost all are free, keyless and public; several are
 volunteer-run. Everything here was measured against the live services, not read
 off a spec sheet — where the two disagree, the measurement is recorded and the
 code follows it.
+
+**There is no fixed number of them.** The geocoders, Overpass and the ATS boards
+are constant; the register connectors come from `CONNECTORS` in
+`src/registry/index.ts`, one per country, and that same table drives `doctor`,
+the manifest's attributions and the weekly canary. This page describes the
+constants in full and then the shape every register connector shares.
 
 ## Nominatim — geocoding, worldwide
 
@@ -18,7 +24,8 @@ of the rectangle around it.
   policy. A generic one is grounds for blocking the address, for everyone
   behind it.
 - Returns `boundingbox` as `[minLat, maxLat, minLon, maxLon]` **as strings**.
-- `address.country_code` decides whether the register lane runs at all.
+- `address.country_code` decides which register connectors apply, and whether
+  any of them can sweep.
 - Ambiguity is resolved by refusal: when a rival hit has comparable
   `importance` and sits more than 10 km away, `where` lists the candidates and
   exits 2.
@@ -64,7 +71,63 @@ seconds`, `out of memory`) means quarter the area and retry. Conflating them
 either hammers one busy host with four sub-queries or gives up on a perfectly
 ordinary town.
 
-## recherche-entreprises — the French register
+## The register connectors
+
+A connector DECLARES what it can do, and the pipeline reads the declaration:
+
+| Capability | What it means | Who has it |
+|---|---|---|
+| `sweep` | Enumerate every company inside a bounded territory. | **France, and nobody else.** |
+| `lookup` | Find a company by name and locality. | most connectors |
+| `verifyId` | Confirm an identifier read off the company's own site, and return what the register filed under it. | most connectors |
+
+That table is not a design preference, it is what the world's open data
+supports. Every other public register was probed and either needs a key, needs
+credentials, or offers no geographic query at all. A connector with no `sweep`
+is not a degraded sweep connector — it answers a different question, and
+`LaneCoverage.mode` records which question was answered.
+
+Each connector also carries its own `canary()`, asserting the response shape ITS
+parser depends on. Adding a country therefore adds its drift detection, with
+nothing to remember elsewhere.
+
+### What each one will not do
+
+- **eu-vies** — all 27 member states, keyless. Confirms that a VAT number is a
+  live intra-community registration. **Germany and Spain answer `"---"` for the
+  trader's name**, so a number can be confirmed without its holder being
+  disclosed. It also does not know a number that was never enabled for
+  intra-EU trade, which is most small traders — that is not evidence the number
+  is wrong, and the run says so. `MS_UNAVAILABLE` is a member state's own outage
+  and is reported as inconclusive, never as invalid.
+- **gleif** — worldwide, keyless, and the only keyless route from a German
+  `HRB` number to a filed identity (`entity.registeredAs`). Covers entities
+  holding an LEI, roughly 2.7 million against tens of millions of companies: it
+  will know a bank and not the bakery next door. German register numbers repeat
+  across courts, so an exact number match is checked against the name too.
+- **gb-companies-house** — a free key (email only). Without one the connector
+  reports itself unavailable with the steps, and the run continues. It does not
+  declare `sweep` even though `/advanced-search` takes a locality: a locality
+  string cannot be aligned with the OSM lane's geometry, and labelling a
+  different territory "whole" is exactly what this tool refuses.
+- **no-brreg** — keyless, and the richest after France's: an EXACT headcount
+  (`antallAnsatte`) rather than a band, and the company's own website
+  (`hjemmeside`), which is otherwise something `resolve` has to go and prove.
+- **fi-prh** — keyless. `status` is `"2"` for live companies AND dissolved ones;
+  it means "registered in YTJ", not "trading". Liveness comes from `endDate` and
+  `tradeRegisterStatus`. Names arrive as a full history, so an expired name is
+  kept for matching and never printed as the company's identity.
+- **cz-ares** — keyless, name search by POST. `czNace2008` is ragged: 5-digit,
+  3-digit and placeholder codes appear in one record.
+- **pl-krs** — keyless, **lookup by KRS number only**. The public API has no
+  name search, so the connector declares `verifyId` and nothing else.
+- **us-edgar** — keyless, and the narrowest here: the only stable name→CIK route
+  is `company_tickers.json`, which lists companies with a traded ticker, about
+  10 400. Whole Foods is not in it. It also **rejects a User-Agent containing a
+  URL** with 403 and wants a bare `name email`, making it the one upstream that
+  refuses this tool's normal polite string.
+
+### recherche-entreprises — the French register, and the only sweepable one
 
 `https://recherche-entreprises.api.gouv.fr`, Licence Ouverte 2.0, 7 req/s, no key.
 
@@ -83,13 +146,13 @@ it and the API answers with an empty page, then a 400 that says so.
 
 **`total_results` is CLAMPED at 10 000** — not documented, and the important
 one. Asking for every legal unit in Vincennes reports exactly 10 000; summing
-the same query across the 21 NAF sections reports **37 717**. The field is a
+the same query across the 21 NACE sections reports **37 717**. The field is a
 floor, never a count. Any code that reads 10 000 as "the total" silently loses
 two thirds of a town.
 
 The lane therefore treats `>= 10 000` as "at least this many" and splits: first
-by **NAF section** (21 parts — usually enough; the largest section in a French
-commune runs to a few thousand), then by **NAF division** inside the section. A
+by **NACE section** (21 parts — usually enough; the largest section in a French
+commune runs to a few thousand), then by **NACE division** inside the section. A
 leaf that still reports the cap is recorded as truncated with its reason.
 
 `activite_principale` accepts **only full codes** (`62.01Z`); a `62` prefix is
@@ -134,7 +197,9 @@ through the address parser.
 ## The ATS job boards
 
 Public, keyless JSON, used by the enrichment stage to read openings without
-executing a page's JavaScript:
+executing a page's JavaScript. They decide whether `isHiring` is a finding or an
+absence, so the weekly canary asserts their shape: a board that changed silently
+makes every company on it read as not hiring.
 
 - Greenhouse — `https://boards-api.greenhouse.io/v1/boards/<token>/jobs`
 - Lever — `https://api.lever.co/v0/postings/<company>?mode=json`

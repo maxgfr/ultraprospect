@@ -158,7 +158,7 @@ export interface Signals {
   hasEcommerce: boolean;
   languages: string[];
   socialProfiles: string[];
-  /** SIREN or VAT number found on the site itself — corroborates the register match. */
+  /** A registration or VAT number found on the site itself — corroborates the register match. */
   legalIdOnSite?: string;
 }
 

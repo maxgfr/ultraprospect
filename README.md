@@ -1,9 +1,9 @@
 # ultraprospect
 
 **Turn a place into a prospect list you can defend.** Give it a town, a street
-or a radius; it sweeps OpenStreetMap worldwide and the French company register
-for the same territory, fuses the two into one entity per company, and refuses
-to guess where guessing would be invisible.
+or a radius; it sweeps OpenStreetMap worldwide, attaches whatever company
+register the country actually has, and refuses to guess where guessing would be
+invisible.
 
 Zero dependencies, no API keys, no install. One vendorable `engine.mjs`, a CLI,
 and a [skills.sh](https://skills.sh) agent skill. The web-retrieval half is
@@ -16,7 +16,7 @@ ultraprospect scan  --where "Vincennes" --country fr
 
 ```
   OSM              1069
-  register         672
+  register         672  (fr-sirene)
   fused places     1567  (174 matched across both lanes)
   with a website   215
 ```
@@ -41,12 +41,76 @@ Two lanes over the same territory, fused, with every fact carrying its origin.
 | Lane | Source | Gives you |
 |---|---|---|
 | **Places** | OpenStreetMap via Overpass, worldwide, ODbL | the sign over the door, category, opening hours, and for ~1 in 5 a website |
-| **Register** | `recherche-entreprises.api.gouv.fr` (Sirene/RNE), France, Licence Ouverte | SIREN/SIRET, NAF activity code, employee band, directors, filed revenue |
+| **Register** | whichever register the country has — see below | the legal identity, the activity code, the size, the directors |
 
 Neither half is a prospect on its own. A shopfront with no legal identity cannot
 be qualified; a registered company with no address on the street cannot be
 visited. The value is the join — and the join is where a tool like this usually
 starts lying, so it is where most of the care went.
+
+## What the register lane can actually do, per country
+
+Measured against the live services, and the single most important thing to
+understand about a run:
+
+**Exactly one public register in the world can enumerate the companies inside a
+territory without an API key, and it is France's.** Everywhere else a register
+can confirm a company you already found, and nothing more.
+
+So there are two shapes of run, and the manifest always says which one you got:
+
+| Mode | What it means | Where |
+|---|---|---|
+| **sweep** | The register was asked for every company in the area. The answer is a territory. | France |
+| **confirm** | OSM covered the ground; each company was then checked against the register one at a time. **A company absent from OpenStreetMap is absent from the run.** | everywhere else |
+
+```bash
+# France — the register is swept alongside OSM
+ultraprospect scan --where "Vincennes" --country fr
+
+# Germany — OSM sweeps, then the register confirms company by company
+ultraprospect scan    --where "Kreuzberg, Berlin" --country de
+ultraprospect resolve --run <dir> --web-results hits.json
+ultraprospect enrich  --run <dir> --tier 1     # fetches the Impressum
+ultraprospect confirm --run <dir>              # reads it, asks the authority
+```
+
+### The connectors
+
+| Country | Register | Key | What it can do |
+|---|---|---|---|
+| France | `recherche-entreprises.api.gouv.fr` (Sirene/RNE) | none | **sweep**, lookup, verify |
+| United Kingdom | Companies House | free, email only | lookup, verify |
+| Norway | Enhetsregisteret (Brønnøysund) | none | lookup, verify — exact headcount and the company's own website |
+| Finland | PRH / YTJ | none | lookup, verify |
+| Czechia | ARES | none | lookup, verify |
+| Poland | KRS | none | verify only — the public API has no name search |
+| United States | SEC EDGAR | none | lookup, **listed companies only** |
+| EU-27 | VIES | none | verify a VAT number |
+| worldwide | GLEIF | none | lookup, verify — entities holding an LEI |
+
+**Germany, Spain and the United States have no open register to sweep or
+search.** What Germany and Spain have instead is the law: `enrich --tier 1`
+fetches the legal notice every company there is required to publish
+(`Impressum`, § 5 DDG; `aviso legal`, Ley 34/2002), `confirm` reads the
+registration number off it, and an authority is asked whether that number is
+real and whose it is.
+
+What the authorities will not say is reported rather than smoothed over:
+
+- **VIES does not name the holder for Germany or Spain.** It answers `"---"`.
+  A number can be confirmed live without its owner being disclosed, and that is
+  recorded as an attested identifier, never as an identity.
+- **VIES only knows numbers enabled for intra-community trade.** A small
+  trader's perfectly legitimate VAT number is unknown to it, and the run says so
+  rather than implying the page is lying.
+- **GLEIF covers entities holding an LEI** — roughly 2.7 million worldwide. It
+  resolves a German `HRB` number to a filed identity, which nothing else keyless
+  does, and it will not know the bakery next door.
+- **The United States has no federal company register and publishes no company
+  number.** An EIN is never disclosed. A US run rests on address and name, and
+  `confirm` says so rather than reporting a failure to find something that does
+  not exist.
 
 ## What it refuses to do
 
@@ -62,10 +126,11 @@ proximity can confirm a name but never substitute for one, because a Paris
 office block holds fifty registered companies inside twenty metres. Pairs in the
 middle band go to `MATCH.todo.json` with their evidence, for a human or an agent
 to adjudicate. A wrong merge produces one plausible company holding somebody
-else's SIREN — invisible forever.
+else's registration — invisible forever.
 
 **It refuses to call a partial sweep complete.** Every lane reports its own
-coverage. `manifest.truncated` is the headline, and the report leads with it.
+coverage, and a confirmed territory is never presented as a swept one.
+`manifest.truncated` is the headline, and the report leads with it.
 
 **It refuses to invent a contact.** Every email, phone number and person must
 appear verbatim in a fetched page or an open-data record. No address is ever
@@ -80,6 +145,10 @@ FAIL  contact-not-on-page   osm:n452420246 · email cyril.kolodziejski@lesoffici
 
 Real director from the register, real domain, real fetched page. Rejected.
 
+**It refuses a registration it cannot re-read.** A legal identifier that
+`confirm` turned into an identity must still be findable in the page it cites,
+or the identity built on it does not ship.
+
 **It refuses to say "not hiring" when it could not look.** A company with no
 careers page and no board is not hiring — a finding. A company whose board
 exists but has no readable API is *unknown*. Those are different facts and the
@@ -87,23 +156,31 @@ CSV keeps them in different states.
 
 ## Things measured, not assumed
 
-Everything here came from calling the live services, and three of them
-contradict what you would reasonably expect:
+Everything here came from calling the live services, and none of it is what the
+documentation says:
 
-- **The register clamps `total_results` at 10 000.** Asking for every legal unit
-  in Vincennes reports exactly 10 000; summing across the 21 NAF sections
-  reports **37 717**. Treating that field as a count silently loses two thirds
-  of a town. The lane treats it as a floor and splits by NAF section, then by
+- **The French register clamps `total_results` at 10 000.** Asking for every
+  legal unit in Vincennes reports exactly 10 000; summing across the 21 NACE
+  sections reports **37 717**. Treating that field as a count silently loses two
+  thirds of a town. The lane treats it as a floor and splits by section, then by
   division.
 - **`/near_point` ignores filters it does not implement** rather than rejecting
   them. `etat_administratif=A` changes nothing there. Those filters are applied
   client-side; nothing assumes a parameter took effect because the request was
   accepted.
-- **`etat_administratif` filters the legal unit, never the establishment.** An
-  active company keeps its closed branches, and they arrive inside
-  `matching_etablissements` looking like open businesses at real addresses.
-  Filtering the establishment's own state drops a Vincennes sweep from 672
-  register rows to 348 — nearly half of it was shut.
+- **A French legal unit closes with "C", an establishment with "F".** Reading
+  only A and C reported every closed office as "unknown", which downstream is
+  indistinguishable from "we did not look".
+- **VIES answers `isValid: false` together with `MS_UNAVAILABLE`** when a member
+  state's own system is down. Reading that as "invalid" reports somebody else's
+  outage as a fact about a company.
+- **Finland's `status` is "2" for live and dissolved companies alike.** It means
+  "registered in YTJ", not "trading". Reading it as liveness reported Nokia as
+  ceased.
+- **SEC EDGAR refuses a User-Agent containing a URL** with 403 "Your Request
+  Originates from an Undeclared Automated Tool", and serves a bare
+  `name email`. It is the one upstream here that rejects this tool's polite
+  identifying string.
 - **`overpass-api.de` answers a browser User-Agent with HTTP 406** — deliberate
   anti-scraping. And several public Overpass endpoints serve a *regional
   extract* while speaking the same protocol: `overpass.osm.ch` answers a query
@@ -130,8 +207,9 @@ node scripts/ultraprospect.mjs --help
 | Command | What it does |
 |---|---|
 | `where <query>` | Resolve a place to a search area. Exits 2 with candidates when ambiguous. |
-| `scan` | Sweep both lanes over the area and fuse them. |
+| `scan` | Sweep OSM over the area, and the register too where one can be swept. |
 | `match --apply` | Fold an adjudication of `MATCH.todo.json` back into the run. |
+| `confirm` | Attach a register identity company by company, where no sweep exists. |
 | `resolve` | Find each company's website and prove it is theirs. |
 | `enrich --tier 1\|2` | Read those sites; tier 2 also reads the openings from the ATS APIs. |
 | `score` | Rank by measured signals; fold your ICP verdicts in with `--apply`. |
@@ -139,9 +217,9 @@ node scripts/ultraprospect.mjs --help
 | `check` | The gate. Exit 1 means do not present the output. |
 | `render` | `PROSPECTS.csv`, `prospects.json`, `REPORT.md`, a self-contained `index.html`. |
 | `watch --since` | What moved: who opened, closed, started hiring, gained a site. |
-| `orchestrate` | Fan the two judgement phases out across subagents. |
+| `orchestrate` | Fan the search and judgement phases out across subagents. |
 | `mcp` | Serve it over MCP: where, scan, places, dossier, check. |
-| `doctor` | Check every upstream, including Overpass planet coverage. |
+| `doctor` | Check every upstream. `--country` narrows the register probes. |
 
 ### A run, end to end
 
@@ -160,12 +238,18 @@ ultraprospect render  --run "$RUN"
 
 ```bash
 ultraprospect scan --where "Lyon" --section M --min-employees 20
-ultraprospect scan --lat 48.8566 --long 2.3522 --radius 500m
-ultraprospect scan --where "Berlin" --no-registry          # outside France, OSM only
+ultraprospect scan --where "Manchester" --country gb --companies-house-key $KEY
+ultraprospect scan --lat 52.5389 --long 13.4244 --radius 350m --country de
 ultraprospect scan --where "Nantes" --no-people          # organisation data only
 ultraprospect scan --record ./fixtures/x                 # record a replayable sweep
 ultraprospect scan --fixture ./fixtures/x                # replay it, fully offline
 ```
+
+`--section J,M` means the same thing in Lyon, Berlin, Madrid and Manchester:
+NAF, WZ, CNAE and UK SIC are all NACE-derived and agree down to the division. It
+does **not** mean the same thing in Austin — US SIC divisions are also lettered
+A–K and stand for different industries — so a section never travels without its
+scheme.
 
 `--help` is the full surface and a build gate keeps it in sync with the code.
 
@@ -173,9 +257,9 @@ ultraprospect scan --fixture ./fixtures/x                # replay it, fully offl
 
 ```
 .ultraprospect/runs/<slug>-<id>/
-  manifest.json      target, filters, per-lane coverage, counts, notes, licences
+  manifest.json      target, filters, per-lane coverage and mode, counts, notes, licences
   osm.json           raw OSM lane output, kept beside the fused result
-  registry.json        raw register lane output
+  registry.json      raw register output, whichever connectors answered
   places.json        the fused entities
   MATCH.todo.json    pairs the matcher would not decide alone
 ```
@@ -183,7 +267,9 @@ ultraprospect scan --fixture ./fixtures/x                # replay it, fully offl
 ## Licensing of the data
 
 Output derived from these sources carries their notices — an ODbL condition, not
-a courtesy. The manifest hands you the exact strings.
+a courtesy. The manifest hands you the exact strings, and **only for the
+connectors that actually answered**: a German run does not claim France's
+Licence Ouverte.
 
 ```
 Places and tags: © OpenStreetMap contributors, ODbL
@@ -206,7 +292,13 @@ pnpm run check:build   # the committed bundle matches the source
 
 The vendored webindex engine is pinned by tag and SHA-256 in
 `src/vendor/webindex.meta.json`; a daily workflow re-pins it, runs every gate,
-and pushes only when they all pass. `src/naf.ts` is generated from the
-register's own validation error by `node scripts/refresh-naf.mjs`.
+and pushes only when they all pass. `src/classification/naf-codes.ts` is
+generated from the French register's own validation error by
+`node scripts/refresh-naf.mjs`.
+
+Adding a country is one file under `src/registry/` and one entry in
+`CONNECTORS`. That table is read by the sweep lane, `confirm`, `doctor`,
+`manifest.licences` and the weekly canary, so a new connector arrives with its
+own drift detection and nothing to remember.
 
 MIT.

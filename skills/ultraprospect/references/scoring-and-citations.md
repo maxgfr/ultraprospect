@@ -23,7 +23,7 @@ will look exactly like a measurement.
 | `openRoles` | 2/role | capped at five roles |
 | `size` | 12 | log of the headcount band's floor, saturating |
 | `revenue` | 8 | log of filed revenue, saturating |
-| `registered` | 8 | the company has a SIREN |
+| `registered` | 8 | a register confirmed the company, whether by sweep or by `confirm` |
 | `contactable` | 10 | a published email or phone exists |
 | `ecommerce` / `pricing` | 4 each | sells online / publishes prices |
 

@@ -9,7 +9,7 @@
 //   TIER 1 runs on everything with a corroborated site. robots, sitemap,
 //   home, legal notice. Four requests, and it answers the questions that
 //   decide whether a company is worth more attention: is the site alive, what
-//   does it say it does, does it run a hiring pipeline, is the SIREN on it.
+//   does it say it does, does it run a hiring pipeline, is its registration on it.
 //
 //   TIER 2 runs on the ones you chose. It walks the site by PAGE ROLE — about,
 //   services, products, pricing, careers, team, contact, news, cases — and
@@ -173,9 +173,11 @@ async function enrichOne(
   const roles = opts.tier === 1 ? TIER1_ROLES.filter((r) => r !== "home") : TIER2_ROLES;
   const picked = pickByRole(inventory, roles);
 
-  // The legal notice is the highest-value page in tier 1 — it carries the SIREN
-  // that corroborates the register match — and it is the one page a site
-  // reliably has at a predictable path when the sitemap omits it.
+  // The legal notice is the highest-value page in tier 1: it carries the
+  // registration number that corroborates the register match — and outside
+  // France it is where the register identity comes from at all, since `confirm`
+  // reads it there. It is also the one page a site reliably has at a
+  // predictable path when the sitemap omits it.
   if (opts.tier === 1 && !picked.has("legal")) {
     for (const guess of LEGAL_GUESSES) {
       try {

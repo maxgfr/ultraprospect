@@ -11,7 +11,10 @@ attribution. The manifest hands you the exact strings in `licences[]`; put them
 in the footer of whatever you produce — the CSV's companion README, the report,
 the HTML page. Stripping them is a licence breach, not a formatting choice.
 
-**French register data is Licence Ouverte 2.0**, which also requires attributing
+**Register data carries its own licence, per connector** — France's is Licence
+Ouverte 2.0, Norway's is NLOD 2.0, the UK's is OGL v3.0, GLEIF's is CC0. The
+manifest lists ONLY the ones that actually answered, so a German run does not
+claim France's. Each requires attributing
 the source and the date of the extract. `manifest.builtAt` is that date.
 
 ```
@@ -21,7 +24,8 @@ French company data: base Sirene / RNE via recherche-entreprises.api.gouv.fr, Li
 
 ## Company data and personal data are not the same thing
 
-A SIREN, a NAF code, a headcount band and a `contact@` address are data about an
+A registration number, an activity code, a headcount band and a `contact@`
+address are data about an
 organisation. A director's name and date of birth, an employee listed on a team
 page, and `firstname.lastname@company.com` are data about **a person**, and
 collecting them makes whoever holds the file a data controller under the GDPR.

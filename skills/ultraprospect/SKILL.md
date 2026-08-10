@@ -1,6 +1,6 @@
 ---
 name: ultraprospect
-description: "Use when the user wants every company in a PLACE — a town, a street, a radius — turned into a qualified, sourced prospect list rather than a page of search results. A deterministic zero-dep engine (node scripts/ultraprospect.mjs, no keys, no install) sweeps OpenStreetMap worldwide and the French register (SIRENE/RNE) for the same territory, fuses the two into one entity per company, and hands YOU the judgment it refuses to make: which near-miss pairs are the same business, what a company does, whether it fits the brief. It REFUSES an ambiguous place name, REFUSES to merge an uncertain pair, and DECLARES a partial sweep truncated rather than passing it off as a whole territory. Triggers: 'find every company in X', 'list the businesses on this street', 'who is based in <town>', 'build a prospect list for <area>', 'quelles entreprises à <ville>', 'prospection sur <zone>'. Not for researching one named company, and not for a codebase."
+description: "Use when the user wants every company in a PLACE — a town, a street, a radius — turned into a qualified, sourced prospect list rather than a page of search results. A deterministic zero-dep engine (node scripts/ultraprospect.mjs, no keys, no install) sweeps OpenStreetMap worldwide and attaches whichever company register a country has. France's is the only one sweepable without a key; elsewhere it CONFIRMS each company from the registration its own site must publish by law (Impressum, aviso legal) against VIES, GLEIF, Companies House, Brreg, PRH, ARES or SEC EDGAR. It hands YOU the judgment it refuses to make: which near-miss pairs are one business, what a company does, whether it fits the brief. It REFUSES an ambiguous place, REFUSES an uncertain merge, and DECLARES whether a territory was swept or confirmed company by company. Triggers: 'every company in X', 'who is based in <town>', 'prospect list for <area>', 'quelles entreprises à <ville>', 'Firmen in <Stadt>'."
 license: MIT
 metadata:
   version: 1.4.4
@@ -9,9 +9,9 @@ metadata:
 # ultraprospect — a territory, turned into prospects you can cite
 
 Like its `ultra*` siblings this is a **division of labour**. The engine decides
-the mechanics: geocode the place, sweep both lanes, tile around the upstream
-caps, fuse what is certainly the same company, account for what it could not
-reach. You decide the judgment: whether a near-miss pair is one business, what a
+the mechanics: geocode the place, sweep what can be swept, tile around the
+upstream caps, fuse what is certainly the same company, confirm the rest against
+whatever authority the country has, account for what it could not reach. You decide the judgment: whether a near-miss pair is one business, what a
 company actually does, which of them is worth a call.
 
 The engine is built to be boring and honest about its edges. Nothing it produces
@@ -22,10 +22,14 @@ is a guess dressed as a fact, and every count it reports is one it measured.
 > 1. **Reason from the run, not from memory.** You know nothing about a town's
 >    economy that is not in `places.json`. If it is not in the run, fetch it or
 >    say you did not.
-> 2. **A truncated run is a truncated run.** When `manifest.truncated` is true,
->    say so in the first sentence of whatever you write, and name the lane. A
->    partial sweep presented as a whole territory is the one failure nobody
->    downstream can detect.
+> 2. **A truncated run is a truncated run, and a confirmed one is not a sweep.**
+>    When `manifest.truncated` is true, say so in the first sentence of whatever
+>    you write, and name the lane. When the register lane's `mode` is
+>    `"confirm"` — which is EVERY country but France — say that too: the list is
+>    what OpenStreetMap holds for that territory, checked against the register,
+>    not what the register holds. A company nobody has mapped is not in it.
+>    Presenting either as a whole territory is the one failure nobody downstream
+>    can detect.
 > 3. **Absence is a finding.** `isHiring: false` means we looked where hiring
 >    would be and found none; `isHiring` absent means a board exists that we
 >    could not read. Report the second as unknown, never as "not hiring".
@@ -74,7 +78,7 @@ gate. Read it rather than guessing a flag.
 ## Cheat sheet
 
 ```bash
-ultraprospect doctor                                          # are the five upstreams up?
+ultraprospect doctor --country de                             # are the upstreams this run needs up?
 ultraprospect where "Vincennes" --country fr                  # resolve, or list the candidates and exit 2
 ultraprospect scan --where "Vincennes" --country fr           # both lanes, fused
 ultraprospect scan --lat 48.8566 --long 2.3522 --radius 500m  # a point and a radius
@@ -107,21 +111,32 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    town in Indiana, and picking silently produces a complete, plausible,
    entirely wrong prospect file.
 
-2. **Scan, with filters if the territory is dense.** A French commune holds tens
-   of thousands of registered units, most of them dormant micro-entrepreneurs.
+2. **Scan, with filters if the territory is dense.** This matters in France,
+   where the register IS swept: a French commune holds tens of thousands of
+   registered units, most of them dormant micro-entrepreneurs.
    `--min-employees`, `--section` and `--activity` are how a run stays useful; the
    register lane stops at `--max-results` and declares itself partial rather
    than spending twenty minutes.
 
 3. **Read the coverage before reading the data.** `manifest.lanes` says what
-   each lane returned and whether it was capped. `manifest.truncated` is the
-   headline. Outside France the register lane reports "not applicable" — that is
-   a property of the territory, not a failure, and should be described as such.
+   each lane returned, whether it was capped, and — for the register lane —
+   whether the territory was `"sweep"`-ed or `"confirm"`-ed. `manifest.truncated`
+   is the headline. Only France has a register that can be swept keylessly;
+   everywhere else the lane says so in words, and that is a property of the
+   world's open data, not a failure of the run.
+
+3b. **Outside France, run `confirm` after `enrich --tier 1`.** That order is not
+   arbitrary: the strongest route reads the registration number off the legal
+   notice tier 1 fetches — an `Impressum` in Germany, an `aviso legal` in Spain,
+   both legally mandatory — and asks an authority whose it is. Without pages,
+   `confirm` can only look companies up by name, which is a candidate rather
+   than a fact. It refuses rather than doing the weak half silently.
 
 4. **Adjudicate `MATCH.todo.json`.** Each pair carries the OSM name, the register
    name that *actually scored* (`matchedName` — often an enseigne, not the legal
    name), the distance in metres and the component scores. Answer with a JSON
-   array of `{osmId, siret, merge, why}` and fold it back with `match --apply`.
+   array of `{osmId, registryId, connectorId, merge, why}` and fold it back with
+   `match --apply`.
    Judge on evidence: same trade name, same street number, a brand the register
    files under an enseigne. When you cannot tell, say `merge: false` — two rows
    are recoverable, one wrong merge is not.
@@ -138,7 +153,7 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    — duplicates, directories, noise and all, `[{"placeId","url","title",
    "snippet"}]` — and pass it back with `--web-results`. Do not filter: you are
    finding candidates, not choosing. The engine fetches each one and keeps it
-   only if the page carries the company's SIREN, its street address or the
+   only if the page carries the company's registration number, its street address or the
    distinctive part of its name; a domain that ranked first and corroborates
    nothing is recorded as `unverified`, never as the website.
 
@@ -147,7 +162,7 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 6. **Enrich in two tiers, and spend the second one deliberately.** Tier 1 reads
    the homepage and the legal notice on every corroborated site: four requests,
    and it answers whether the site is alive, what it says it does, whether the
-   company runs a hiring pipeline, and whether its SIREN is published there.
+   company runs a hiring pipeline, and whether its registration is published there.
    Tier 2 is the expensive one — a page per role (about, services, products,
    pricing, careers, team, contact, cases, news) plus the openings read
    straight out of the ATS API rather than out of a JavaScript shell. Run it on
@@ -195,12 +210,14 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 |---|---|
 | `where` exits 2 with a list | Working as designed. Several distinct places match; choose one. |
 | Very few OSM places | Overpass mirrors were busy. `doctor` shows which answered; re-run. |
-| `truncated: true` on the register lane | The territory exceeds the API's 10 000-result ceiling even after the NAF split, or `--max-results` was reached. Narrow the filters. |
-| Register lane returned 0 outside France | Expected. The register is French; only the OSM lane applies. |
+| `truncated: true` on the register lane | A French territory exceeding the API's 10 000-result ceiling even after the NACE split, or `--max-results` was reached. Narrow the filters. |
+| Register lane `mode: "confirm"`, not `"sweep"` | Expected everywhere but France. OSM covered the ground; run `confirm` to attach register identities company by company. |
+| `confirm` found identifiers but named no holders | Expected in Germany and Spain: VIES confirms a VAT number is live and does not disclose who holds it. The identifiers are on the record, sourced and re-readable. |
+| `confirm` found nothing at all in the US | Expected. There is no US company register and no published company number; identity there rests on address and name. |
 | A merged place looks like two companies | Adjudication was skipped or answered too generously. Check `matchConfidence` and the raw lanes in `osm.json` / `registry.json`. |
 | Thousands of dormant one-person companies | Add `--min-employees`; ceased companies are already excluded unless `--include-ceased`. |
 | `resolve` exits 2 saying no results were supplied | Working as designed. Run `--queries`, do the searching, pass `--web-results`. |
-| A company's own domain shows as `unverified` | The page did not carry its name, address or SIREN. Often a JavaScript-only site — the evidence string says which. It is a candidate, not a confirmed site. |
+| A company's own domain shows as `unverified` | The page did not carry its name, address or registration number. Often a JavaScript-only site — the evidence string says which. It is a candidate, not a confirmed site. |
 | `enrich` says "no place has a corroborated website" | `resolve` has not run, or corroborated nothing. Enrichment only ever reads sites we proved belong to the company. |
 | A company with a careers page shows `isHiring` unset | Deliberate. A board was detected but its openings could not be read, and "not hiring" would be a different claim. |
 | `check` says a contact is not on its page | Believe it. Either the value was constructed, or the page changed since it was read. Both mean it must not ship. |
@@ -212,8 +229,11 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 - Never merge a `MATCH.todo.json` pair you cannot justify from its evidence.
 - Never write a contact detail that is not verbatim in a fetched page or an
   open-data record, and never derive one from a naming pattern.
-- Never describe the register lane's absence outside France as a failure.
-- Never strip the ODbL and Licence Ouverte notices from a deliverable.
+- Never describe a `confirm`-mode run as if the register had been swept, and
+  never describe the absence of a sweepable register as a failure.
+- Never present an identifier an authority declined to attribute as an identity.
+- Never strip the attributions in `manifest.licences` from a deliverable, and
+  never add one for a connector that did not answer.
 - Never re-run a sweep to "check" a number the manifest already reports — the
   upstreams move, and a second run answers a different question.
 - Never treat a search result as a company's website. Rank is not evidence of

@@ -30,7 +30,7 @@ skill runs far from the user's project.
 <out>/runs/<slug>-<id>/
   manifest.json      target, filters, per-lane coverage, counts, notes, licences, timings
   osm.json           raw OSM lane output
-  registry.json        raw register lane output
+  registry.json      raw register output, whichever connectors answered
   places.json        the fused entities — the only input later stages read
   MATCH.todo.json    pairs the matcher would not decide
 ```
@@ -48,15 +48,26 @@ under it is taken.
 `reason`, and how many partitions the lane needed:
 
 ```json
-{ "lane": "sirene", "returned": 672, "truncated": false, "partitions": 1 }
-{ "lane": "sirene", "returned": 3000, "truncated": true,
+{ "lane": "registry", "mode": "sweep", "connectorId": "fr-sirene",
+  "returned": 672, "truncated": false, "partitions": 1 }
+{ "lane": "registry", "mode": "sweep", "connectorId": "fr-sirene",
+  "returned": 3000, "truncated": true,
   "reason": "the --max-results budget of 3000 was reached", "partitions": 21 }
-{ "lane": "sirene", "returned": 0, "truncated": false,
-  "reason": "not applicable outside France (country=de)" }
+{ "lane": "registry", "connectorId": "eu-vies", "returned": 0, "truncated": false,
+  "reason": "no register can be swept for country=de; OSM covered the territory and eu-vies, gleif can confirm each company (run `confirm`)" }
+{ "lane": "registry", "mode": "confirm", "connectorId": "eu-vies,gleif",
+  "returned": 12, "truncated": false,
+  "reason": "confirmed one company at a time: 4 by a published registration number, 8 by a name lookup, 31 not found. This is NOT a sweep — companies absent from OSM are absent from this run." }
 ```
 
-The third is not a failure. "Not applicable" and "failed" are different states
-and the manifest keeps them apart; describe them differently.
+**`mode` is the field to read first.** `"sweep"` means the register was asked
+for every company in the area, and the answer is a territory. `"confirm"` means
+OSM covered the ground and each company was checked afterwards — a company
+nobody has mapped is not in the run at all. Only France can be swept.
+
+The third entry is not a failure either. "No register can be swept here",
+"skipped" and "failed" are three different states and the manifest keeps them
+apart; describe them differently.
 
 `manifest.truncated` is the OR of every lane. When it is true, say so first.
 
@@ -73,7 +84,7 @@ and the manifest keeps them apart; describe them differently.
 
 ## Cost and pacing
 
-The register is paced at 5 req/s against an allowed 7. A whole French commune
+The French register is paced at 5 req/s against an allowed 7. A whole commune
 without filters is roughly 1 500 requests and several minutes, which is why
 `--max-results` defaults to 3 000 and why `--min-employees` / `--section` are the
 normal way to run it.
@@ -102,7 +113,7 @@ live, which is what makes the pipeline testable without five live services.
 | `0/4 Overpass mirrors answering` | All instances busy. `doctor` again in a few minutes. |
 | An Overpass mirror reports "regional extract" | It serves a country subset, not the planet. It is excluded automatically. |
 | OSM lane `truncated` | A tile failed after the split budget. Re-run; a different mirror will usually answer. |
-| Register lane `truncated` at 10 000 | The territory exceeds the API's ceiling even split by NAF division. Add `--activity` or `--min-employees`. |
+| Register lane `truncated` at 10 000 | The territory exceeds the API's ceiling even split by NACE division. Add `--activity` or `--min-employees`. |
 | Register lane returned far more than expected | Ceased companies are excluded by default; check whether `--include-ceased` was passed. |
 | A run wrote nothing | `--stdout` or `ULTRAPROSPECT_NO_WRITE=1` is set. |
 | `places.json is missing` | The `--run` path points at a directory that is not a run. |

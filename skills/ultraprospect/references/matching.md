@@ -2,7 +2,7 @@
 
 OSM sees shopfronts. The register sees legal units at postal addresses. The same
 bakery is a `shop=bakery` node with an awning *and* a SIRET filed at the
-building, and the whole value of the French path is that the two get joined —
+building, and the whole value of the join is that neither half is a prospect alone —
 neither half is a prospect on its own.
 
 ## Why proximity cannot carry a match
@@ -42,7 +42,8 @@ measure down. Split out, each is a name the business actually goes by, and
 usually the one on the sign OSM recorded.
 
 Legal forms (`SARL`, `SAS`, `SASU`, …) are stripped before comparison: every
-third French company is a SAS, so they carry no identifying signal but dominate
+third French company is a SAS and every second German one a GmbH, so they carry
+no identifying signal but dominate
 a token overlap. A name that is *only* boilerplate normalises to the empty
 string and scores zero — two companies called "SARL" are not the same company.
 
@@ -125,4 +126,4 @@ means the file came from a different run.
 
 **When you cannot tell, answer `false`.** Two rows are recoverable by anyone
 looking at the list. One wrong merge produces a single plausible company holding
-somebody else's SIREN, and nothing downstream will ever flag it.
+somebody else's registration number, and nothing downstream will ever flag it.
