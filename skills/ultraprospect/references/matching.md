@@ -52,9 +52,27 @@ list. A separate signal from the name: a franchise is mapped as
 it under an enseigne rather than a denomination.
 
 **Address.** `addr:housenumber` + `addr:street` against the register's parsed
-address. A full match is near-proof of identity even when the names are
-unrelated, which is exactly the case it exists for: a restaurant trading as "Les
-Officiers" is registered as "AUX BARREZIENS". Street-only agreement scores 0.6.
+address. An exact match **confirms a name; it does not replace one.**
+
+That distinction was bought with a real run. Treating a full address as
+near-proof auto-merged eight Vincennes pairs on the address alone, and they were
+indistinguishable from each other:
+
+| Pair | Verdict |
+|---|---|
+| Aux Papilles ↔ BRUNO ENCAOUA | right — a trade name over the owner's |
+| Synotis ↔ SYNALTIC | right — the shopfront name is stale |
+| **Société Générale ↔ PAREX AUDIT S.A.S** | **wrong — a bank branch and an audit firm in one building** |
+
+Nothing in the data separates them. Occupancy was tried as the discriminator —
+one company at that doorway versus several — and abandoned, because it can only
+be counted over the records a run actually fetched, so any `--section` or
+`--min-effectif` filter makes every address look like a sole occupancy. A signal
+that is wrong exactly when a filter is used is worse than no signal.
+
+So an address with **no** name agreement scores 0.6 identity and lands in the
+undecided band. With even weak name support (≥ 0.4) the two signals agree and it
+merges. Street-only agreement, without the number, scores 0.3.
 
 ## Three outcomes, on purpose
 
@@ -63,6 +81,11 @@ Officiers" is registered as "AUX BARREZIENS". Street-only agreement scores 0.6.
 | ≥ 0.72 | Merged. One entity, `sources: ["osm","sirene"]`. |
 | 0.40 – 0.72 | **Undecided.** Written to `MATCH.todo.json` for you. |
 | < 0.40 | Two distinct entities. |
+
+A merge records the score it was made on and which signal carried it —
+`matchConfidence: 0.851`, `matchedBy: "name"` — never a flat 1. A pair merged at
+0.74 and one merged at 0.99 are both "merged", and only one of them is worth
+re-reading when a row looks wrong.
 
 Assignment is one-to-one and greedy on a descending score list: one register
 record cannot be two shopfronts, and one shopfront cannot be two companies.

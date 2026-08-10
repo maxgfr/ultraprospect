@@ -91,7 +91,12 @@ export function scoreOf(place: Place, weights: ScoreWeights = DEFAULT_WEIGHTS): 
     parts.openRoles = Math.min(weights.perRole * 5, weights.perRole * (s.openRoles ?? 0));
   }
 
-  const band = place.sirene?.effectifTranche;
+  // How big is the COMPANY, not how big is this doorway. An establishment's
+  // headcount is unfiled far more often than a legal unit's, so scoring the
+  // establishment would rank a 1 500-person firm's branch as unknown while its
+  // competitor's head office scores full marks — an artefact of where the
+  // paperwork landed, not a difference between the prospects.
+  const band = place.sirene?.company?.effectifTranche ?? place.sirene?.effectifTranche;
   const floor = band ? EFFECTIF_FLOOR[band] : undefined;
   // -1 is the register's "undetermined". Unknown headcount scores nothing; it
   // does not score as zero employees.

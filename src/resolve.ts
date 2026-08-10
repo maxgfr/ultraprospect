@@ -92,9 +92,15 @@ export function classifyHost(url: string): HostKind {
  * Distinct angles rather than rephrasings: the legal name and the shopfront
  * name are often different strings, and a company whose name is a common word
  * is only findable with its town attached.
+ *
+ * `fallbackTown` matters more than it looks. A register record always carries a
+ * commune, but an OSM node usually has no `addr:city` at all — so without it the
+ * query for a taqueria in Vincennes is the bare string "El Gringo", which finds
+ * a restaurant in Mexico. The run's own territory is the right answer and we
+ * always know it: the place was found inside it, by construction.
  */
-export function queriesFor(place: Place): string[] {
-  const town = place.address.commune ?? place.address.codePostal ?? "";
+export function queriesFor(place: Place, fallbackTown?: string): string[] {
+  const town = place.address.commune ?? place.address.codePostal ?? fallbackTown ?? "";
   const names = new Set<string>();
   if (place.osm?.name) names.add(place.osm.name);
   if (place.sirene?.enseignes[0]) names.add(place.sirene.enseignes[0]);
@@ -183,6 +189,8 @@ export function corroborate(place: Place, pageText: string, pageTitle?: string):
 export interface ResolveOptions {
   /** Hits the agent produced with its own WebSearch. */
   webResults?: WebHit[];
+  /** The run's territory, used when a place carries no address of its own. */
+  town?: string;
   /** Only work on this many places. */
   limit?: number;
   /** Fall back to the engine's keyless search when no hits were supplied. */
@@ -196,6 +204,8 @@ export interface ResolveOutcome {
   pages: Map<string, PageRecord[]>;
   corroborated: number;
   rejected: number;
+  /** Reachable sites that serve no text without a browser. */
+  jsOnly: number;
   unchanged: number;
   socials: number;
   notes: string[];
@@ -252,7 +262,7 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
     notes.push(n);
     opts.onNote?.(n);
   };
-  const outcome: ResolveOutcome = { pages: new Map(), corroborated: 0, rejected: 0, unchanged: 0, socials: 0, notes };
+  const outcome: ResolveOutcome = { pages: new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unchanged: 0, socials: 0, notes };
 
   const targets = needsResolving(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
   const grouped = groupHits(targets, opts.webResults ?? []);
@@ -266,7 +276,7 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
 
     let hits = grouped.get(place.id) ?? [];
     if (hits.length === 0 && opts.useEngineSearch) {
-      const query = queriesFor(place)[0];
+      const query = queriesFor(place, opts.town)[0];
       if (query) {
         try {
           const res = await search(query, { limit: 3 });
@@ -297,8 +307,23 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
       }
       if (kind === "directory") continue;
 
-      const page = await fetchPage(runDir, place.id, url, "home", store);
-      if (!page) continue;
+      const fetched = await fetchPage(runDir, place.id, url, "home", store);
+      if (!fetched.ok) {
+        if (fetched.reason === "no-readable-text") {
+          // The site is real and a human can open it; only we could not read
+          // it. Recording "no website" here would be a false absence — measured
+          // on restaurant-elgringo.fr, which answers 200 with 37 bytes.
+          place.website = {
+            url,
+            confidence: "unverified",
+            evidence: [`fetched HTTP ${fetched.status}, but the page carries ${fetched.chars} characters of text — a JavaScript-only site we cannot read`],
+          };
+          outcome.jsOnly++;
+          settled = true;
+        }
+        continue;
+      }
+      const page = fetched.page;
 
       const check = corroborate(place, page.text, page.title);
       const list = outcome.pages.get(place.id) ?? [];
@@ -321,8 +346,14 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
     if (!settled) outcome.unchanged++;
   }
 
+  // The jsOnly count is reported separately from "left without a site" on
+  // purpose: those companies HAVE a website, a human can open it, and only the
+  // machine could not read it. Folding them into the absences would hide a
+  // whole category of prospect behind a number that looks like coverage.
   note(
-    `resolve: ${outcome.corroborated} corroborated, ${outcome.rejected} fetched but unverified, ${outcome.socials} social profile(s), ${outcome.unchanged} left without a site`,
+    `resolve: ${outcome.corroborated} corroborated, ${outcome.rejected} fetched but unverified, ` +
+      `${outcome.jsOnly} reachable but JavaScript-only, ${outcome.socials} social profile(s), ` +
+      `${outcome.unchanged} left without a site`,
   );
   return outcome;
 }

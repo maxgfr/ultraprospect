@@ -38,7 +38,7 @@ import { createAdapter } from "./mcp/adapter.js";
 import { emitOrchestration } from "./orchestrate.js";
 import { runStdioServer, startHttpServer } from "./engine.js";
 import type { FitVerdict } from "./types.js";
-import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, writePlaces, writeRunManifest } from "./run.js";
+import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, shortLabel, writePlaces, writeRunManifest } from "./run.js";
 import { clampInt, parseBbox, parseDistanceM } from "./util.js";
 import { VERSION } from "./version.js";
 
@@ -413,7 +413,10 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
   // WebSearch, and the hits come back through --web-results. The engine never
   // pretends to be a search engine.
   if (bools.has("queries")) {
-    const plan = targets.map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p) }));
+    // The run's own town backfills a place that has no address of its own —
+    // most OSM nodes have no addr:city, and a bare shop name is not a query.
+    const town = shortLabel(requireManifest(runDir).target.label);
+    const plan = targets.map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town) }));
     if (bools.has("json")) out(jsonLine(plan));
     else for (const item of plan) for (const q of item.queries) out(q);
     say("");
@@ -438,6 +441,7 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
   const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }) as any)));
   const outcome = await runResolve(runDir, places, store, {
     webResults,
+    town: shortLabel(requireManifest(runDir).target.label),
     limit,
     useEngineSearch: bools.has("engine-search"),
     onNote: (n) => say(`  ${n}`),

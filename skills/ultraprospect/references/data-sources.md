@@ -103,6 +103,25 @@ comes back identical. It is not rejected, it is dropped. So filters that only
 `/search` implements are applied client-side after the fetch, and nothing
 assumes a parameter took effect because the request was accepted.
 
+### Every filter matches the LEGAL UNIT, never the establishment
+
+This catches everyone once. `section_activite_principale`, `tranche_effectif_salarie`
+and `etat_administratif` all filter the company; `matching_etablissements` then
+returns its establishments with their own, different values. Orange is a telecom
+operator (61.10Z, section J, 10 000+ staff) and its Vincennes establishment is a
+phone shop (47.42Z, section G, 10-19 staff). **Both are true.** A `--section J`
+run returning a section-G shop is the API being precise, not broken.
+
+So a record carries both: `nafCode`/`effectifTranche` are the ESTABLISHMENT's —
+this tool's unit is the place — and `company.nafCode`/`company.effectifTranche`
+are the legal unit's, which is what the filters matched and what the score uses
+for company size. The fact sheet and the CSV show both whenever they differ.
+
+The establishment's own `etat_administratif` is filtered client-side regardless
+of endpoint: an active company keeps its closed branches, and without that a
+restaurant that shut in 2019 appears as an open one at a real address. On
+Vincennes it is the difference between 672 rows and 348.
+
 ### Establishments, not legal units
 
 One company is one legal unit and any number of establishments. This tool's unit

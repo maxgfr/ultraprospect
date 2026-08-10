@@ -54,6 +54,8 @@ export interface EnrichOutcome {
   enriched: number;
   skipped: number;
   unreachable: number;
+  /** Reachable, but served no text without a browser. Not the same as absent. */
+  jsOnly: number;
   pagesFetched: number;
   jobsFound: number;
   notes: string[];
@@ -115,7 +117,7 @@ async function enrichOne(
   place: Place,
   store: PageStore,
   opts: EnrichOptions,
-): Promise<{ pages: PageRecord[]; jobs: number; reachable: boolean }> {
+): Promise<{ pages: PageRecord[]; jobs: number; reachable: boolean; why?: string }> {
   const home = place.website!.url;
   const fetched: FetchedPage[] = [];
   const boards: AtsBoard[] = [];
@@ -129,8 +131,14 @@ async function enrichOne(
 
   const sitemap = await readSitemap(home);
 
-  const homePage = await fetchPage(runDir, place.id, home, "home", store, { keepHtml: true });
-  if (!homePage) return { pages: [], jobs: 0, reachable: false };
+  const homeOutcome = await fetchPage(runDir, place.id, home, "home", store, { keepHtml: true });
+  if (!homeOutcome.ok) {
+    // "Unreachable" and "answers, but is a JavaScript shell" are different
+    // facts about a prospect, and the second one is actionable: the site is
+    // there, a human can open it, only the machine could not read it.
+    return { pages: [], jobs: 0, reachable: false, why: homeOutcome.reason };
+  }
+  const homePage = homeOutcome.page;
   fetched.push(homePage);
 
   // Links off the homepage matter as much as the sitemap: plenty of small sites
@@ -162,11 +170,11 @@ async function enrichOne(
   for (const [role, url] of picked) {
     if (spent >= budget) break;
     if (!allowed(url)) continue;
-    const page = await fetchPage(runDir, place.id, url, role, store, { keepHtml: true });
+    const outcome = await fetchPage(runDir, place.id, url, role, store, { keepHtml: true });
     spent++;
-    if (page) {
-      fetched.push(page);
-      boards.push(...detectBoards(page.html ?? "", page.record.url));
+    if (outcome.ok) {
+      fetched.push(outcome.page);
+      boards.push(...detectBoards(outcome.page.html ?? "", outcome.page.record.url));
     }
   }
   boards.push(...detectBoards(homePage.html ?? "", homePage.record.url));
@@ -215,7 +223,7 @@ export async function runEnrich(runDir: string, places: Place[], store: PageStor
   }
   if (opts.limit) targets = targets.slice(0, opts.limit);
 
-  const outcome: EnrichOutcome = { enriched: 0, skipped: places.length - targets.length, unreachable: 0, pagesFetched: 0, jobsFound: 0, notes };
+  const outcome: EnrichOutcome = { enriched: 0, skipped: places.length - targets.length, unreachable: 0, jsOnly: 0, pagesFetched: 0, jobsFound: 0, notes };
   if (targets.length === 0) {
     note("enrich: no place has a corroborated website yet — run `resolve` first");
     return outcome;
@@ -227,11 +235,20 @@ export async function runEnrich(runDir: string, places: Place[], store: PageStor
   // host on its own, so this parallelises ACROSS companies without ever putting
   // two simultaneous requests on one server.
   await mapLimit(targets, opts.concurrency ?? 4, async (place) => {
-    const result = await enrichOne(runDir, place, store, opts).catch(() => ({ pages: [] as PageRecord[], jobs: 0, reachable: false }));
+    const result = await enrichOne(runDir, place, store, opts).catch(() => ({
+      pages: [] as PageRecord[],
+      jobs: 0,
+      reachable: false,
+      why: "unreachable" as const,
+    }));
     done++;
     opts.onProgress?.(done, targets.length, place.name);
     if (!result.reachable) {
       outcome.unreachable++;
+      if (result.why === "no-readable-text") {
+        outcome.jsOnly++;
+        note(`enrich: ${place.name} — ${place.website?.url} answers but serves no readable text (a JavaScript-only page). The site exists; we cannot read it.`);
+      }
       place.signals = {
         ...(place.signals ?? {
           hasWebsite: true,
@@ -254,6 +271,9 @@ export async function runEnrich(runDir: string, places: Place[], store: PageStor
     outcome.jobsFound += result.jobs;
   });
 
-  note(`enrich: ${outcome.enriched} site(s) read, ${outcome.pagesFetched} page(s) stored, ${outcome.jobsFound} opening(s), ${outcome.unreachable} unreachable`);
+  note(
+    `enrich: ${outcome.enriched} site(s) read, ${outcome.pagesFetched} page(s) stored, ${outcome.jobsFound} opening(s), ${outcome.unreachable} unreachable` +
+      (outcome.jsOnly ? ` (of which ${outcome.jsOnly} answer but serve no text without a browser)` : ""),
+  );
   return outcome;
 }

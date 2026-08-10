@@ -131,9 +131,28 @@ export function scorePair(poi: OsmPoi, rec: SireneRecord): PairScore {
   const streetAgrees = sameStreet(pa.libelleVoie, rec.address.libelleVoie, rec.address.typeVoie);
   const addressScore = numberAgrees && streetAgrees ? 1 : streetAgrees ? 0.6 : 0;
 
-  // A full street address is near-proof of identity even when the names differ —
-  // a shop trades under a sign, the register holds a holding company's name.
-  const identity = Math.max(nameScore, enseigneScore, addressScore === 1 ? 0.85 : addressScore * 0.5);
+  // An exact street address CONFIRMS a name; it does not replace one.
+  //
+  // This started as "a full address is near-proof of identity", and a real
+  // Vincennes run showed what that buys: seven pairs auto-merged on an address
+  // with no name agreement whatever — "Aux Papilles" ↔ "BRUNO ENCAOUA" and
+  // "Synotis" ↔ "SYNALTIC" (both right, a trade name and a stale one), and
+  // "Société Générale" ↔ "PAREX AUDIT S.A.S" (plainly wrong, one bank branch
+  // and one audit firm in the same building). They are the same shape. The
+  // matcher cannot tell them apart, and neither could any rule available here.
+  //
+  // Occupancy was tried as the discriminator — an address one company occupies
+  // versus one several share — and abandoned: it can only be counted over the
+  // records this run FETCHED, and any `--section`/`--min-effectif` filter makes
+  // every address look like a sole occupancy. A signal that is wrong precisely
+  // when a filter is used is worse than no signal.
+  //
+  // So address-only lands in the undecided band, which is what the band is for:
+  // real evidence, too thin to decide, adjudicated rather than guessed. With
+  // even weak name support (>= 0.4) the two signals agree and it merges.
+  const nameSupported = nameScore >= 0.4 || enseigneScore >= 0.4;
+  const addressIdentity = addressScore === 1 ? (nameSupported ? 0.9 : 0.6) : addressScore * 0.5;
+  const identity = Math.max(nameScore, enseigneScore, addressIdentity);
   if (identity < MIN_IDENTITY) return zero;
 
   const proximity = 1 - Math.min(1, distanceM / MAX_DISTANCE_M);
@@ -141,9 +160,18 @@ export function scorePair(poi: OsmPoi, rec: SireneRecord): PairScore {
   return { score, parts: { distance: proximity, name: nameScore, enseigne: enseigneScore, address: addressScore }, distanceM, matchedName: best.name };
 }
 
+/** A merge the matcher made on its own, with the score it made it on. */
+export interface MergeDecision {
+  osmId: string;
+  /** The pair's score, 0.72-1. Carried through so a row can be re-judged later. */
+  score: number;
+  /** Which signal carried it — name, enseigne or address. */
+  by: "name" | "enseigne" | "address";
+}
+
 export interface MatchOutcome {
-  /** SIRET (or `siren:` key) -> OSM POI id, for pairs confident enough to merge. */
-  merged: Map<string, string>;
+  /** SIRET (or `siren:` key) -> the merge, for pairs confident enough. */
+  merged: Map<string, MergeDecision>;
   /** Pairs in the middle band, for the agent. */
   undecided: MatchCandidate[];
 }
@@ -192,7 +220,7 @@ export function matchLanes(pois: readonly OsmPoi[], records: readonly SireneReco
   }
   scored.sort((a, b) => b.s.score - a.s.score);
 
-  const merged = new Map<string, string>();
+  const merged = new Map<string, MergeDecision>();
   const usedPoi = new Set<string>();
   const usedRec = new Set<string>();
   const undecided: MatchCandidate[] = [];
@@ -201,7 +229,14 @@ export function matchLanes(pois: readonly OsmPoi[], records: readonly SireneReco
     const key = recordKey(rec);
     if (usedPoi.has(poi.id) || usedRec.has(key)) continue;
     if (s.score >= MERGE_HIGH) {
-      merged.set(key, poi.id);
+      // The score is recorded, never flattened to 1. A merge at 0.74 carried by
+      // a street number alone and a merge at 0.98 on an exact name are both
+      // "merged", and only one of them is worth re-reading when a row looks
+      // wrong: Synotis(OSM) was merged with SYNALTIC(register) on the address,
+      // with a name similarity of 0.21. Correct — the shopfront name is stale —
+      // but a confidence of 1 would have hidden that entirely.
+      const by = s.parts.address >= 1 && s.parts.name < 0.5 && s.parts.enseigne < 0.5 ? "address" : s.parts.enseigne > s.parts.name ? "enseigne" : "name";
+      merged.set(key, { osmId: poi.id, score: Number(s.score.toFixed(3)), by });
       usedPoi.add(poi.id);
       usedRec.add(key);
     } else {

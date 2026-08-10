@@ -72,8 +72,30 @@ export interface SireneRecord {
   nomRaisonSociale?: string;
   sigle?: string;
   enseignes: string[];
+  /**
+   * The ESTABLISHMENT's activity — this site's, not the company's.
+   *
+   * They differ more often than you would expect, and the difference is real
+   * rather than a data flaw: Orange is a telecom operator (61.10Z, section J)
+   * and its Vincennes establishment is a phone shop (47.42Z, section G). Both
+   * are true, and a prospect list about the shop should say shop.
+   */
   nafCode?: string;
   section?: string;
+  /**
+   * The LEGAL UNIT's activity and size, carried alongside — because EVERY
+   * register filter matches on these, never on the establishment's.
+   *
+   * Filtering `--section J,M` and displaying only the establishment's `47.42Z`
+   * makes the tool look broken when it is being accurate; showing both is what
+   * makes the row explicable.
+   */
+  company?: {
+    nafCode?: string;
+    section?: string;
+    effectifTranche?: string;
+    effectifAnnee?: string;
+  };
   categorieEntreprise?: string;
   natureJuridique?: string;
   effectifTranche?: string;
@@ -192,8 +214,10 @@ export interface Place {
   name: string;
   /** Which lanes contributed. Order is discovery order, not precedence. */
   sources: Lane[];
-  /** 0-1. How sure the fusion is, when more than one lane contributed. */
+  /** 0-1. The pair's actual score, never rounded up to certainty. */
   matchConfidence?: number;
+  /** Which signal carried the merge: the name, a brand, or the street address. */
+  matchedBy?: string;
   osm?: OsmPoi;
   sirene?: SireneRecord;
   google?: GooglePlace;

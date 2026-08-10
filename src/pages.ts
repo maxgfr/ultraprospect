@@ -29,6 +29,9 @@ export interface FetchedPage {
   html?: string;
 }
 
+/** Under this, a body is a shell rather than a page. */
+export const MIN_READABLE_CHARS = 120;
+
 export interface PageStore {
   /** Next free id, shared across every place in the run. */
   next: number;
@@ -40,11 +43,24 @@ export function newPageStore(existing: readonly PageRecord[] = []): PageStore {
 }
 
 /**
+ * Why a fetch produced no citable page.
+ *
+ * The two are worth telling apart, and the second one was found in real use:
+ * `restaurant-elgringo.fr` answers HTTP 200 with 37 bytes — a JavaScript shell
+ * with no server-rendered content. Reporting that as "no website" is wrong in a
+ * way the reader cannot see: the site exists, a human can open it, and only the
+ * MACHINE could not read it. "Unreachable" and "reachable but empty without a
+ * browser" are different facts about a prospect.
+ */
+export type FetchFailure = { reason: "unreachable" } | { reason: "no-readable-text"; status: number; chars: number };
+
+export type FetchOutcome = { ok: true; page: FetchedPage } | ({ ok: false } & FetchFailure);
+
+/**
  * Fetch a URL and store it as a citable page.
  *
- * Returns undefined when the fetch produced nothing usable — a 404, a
- * challenge page, an empty body. That is a normal outcome for a third of small
- * business sites and is reported as absence, never filled in from elsewhere.
+ * Never invents: a page that could not be read produces a named failure, and
+ * the caller records the absence rather than filling it from elsewhere.
  */
 export async function fetchPage(
   runDir: string,
@@ -53,7 +69,7 @@ export async function fetchPage(
   role: PageRole,
   store: PageStore,
   opts: { keepHtml?: boolean; timeoutMs?: number } = {},
-): Promise<FetchedPage | undefined> {
+): Promise<FetchOutcome> {
   // Two fetchers, chosen by whether the caller needs the raw HTML.
   //
   // The cached path is the default and the right one for text: a `watch` run
@@ -72,13 +88,16 @@ export async function fetchPage(
   try {
     result = opts.keepHtml ? await fetchAndExtract(url, { keepHtml: true }) : await cachedFetchAndExtract(url);
   } catch {
-    return undefined;
+    return { ok: false, reason: "unreachable" };
   }
 
   const text = (result.text ?? "").trim();
   // Below this a "page" is a cookie wall, a redirect stub or a JS shell. Citing
-  // one would pass the resolution gate and support nothing.
-  if (text.length < 120) return undefined;
+  // one would pass the resolution gate and support nothing — but the caller is
+  // told which, because a live site we cannot read is not an absent site.
+  if (text.length < MIN_READABLE_CHARS) {
+    return { ok: false, reason: "no-readable-text", status: result.status ?? 0, chars: text.length };
+  }
 
   const id = `P${store.next++}`;
   const dir = pageDirFor(placeId);
@@ -105,20 +124,23 @@ export async function fetchPage(
   writeArtifact(join(runDir, extract), header + text + markupEvidence(result.html) + "\n");
 
   return {
-    record: {
-      id,
-      url: result.finalUrl ?? url,
-      role,
+    ok: true,
+    page: {
+      record: {
+        id,
+        url: result.finalUrl ?? url,
+        role,
+        title: result.title,
+        fetchedAt,
+        extractor: result.extractor,
+        status: result.status,
+        chars: text.length,
+        extract,
+      },
+      text,
       title: result.title,
-      fetchedAt,
-      extractor: result.extractor,
-      status: result.status,
-      chars: text.length,
-      extract,
+      html: (result as { html?: string }).html,
     },
-    text,
-    title: result.title,
-    html: (result as { html?: string }).html,
   };
 }
 

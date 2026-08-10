@@ -3323,7 +3323,9 @@ function scorePair(poi, rec) {
   );
   const streetAgrees = sameStreet(pa.libelleVoie, rec.address.libelleVoie, rec.address.typeVoie);
   const addressScore = numberAgrees && streetAgrees ? 1 : streetAgrees ? 0.6 : 0;
-  const identity = Math.max(nameScore, enseigneScore, addressScore === 1 ? 0.85 : addressScore * 0.5);
+  const nameSupported = nameScore >= 0.4 || enseigneScore >= 0.4;
+  const addressIdentity = addressScore === 1 ? nameSupported ? 0.9 : 0.6 : addressScore * 0.5;
+  const identity = Math.max(nameScore, enseigneScore, addressIdentity);
   if (identity < MIN_IDENTITY) return zero;
   const proximity = 1 - Math.min(1, distanceM / MAX_DISTANCE_M);
   const score = 0.8 * identity + 0.2 * proximity;
@@ -3369,7 +3371,8 @@ function matchLanes(pois, records) {
     const key = recordKey(rec);
     if (usedPoi.has(poi.id) || usedRec.has(key)) continue;
     if (s.score >= MERGE_HIGH) {
-      merged.set(key, poi.id);
+      const by = s.parts.address >= 1 && s.parts.name < 0.5 && s.parts.enseigne < 0.5 ? "address" : s.parts.enseigne > s.parts.name ? "enseigne" : "name";
+      merged.set(key, { osmId: poi.id, score: Number(s.score.toFixed(3)), by });
       usedPoi.add(poi.id);
       usedRec.add(key);
     } else {
@@ -4322,13 +4325,20 @@ function expandRecord(entity) {
     nomComplet: entity?.nom_complet ?? void 0,
     nomRaisonSociale: entity?.nom_raison_sociale ?? void 0,
     sigle: entity?.sigle ?? void 0,
-    section: entity?.section_activite_principale ?? void 0,
     categorieEntreprise: entity?.categorie_entreprise ?? void 0,
     natureJuridique: entity?.nature_juridique ?? void 0,
     dateCreation: entity?.date_creation ?? void 0,
     nombreEtablissements: entity?.nombre_etablissements ?? void 0,
     dirigeants: mapDirigeants(entity?.dirigeants),
-    finances: latestFinances(entity?.finances)
+    finances: latestFinances(entity?.finances),
+    // The legal unit's own activity and size. Every filter the API applies
+    // matches on THESE, so a row has to be able to explain why it came back.
+    company: {
+      nafCode: entity?.activite_principale ?? void 0,
+      section: entity?.section_activite_principale ?? void 0,
+      effectifTranche: entity?.tranche_effectif_salarie ?? void 0,
+      effectifAnnee: entity?.annee_tranche_effectif_salarie ?? void 0
+    }
   };
   const establishments = entity?.matching_etablissements?.length ? entity.matching_etablissements : entity?.siege ? [entity.siege] : [];
   return establishments.filter((e) => e).map((e) => {
@@ -4350,6 +4360,11 @@ function expandRecord(entity) {
       siret: e.siret ?? void 0,
       enseignes: (e.liste_enseignes ?? []).filter(Boolean),
       nafCode: e.activite_principale ?? entity?.activite_principale ?? void 0,
+      // Derived from THIS establishment's code, never inherited from the
+      // legal unit's: pairing an establishment's 68.20B with the company's
+      // section J produces a line that is impossible on its face and reads as
+      // a bug rather than as two true things about two levels.
+      section: nafSection(e.activite_principale ?? entity?.activite_principale ?? "") ?? void 0,
       effectifTranche: e.tranche_effectif_salarie ?? entity?.tranche_effectif_salarie ?? void 0,
       effectifAnnee: e.annee_tranche_effectif_salarie ?? void 0,
       dateFermeture: e.date_fermeture ?? void 0,
@@ -4620,10 +4635,11 @@ function placeFromRecord(rec) {
     pages: []
   };
 }
-function mergeInto(poiPlace, rec, confidence) {
+function mergeInto(poiPlace, rec, confidence, by) {
   poiPlace.sirene = rec;
   poiPlace.sources = [.../* @__PURE__ */ new Set([...poiPlace.sources, "sirene"])];
   poiPlace.matchConfidence = Number(confidence.toFixed(3));
+  poiPlace.matchedBy = by;
   poiPlace.address = {
     ...rec.address,
     ...Object.fromEntries(Object.entries(poiPlace.address).filter(([, v]) => v !== void 0 && v !== ""))
@@ -4708,10 +4724,10 @@ async function runScan(target, opts = {}) {
   const claimed = /* @__PURE__ */ new Set();
   for (const rec of records) {
     const key = rec.siret ?? `siren:${rec.siren}`;
-    const poiId = merged.get(key);
-    const host = poiId ? poiPlaces.get(poiId) : void 0;
-    if (host) {
-      mergeInto(host, rec, 1);
+    const decision = merged.get(key);
+    const host = decision ? poiPlaces.get(decision.osmId) : void 0;
+    if (host && decision) {
+      mergeInto(host, rec, decision.score, decision.by);
       claimed.add(key);
     } else {
       places.push(placeFromRecord(rec));
@@ -4767,6 +4783,7 @@ import { join as join9 } from "path";
 function pageDirFor(placeId) {
   return join9("pages", placeId.replace(/[^a-zA-Z0-9._-]/g, "_"));
 }
+var MIN_READABLE_CHARS = 120;
 function newPageStore(existing = []) {
   const highest = existing.reduce((max, p) => Math.max(max, Number.parseInt(p.id.slice(1), 10) || 0), 0);
   return { next: highest + 1 };
@@ -4776,10 +4793,12 @@ async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
   try {
     result = opts.keepHtml ? await fetchAndExtract(url, { keepHtml: true }) : await cachedFetchAndExtract(url);
   } catch {
-    return void 0;
+    return { ok: false, reason: "unreachable" };
   }
   const text2 = (result.text ?? "").trim();
-  if (text2.length < 120) return void 0;
+  if (text2.length < MIN_READABLE_CHARS) {
+    return { ok: false, reason: "no-readable-text", status: result.status ?? 0, chars: text2.length };
+  }
   const id = `P${store.next++}`;
   const dir = pageDirFor(placeId);
   const extract = join9(dir, `${id}.md`);
@@ -4799,20 +4818,23 @@ async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
   if (!isNoWrite()) mkdirSync5(join9(runDir, dir), { recursive: true });
   writeArtifact(join9(runDir, extract), header2 + text2 + markupEvidence(result.html) + "\n");
   return {
-    record: {
-      id,
-      url: result.finalUrl ?? url,
-      role,
+    ok: true,
+    page: {
+      record: {
+        id,
+        url: result.finalUrl ?? url,
+        role,
+        title: result.title,
+        fetchedAt,
+        extractor: result.extractor,
+        status: result.status,
+        chars: text2.length,
+        extract
+      },
+      text: text2,
       title: result.title,
-      fetchedAt,
-      extractor: result.extractor,
-      status: result.status,
-      chars: text2.length,
-      extract
-    },
-    text: text2,
-    title: result.title,
-    html: result.html
+      html: result.html
+    }
   };
 }
 function markupEvidence(html) {
@@ -4889,8 +4911,8 @@ function classifyHost(url) {
   if (DIRECTORY_HOSTS.some((h) => host.includes(h))) return "directory";
   return "own";
 }
-function queriesFor(place) {
-  const town = place.address.commune ?? place.address.codePostal ?? "";
+function queriesFor(place, fallbackTown) {
+  const town = place.address.commune ?? place.address.codePostal ?? fallbackTown ?? "";
   const names = /* @__PURE__ */ new Set();
   if (place.osm?.name) names.add(place.osm.name);
   if (place.sirene?.enseignes[0]) names.add(place.sirene.enseignes[0]);
@@ -4974,7 +4996,7 @@ async function runResolve(runDir, places, store, opts = {}) {
     notes.push(n);
     opts.onNote?.(n);
   };
-  const outcome = { pages: /* @__PURE__ */ new Map(), corroborated: 0, rejected: 0, unchanged: 0, socials: 0, notes };
+  const outcome = { pages: /* @__PURE__ */ new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unchanged: 0, socials: 0, notes };
   const targets = needsResolving(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
   const grouped = groupHits(targets, opts.webResults ?? []);
   if (opts.webResults?.length) note(`resolve: ${opts.webResults.length} supplied web result(s) attributed to ${grouped.size} place(s)`);
@@ -4985,7 +5007,7 @@ async function runResolve(runDir, places, store, opts = {}) {
     opts.onProgress?.(done, targets.length, place.name);
     let hits = grouped.get(place.id) ?? [];
     if (hits.length === 0 && opts.useEngineSearch) {
-      const query = queriesFor(place)[0];
+      const query = queriesFor(place, opts.town)[0];
       if (query) {
         try {
           const res = await search(query, { limit: 3 });
@@ -5010,8 +5032,20 @@ async function runResolve(runDir, places, store, opts = {}) {
         continue;
       }
       if (kind === "directory") continue;
-      const page = await fetchPage2(runDir, place.id, url, "home", store);
-      if (!page) continue;
+      const fetched = await fetchPage2(runDir, place.id, url, "home", store);
+      if (!fetched.ok) {
+        if (fetched.reason === "no-readable-text") {
+          place.website = {
+            url,
+            confidence: "unverified",
+            evidence: [`fetched HTTP ${fetched.status}, but the page carries ${fetched.chars} characters of text \u2014 a JavaScript-only site we cannot read`]
+          };
+          outcome.jsOnly++;
+          settled = true;
+        }
+        continue;
+      }
+      const page = fetched.page;
       const check = corroborate(place, page.text, page.title);
       const list2 = outcome.pages.get(place.id) ?? [];
       list2.push(page.record);
@@ -5030,7 +5064,7 @@ async function runResolve(runDir, places, store, opts = {}) {
     if (!settled) outcome.unchanged++;
   }
   note(
-    `resolve: ${outcome.corroborated} corroborated, ${outcome.rejected} fetched but unverified, ${outcome.socials} social profile(s), ${outcome.unchanged} left without a site`
+    `resolve: ${outcome.corroborated} corroborated, ${outcome.rejected} fetched but unverified, ${outcome.jsOnly} reachable but JavaScript-only, ${outcome.socials} social profile(s), ${outcome.unchanged} left without a site`
   );
   return outcome;
 }
@@ -5385,8 +5419,11 @@ async function enrichOne(runDir, place, store, opts) {
   const robots = await fetchRobots(home).catch(() => void 0);
   const allowed = (url) => robots ? isAllowed(robots, url) : true;
   const sitemap = await readSitemap(home);
-  const homePage = await fetchPage2(runDir, place.id, home, "home", store, { keepHtml: true });
-  if (!homePage) return { pages: [], jobs: 0, reachable: false };
+  const homeOutcome = await fetchPage2(runDir, place.id, home, "home", store, { keepHtml: true });
+  if (!homeOutcome.ok) {
+    return { pages: [], jobs: 0, reachable: false, why: homeOutcome.reason };
+  }
+  const homePage = homeOutcome.page;
   fetched.push(homePage);
   const homeLinks = sameOriginLinks(homePage.html ?? "", homePage.record.url);
   const inventory = [.../* @__PURE__ */ new Set([...sitemap.urls, ...homeLinks])];
@@ -5408,11 +5445,11 @@ async function enrichOne(runDir, place, store, opts) {
   for (const [role, url] of picked) {
     if (spent2 >= budget) break;
     if (!allowed(url)) continue;
-    const page = await fetchPage2(runDir, place.id, url, role, store, { keepHtml: true });
+    const outcome = await fetchPage2(runDir, place.id, url, role, store, { keepHtml: true });
     spent2++;
-    if (page) {
-      fetched.push(page);
-      boards.push(...detectBoards(page.html ?? "", page.record.url));
+    if (outcome.ok) {
+      fetched.push(outcome.page);
+      boards.push(...detectBoards(outcome.page.html ?? "", outcome.page.record.url));
     }
   }
   boards.push(...detectBoards(homePage.html ?? "", homePage.record.url));
@@ -5452,7 +5489,7 @@ async function runEnrich(runDir, places, store, opts) {
     targets = [...targets].sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0));
   }
   if (opts.limit) targets = targets.slice(0, opts.limit);
-  const outcome = { enriched: 0, skipped: places.length - targets.length, unreachable: 0, pagesFetched: 0, jobsFound: 0, notes };
+  const outcome = { enriched: 0, skipped: places.length - targets.length, unreachable: 0, jsOnly: 0, pagesFetched: 0, jobsFound: 0, notes };
   if (targets.length === 0) {
     note("enrich: no place has a corroborated website yet \u2014 run `resolve` first");
     return outcome;
@@ -5460,11 +5497,20 @@ async function runEnrich(runDir, places, store, opts) {
   note(`enrich: tier ${opts.tier} over ${targets.length} site(s)`);
   let done = 0;
   await mapLimit(targets, opts.concurrency ?? 4, async (place) => {
-    const result = await enrichOne(runDir, place, store, opts).catch(() => ({ pages: [], jobs: 0, reachable: false }));
+    const result = await enrichOne(runDir, place, store, opts).catch(() => ({
+      pages: [],
+      jobs: 0,
+      reachable: false,
+      why: "unreachable"
+    }));
     done++;
     opts.onProgress?.(done, targets.length, place.name);
     if (!result.reachable) {
       outcome.unreachable++;
+      if (result.why === "no-readable-text") {
+        outcome.jsOnly++;
+        note(`enrich: ${place.name} \u2014 ${place.website?.url} answers but serves no readable text (a JavaScript-only page). The site exists; we cannot read it.`);
+      }
       place.signals = {
         ...place.signals ?? {
           hasWebsite: true,
@@ -5486,7 +5532,9 @@ async function runEnrich(runDir, places, store, opts) {
     outcome.pagesFetched += result.pages.length;
     outcome.jobsFound += result.jobs;
   });
-  note(`enrich: ${outcome.enriched} site(s) read, ${outcome.pagesFetched} page(s) stored, ${outcome.jobsFound} opening(s), ${outcome.unreachable} unreachable`);
+  note(
+    `enrich: ${outcome.enriched} site(s) read, ${outcome.pagesFetched} page(s) stored, ${outcome.jobsFound} opening(s), ${outcome.unreachable} unreachable` + (outcome.jsOnly ? ` (of which ${outcome.jsOnly} answer but serve no text without a browser)` : "")
+  );
   return outcome;
 }
 
@@ -5524,7 +5572,7 @@ function scoreOf(place, weights = DEFAULT_WEIGHTS) {
     parts.hiring = weights.hiring;
     parts.openRoles = Math.min(weights.perRole * 5, weights.perRole * (s.openRoles ?? 0));
   }
-  const band = place.sirene?.effectifTranche;
+  const band = place.sirene?.company?.effectifTranche ?? place.sirene?.effectifTranche;
   const floor = band ? EFFECTIF_FLOOR[band] : void 0;
   if (floor !== void 0 && floor >= 0) {
     parts.size = Math.round(weights.size * Math.min(1, Math.log10(Math.max(1, floor) + 1) / 3));
@@ -5598,9 +5646,20 @@ function factSheet(place) {
   if (place.sirene) {
     const s = place.sirene;
     l.push(`- SIREN: ${s.siren}${s.siret ? ` \xB7 SIRET ${s.siret}` : ""}${s.estSiege ? " (head office)" : ""}`);
-    if (s.nafCode) l.push(`- NAF: ${s.nafCode}${s.section ? ` (section ${s.section})` : ""}`);
-    if (s.effectifTranche)
-      l.push(`- headcount band: ${EFFECTIF_LABELS[s.effectifTranche] ?? s.effectifTranche}${s.effectifAnnee ? ` (${s.effectifAnnee})` : ""}`);
+    if (s.nafCode) l.push(`- NAF, this establishment: ${s.nafCode}${s.section ? ` (section ${s.section})` : ""}`);
+    if (s.company?.nafCode && s.company.nafCode !== s.nafCode) {
+      l.push(
+        `- NAF, the company as a whole: ${s.company.nafCode}${s.company.section ? ` (section ${s.company.section})` : ""} \u2014 the register filters matched on this`
+      );
+    }
+    if (s.effectifTranche) {
+      l.push(`- headcount, this establishment: ${EFFECTIF_LABELS[s.effectifTranche] ?? s.effectifTranche}${s.effectifAnnee ? ` (${s.effectifAnnee})` : ""}`);
+    }
+    if (s.company?.effectifTranche && s.company.effectifTranche !== s.effectifTranche) {
+      l.push(
+        `- headcount, the company as a whole: ${EFFECTIF_LABELS[s.company.effectifTranche] ?? s.company.effectifTranche} \u2014 the filters matched on this, and it is what the score uses`
+      );
+    }
     if (s.dateCreation) l.push(`- registered since: ${s.dateCreation}`);
     if (s.etatAdministratif) l.push(`- administrative state: ${s.etatAdministratif === "A" ? "active" : "ceased"}`);
     if (s.nombreEtablissements) l.push(`- establishments: ${s.nombreEtablissements}`);
@@ -5900,7 +5959,10 @@ var HEADER = [
   "category",
   "naf",
   "section",
+  "company_naf",
+  "company_section",
   "headcount_band",
+  "company_headcount_band",
   "revenue_eur",
   "revenue_year",
   "siren",
@@ -5964,7 +6026,13 @@ function toCsv(places, opts = {}) {
         place.category ?? "",
         s?.nafCode ?? "",
         s?.section ?? "",
+        // The legal unit's, in its own columns: every register filter matched
+        // on these, so a row that looks off-target can be explained instead of
+        // looking like a bug.
+        s?.company?.nafCode ?? "",
+        s?.company?.section ?? "",
         s?.effectifTranche ? EFFECTIF_LABELS[s.effectifTranche] ?? s.effectifTranche : "",
+        s?.company?.effectifTranche ? EFFECTIF_LABELS[s.company.effectifTranche] ?? s.company.effectifTranche : "",
         s?.finances?.ca ?? "",
         s?.finances?.annee ?? "",
         s?.siren ?? "",
@@ -7075,7 +7143,8 @@ async function cmdResolve(values, bools) {
   const limit = values.limit ? clampInt(values.limit, 1, 1e5, 50) : void 0;
   const targets = needsResolving(places).slice(0, limit ?? Number.POSITIVE_INFINITY);
   if (bools.has("queries")) {
-    const plan = targets.map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p) }));
+    const town = shortLabel(requireManifest(runDir).target.label);
+    const plan = targets.map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town) }));
     if (bools.has("json")) out(jsonLine(plan));
     else for (const item of plan) for (const q of item.queries) out(q);
     say("");
@@ -7098,6 +7167,7 @@ async function cmdResolve(values, bools) {
   const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }))));
   const outcome = await runResolve(runDir, places, store, {
     webResults,
+    town: shortLabel(requireManifest(runDir).target.label),
     limit,
     useEngineSearch: bools.has("engine-search"),
     onNote: (n) => say(`  ${n}`),

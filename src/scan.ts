@@ -115,10 +115,11 @@ function placeFromRecord(rec: SireneRecord): Place {
   };
 }
 
-function mergeInto(poiPlace: Place, rec: SireneRecord, confidence: number): void {
+function mergeInto(poiPlace: Place, rec: SireneRecord, confidence: number, by: string): void {
   poiPlace.sirene = rec;
   poiPlace.sources = [...new Set([...poiPlace.sources, "sirene" as const])];
   poiPlace.matchConfidence = Number(confidence.toFixed(3));
+  poiPlace.matchedBy = by;
   // OSM's address is what is written on the street; the register's is what was
   // filed. Prefer the filed one for the parts OSM leaves blank, keep OSM's where
   // both exist — a mapper standing in front of the door is rarely wrong about
@@ -220,10 +221,10 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
   const claimed = new Set<string>();
   for (const rec of records) {
     const key = rec.siret ?? `siren:${rec.siren}`;
-    const poiId = merged.get(key);
-    const host = poiId ? poiPlaces.get(poiId) : undefined;
-    if (host) {
-      mergeInto(host, rec, 1);
+    const decision = merged.get(key);
+    const host = decision ? poiPlaces.get(decision.osmId) : undefined;
+    if (host && decision) {
+      mergeInto(host, rec, decision.score, decision.by);
       claimed.add(key);
     } else {
       places.push(placeFromRecord(rec));

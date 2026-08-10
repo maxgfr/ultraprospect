@@ -23,7 +23,7 @@
 // however patiently it is walked.
 import { awaitHostSlot, httpJson, mapLimit } from "./engine.js";
 import { politeUa } from "./net.js";
-import { NAF_SECTIONS, divisionsOfSection } from "./naf.js";
+import { NAF_SECTIONS, divisionsOfSection, nafSection } from "./naf.js";
 import type { Dirigeant, LaneCoverage, PostalAddress, SireneRecord } from "./types.js";
 import { firstText } from "./util.js";
 
@@ -219,13 +219,20 @@ export function expandRecord(entity: any): SireneRecord[] {
     nomComplet: entity?.nom_complet ?? undefined,
     nomRaisonSociale: entity?.nom_raison_sociale ?? undefined,
     sigle: entity?.sigle ?? undefined,
-    section: entity?.section_activite_principale ?? undefined,
     categorieEntreprise: entity?.categorie_entreprise ?? undefined,
     natureJuridique: entity?.nature_juridique ?? undefined,
     dateCreation: entity?.date_creation ?? undefined,
     nombreEtablissements: entity?.nombre_etablissements ?? undefined,
     dirigeants: mapDirigeants(entity?.dirigeants),
     finances: latestFinances(entity?.finances),
+    // The legal unit's own activity and size. Every filter the API applies
+    // matches on THESE, so a row has to be able to explain why it came back.
+    company: {
+      nafCode: entity?.activite_principale ?? undefined,
+      section: entity?.section_activite_principale ?? undefined,
+      effectifTranche: entity?.tranche_effectif_salarie ?? undefined,
+      effectifAnnee: entity?.annee_tranche_effectif_salarie ?? undefined,
+    },
   };
 
   const establishments: any[] = entity?.matching_etablissements?.length ? entity.matching_etablissements : entity?.siege ? [entity.siege] : [];
@@ -257,6 +264,11 @@ export function expandRecord(entity: any): SireneRecord[] {
         siret: e.siret ?? undefined,
         enseignes: (e.liste_enseignes ?? []).filter(Boolean),
         nafCode: e.activite_principale ?? entity?.activite_principale ?? undefined,
+        // Derived from THIS establishment's code, never inherited from the
+        // legal unit's: pairing an establishment's 68.20B with the company's
+        // section J produces a line that is impossible on its face and reads as
+        // a bug rather than as two true things about two levels.
+        section: nafSection(e.activite_principale ?? entity?.activite_principale ?? "") ?? undefined,
         effectifTranche: e.tranche_effectif_salarie ?? entity?.tranche_effectif_salarie ?? undefined,
         effectifAnnee: e.annee_tranche_effectif_salarie ?? undefined,
         dateFermeture: e.date_fermeture ?? undefined,

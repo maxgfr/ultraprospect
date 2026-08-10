@@ -34,7 +34,10 @@ const HEADER = [
   "category",
   "naf",
   "section",
+  "company_naf",
+  "company_section",
   "headcount_band",
+  "company_headcount_band",
   "revenue_eur",
   "revenue_year",
   "siren",
@@ -106,7 +109,13 @@ export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
         place.category ?? "",
         s?.nafCode ?? "",
         s?.section ?? "",
+        // The legal unit's, in its own columns: every register filter matched
+        // on these, so a row that looks off-target can be explained instead of
+        // looking like a bug.
+        s?.company?.nafCode ?? "",
+        s?.company?.section ?? "",
         s?.effectifTranche ? (EFFECTIF_LABELS[s.effectifTranche] ?? s.effectifTranche) : "",
+        s?.company?.effectifTranche ? (EFFECTIF_LABELS[s.company.effectifTranche] ?? s.company.effectifTranche) : "",
         s?.finances?.ca ?? "",
         s?.finances?.annee ?? "",
         s?.siren ?? "",

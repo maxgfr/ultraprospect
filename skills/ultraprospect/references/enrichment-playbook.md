@@ -96,6 +96,19 @@ Everything in `signals` is a count or a presence. The engine does not conclude:
 `lastContentAt` is a signal, not a guarantee: some generators stamp every page
 with the build date, and its **absence is not staleness**.
 
+## A site that answers but says nothing
+
+`restaurant-elgringo.fr` returns HTTP 200 with **37 bytes**: a JavaScript shell
+with no server-rendered content. It is a real, live website that a human can
+open, and this tool cannot read a word of it.
+
+Reporting that as "no website" would be wrong in a way the reader cannot see, so
+it is its own outcome: the place keeps `website.confidence: "unverified"` with
+the reason spelled out, `resolve` counts it separately from the absences, and
+`enrich` notes it. Roughly one small-business site in ten is like this. It is a
+prospect with a website you will have to open yourself, not a prospect without
+one.
+
 ## Contacts
 
 Verbatim only, each carrying the page id it came from.

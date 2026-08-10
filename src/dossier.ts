@@ -55,9 +55,27 @@ export function factSheet(place: Place): string {
   if (place.sirene) {
     const s = place.sirene;
     l.push(`- SIREN: ${s.siren}${s.siret ? ` · SIRET ${s.siret}` : ""}${s.estSiege ? " (head office)" : ""}`);
-    if (s.nafCode) l.push(`- NAF: ${s.nafCode}${s.section ? ` (section ${s.section})` : ""}`);
-    if (s.effectifTranche)
-      l.push(`- headcount band: ${EFFECTIF_LABELS[s.effectifTranche] ?? s.effectifTranche}${s.effectifAnnee ? ` (${s.effectifAnnee})` : ""}`);
+    // Two levels, and where they differ the difference is real rather than a
+    // data flaw: Orange is a telecom operator (61.10Z, section J) and its
+    // Vincennes establishment is a phone shop (47.42Z, section G). Both are
+    // true. The company's line is shown only when it differs — the common case
+    // stays one line — but always when it does, because EVERY register filter
+    // matched on the company's values, and a reader who asked for section J
+    // deserves to see why a section-G shop came back.
+    if (s.nafCode) l.push(`- NAF, this establishment: ${s.nafCode}${s.section ? ` (section ${s.section})` : ""}`);
+    if (s.company?.nafCode && s.company.nafCode !== s.nafCode) {
+      l.push(
+        `- NAF, the company as a whole: ${s.company.nafCode}${s.company.section ? ` (section ${s.company.section})` : ""} — the register filters matched on this`,
+      );
+    }
+    if (s.effectifTranche) {
+      l.push(`- headcount, this establishment: ${EFFECTIF_LABELS[s.effectifTranche] ?? s.effectifTranche}${s.effectifAnnee ? ` (${s.effectifAnnee})` : ""}`);
+    }
+    if (s.company?.effectifTranche && s.company.effectifTranche !== s.effectifTranche) {
+      l.push(
+        `- headcount, the company as a whole: ${EFFECTIF_LABELS[s.company.effectifTranche] ?? s.company.effectifTranche} — the filters matched on this, and it is what the score uses`,
+      );
+    }
     if (s.dateCreation) l.push(`- registered since: ${s.dateCreation}`);
     if (s.etatAdministratif) l.push(`- administrative state: ${s.etatAdministratif === "A" ? "active" : "ceased"}`);
     if (s.nombreEtablissements) l.push(`- establishments: ${s.nombreEtablissements}`);

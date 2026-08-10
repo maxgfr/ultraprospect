@@ -43,14 +43,37 @@ describe("scorePair", () => {
     expect(s.score).toBe(0);
   });
 
-  it("matches on a full street address when the names differ entirely", () => {
-    // A shop trades under its sign; the register holds the operating company.
-    // This is the case the address component exists for.
+  it("sends an address-only pair to ADJUDICATION rather than merging it", () => {
+    // A shop trades under its sign and the register holds the operating
+    // company, so an exact address with no name agreement is real evidence —
+    // and it is not decidable. Measured on one Vincennes run, this exact shape
+    // produced "Aux Papilles" ↔ "BRUNO ENCAOUA" and "Synotis" ↔ "SYNALTIC"
+    // (both right) alongside "Société Générale" ↔ "PAREX AUDIT S.A.S" (plainly
+    // wrong, two tenants of one building). Nothing available here separates
+    // them, so the band decides, not the matcher.
     const p = poi({ name: "Les Officiers", tags: { "addr:housenumber": "12", "addr:street": "Avenue de Paris" } });
     const r = rec({ nomComplet: "AUX BARREZIENS", address: { numero: "12", typeVoie: "AVENUE", libelleVoie: "DE PARIS" } });
     const s = scorePair(p, r);
     expect(s.parts.address).toBe(1);
+    expect(s.score).toBeGreaterThanOrEqual(MERGE_LOW);
+    expect(s.score).toBeLessThan(MERGE_HIGH);
+  });
+
+  it("MERGES an address match that even weakly agrees on the name", () => {
+    // Two independent signals pointing the same way is a different situation
+    // from one signal pointing anywhere. "Maison 1 2 3" against "MAISON 123"
+    // scores 0.5 on the name — not enough on its own (it sits in the undecided
+    // band in the test below) — but at the same street number it is decided.
+    const p = poi({ name: "Maison 1 2 3", tags: { "addr:housenumber": "12", "addr:street": "Avenue de Paris" } });
+    const r = rec({ nomComplet: "MAISON 123", address: { numero: "12", typeVoie: "AVENUE", libelleVoie: "DE PARIS" } });
+    const s = scorePair(p, r);
+    expect(s.parts.address).toBe(1);
+    expect(s.parts.name).toBeGreaterThanOrEqual(0.4);
     expect(s.score).toBeGreaterThanOrEqual(MERGE_HIGH);
+
+    // The same name, no address: undecided. The address is what settles it.
+    const alone = scorePair(poi({ name: "Maison 1 2 3" }), rec({ nomComplet: "MAISON 123" }));
+    expect(alone.score).toBeLessThan(MERGE_HIGH);
   });
 
   it("uses the brand tag against the register's enseigne", () => {
@@ -80,7 +103,11 @@ describe("matchLanes", () => {
     const { merged } = matchLanes(pois, records);
     // One register record cannot be two shopfronts.
     expect(merged.size).toBe(1);
-    expect(merged.get("A")).toBe("n1");
+    // The decision carries the score it was made on, never a flat 1: a merge at
+    // 0.74 and a merge at 0.99 are both "merged", and only one is worth
+    // re-reading when a row looks wrong.
+    expect(merged.get("A")).toMatchObject({ osmId: "n1", by: "name" });
+    expect(merged.get("A")!.score).toBeGreaterThanOrEqual(MERGE_HIGH);
   });
 
   it("routes the middle band to the agent instead of deciding", () => {
