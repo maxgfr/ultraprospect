@@ -18,6 +18,7 @@
 // refusal to guess. Anything non-zero means stop and fix, never present anyway.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { EXIT_FAILURE, EXIT_OK, EXIT_USAGE, UsageError, isInvokedDirectly, jsonLine, parseArgs, positionalText, setNoWrite, writeArtifact } from "./engine.js";
 import { brandEngine } from "./engine.js";
 import { runDoctor } from "./doctor.js";
@@ -33,12 +34,30 @@ import { buildDossierPacket, dossierPathFor } from "./dossier.js";
 import { formatReport, runCheck } from "./check.js";
 import { buildAll } from "./render.js";
 import { buildDelta, diffRuns } from "./watch.js";
+import { createAdapter } from "./mcp/adapter.js";
+import { emitOrchestration } from "./orchestrate.js";
+import { runStdioServer, startHttpServer } from "./engine.js";
 import type { FitVerdict } from "./types.js";
 import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, writePlaces, writeRunManifest } from "./run.js";
 import { clampInt, parseBbox, parseDistanceM } from "./util.js";
 import { VERSION } from "./version.js";
 
-export const COMMANDS = ["where", "scan", "match", "resolve", "enrich", "score", "dossier", "check", "render", "watch", "doctor", "version"] as const;
+export const COMMANDS = [
+  "where",
+  "scan",
+  "match",
+  "resolve",
+  "enrich",
+  "score",
+  "dossier",
+  "check",
+  "render",
+  "watch",
+  "orchestrate",
+  "mcp",
+  "doctor",
+  "version",
+] as const;
 
 export const VALUE_FLAGS = [
   "where",
@@ -72,9 +91,26 @@ export const VALUE_FLAGS = [
   "min-score",
   "min-fit",
   "since",
+  "transport",
+  "port",
+  "bind",
+  "phase",
 ] as const;
 
-export const BOOL_FLAGS = ["json", "no-osm", "no-sirene", "include-ceased", "no-people", "queries", "engine-search", "stdout", "help", "version"] as const;
+export const BOOL_FLAGS = [
+  "json",
+  "no-osm",
+  "no-sirene",
+  "include-ceased",
+  "no-people",
+  "queries",
+  "engine-search",
+  "eco",
+  "list",
+  "stdout",
+  "help",
+  "version",
+] as const;
 
 export const HELP = `ultraprospect ${VERSION} — turn a place into a qualified prospect list
 
@@ -92,6 +128,8 @@ COMMANDS
   check                  The gate: citations resolve, claims are cited, contacts were observed.
   render                 CSV, JSON, report and a self-contained HTML page.
   watch --since <run>    Diff this run against an earlier one: who opened, closed, started hiring.
+  orchestrate            Emit the fan-out for the two judgement phases: match and dossier.
+  mcp                    Serve the run over MCP: where, scan, places, dossier, check.
   doctor                 Check node, network and the health of every upstream.
   version                Print the version.
 
@@ -146,6 +184,15 @@ DELIVERABLES (render)
 
 CHANGE (watch)
   --since <dir>          The earlier run to compare against.
+
+FAN-OUT (orchestrate)
+  --phase <name>         Emit just one phase: match or dossier.
+  --eco                  Emit only the RUNBOOK and the contracts — the sequential path.
+  --list                 Report which phases are ready, as JSON, and emit nothing.
+
+SERVER (mcp)
+  --transport <kind>     stdio (default) or http.
+  --port <n> --bind <addr>   For the http transport. Loopback only.
 
 OUTPUT
   --out <dir>            Run root. Default ./${DEFAULT_OUT}
@@ -617,6 +664,54 @@ async function cmdWatch(values: Record<string, string>, bools: ReadonlySet<strin
   return EXIT_OK;
 }
 
+async function cmdMcp(values: Record<string, string>): Promise<number> {
+  const adapter = createAdapter();
+  if ((values.transport ?? "stdio") === "http") {
+    const server = await startHttpServer(adapter, {
+      port: values.port ? clampInt(values.port, 1, 65535, 8787) : 8787,
+      // Loopback unless the operator says otherwise. A prospect run holds
+      // personal data; binding it to every interface by default would be a
+      // surprising thing for a CLI flag-less invocation to do.
+      bind: values.bind ?? "127.0.0.1",
+    });
+    say(`ultraprospect: MCP over http on ${values.bind ?? "127.0.0.1"}:${values.port ?? 8787}`);
+    await new Promise(() => {});
+    void server;
+    return EXIT_OK;
+  }
+  await runStdioServer(adapter);
+  return EXIT_OK;
+}
+
+async function cmdOrchestrate(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
+  if (!values.run) throw new UsageError("orchestrate needs --run <dir>");
+  const runDir = resolveRun(values.run);
+  // The emitted scripts bake in the absolute engine path: an installed skill
+  // runs far from the user's project, and a subagent handed a relative path
+  // resolves it against its own cwd.
+  const engineAbs = fileURLToPath(new URL(import.meta.url));
+
+  const result = emitOrchestration(runDir, engineAbs, {
+    phase: values.phase,
+    eco: bools.has("eco"),
+  });
+
+  if (bools.has("list") || bools.has("json")) {
+    out(
+      jsonLine({
+        run: runDir,
+        exitCode: result.exitCode,
+        phases: result.phases.map((p) => ({ name: p.name, ready: p.ready, items: p.items, prerequisite: p.prerequisite })),
+      }),
+    );
+  } else {
+    for (const file of result.written) out(file);
+  }
+  for (const notice of result.notices) say(`  ${notice}`);
+  for (const error of result.errors) say(`  ${error}`);
+  return result.exitCode;
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   brandEngine();
   const parsed = parseArgs(argv, SPEC);
@@ -654,6 +749,10 @@ export async function main(argv: readonly string[]): Promise<number> {
       return cmdRender(values, bools);
     case "watch":
       return cmdWatch(values, bools);
+    case "orchestrate":
+      return cmdOrchestrate(values, bools);
+    case "mcp":
+      return cmdMcp(values);
     case "doctor":
       return runDoctor({ json: bools.has("json"), out, say });
     case "version":

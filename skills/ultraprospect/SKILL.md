@@ -66,6 +66,8 @@ gate. Read it rather than guessing a flag.
 | Prove the write-up is grounded before anyone reads it | `check --run <dir>` |
 | Hand it over: CSV, report, one self-contained page | `render --run <dir>` |
 | See what moved since last month's sweep | `watch --run <new> --since <old>` |
+| Spread the judgement across subagents | `orchestrate --run <dir>` |
+| Drive it all from another harness | `mcp` |
 | Find out why a run came back thin | `doctor` |
 
 ## Cheat sheet
@@ -88,6 +90,8 @@ ultraprospect check --run <dir>                               # the gate. Exit 1
 ultraprospect render --run <dir>                              # CSV + JSON + REPORT.md + index.html
 ultraprospect render --run <dir> --min-fit possible           # only the ones you judged worth it
 ultraprospect watch --run <new> --since <old>                 # who opened, closed, started hiring
+ultraprospect orchestrate --run <dir>                         # fan the two judgement phases out
+ultraprospect mcp                                             # serve it over MCP, stdio
 ultraprospect scan --fixture <dir>                            # replay a recorded sweep, offline
 ```
 
@@ -220,11 +224,30 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
   three of them volunteer-run. The engine identifies itself, paces itself per
   host and honours robots.txt.
 
+## Orchestration — route by harness
+
+| You have | Do |
+|---|---|
+| The Workflow tool | `orchestrate --run <dir>`, then launch `orchestration/<phase>.workflow.mjs` |
+| Subagents but no Workflow tool | `orchestrate --run <dir>`, dispatch each agent with the contract in `orchestration/agents/<role>.md` |
+| Neither | `orchestrate --run <dir> --eco` and work down `RUNBOOK.md` yourself |
+
+Two phases fan out — `match` and `dossier` — and both are judgement. Enrichment
+is not one of them: it is I/O against other people's servers, and parallelising
+it across subagents multiplies the request rate while the per-host pacing only
+governs one process. **Fan-out is an optimisation for thinking, never for
+fetching.**
+
+Subagents never write; the folds stay with you, the orchestrator. Re-run
+`orchestrate` whenever a worklist changes.
+
 ## References
 
 | Open it when | File |
 |---|---|
 | You need an upstream's exact parameters, limits or failure modes | [references/data-sources.md](references/data-sources.md) |
 | You are adjudicating pairs and want the scoring model | [references/matching.md](references/matching.md) |
+| You are enriching, or wondering why hiring is unknown | [references/enrichment-playbook.md](references/enrichment-playbook.md) |
+| You are ranking, writing a dossier, or reading a gate failure | [references/scoring-and-citations.md](references/scoring-and-citations.md) |
 | A run behaved oddly, or you need exit codes and env vars | [references/operations.md](references/operations.md) |
 | The deliverable will be shared, stored, or contains people | [references/privacy-and-licensing.md](references/privacy-and-licensing.md) |

@@ -69,7 +69,21 @@ coverage. `manifest.truncated` is the headline, and the report leads with it.
 
 **It refuses to invent a contact.** Every email, phone number and person must
 appear verbatim in a fetched page or an open-data record. No address is ever
-derived from a `firstname.lastname@` pattern.
+derived from a `firstname.lastname@` pattern — and this is enforced rather than
+intended. The gate re-reads each value against the page it claims to come from:
+
+```
+FAIL  contact-not-on-page   osm:n452420246 · email cyril.kolodziejski@lesofficiers.fr
+      does not appear in P3. Either it was constructed, or the page changed
+      since it was read — both mean it must not ship.
+```
+
+Real director from the register, real domain, real fetched page. Rejected.
+
+**It refuses to say "not hiring" when it could not look.** A company with no
+careers page and no board is not hiring — a finding. A company whose board
+exists but has no readable API is *unknown*. Those are different facts and the
+CSV keeps them in different states.
 
 ## Things measured, not assumed
 
@@ -85,6 +99,11 @@ contradict what you would reasonably expect:
   them. `etat_administratif=A` changes nothing there. Those filters are applied
   client-side; nothing assumes a parameter took effect because the request was
   accepted.
+- **`etat_administratif` filters the legal unit, never the establishment.** An
+  active company keeps its closed branches, and they arrive inside
+  `matching_etablissements` looking like open businesses at real addresses.
+  Filtering the establishment's own state drops a Vincennes sweep from 672
+  register rows to 348 — nearly half of it was shut.
 - **`overpass-api.de` answers a browser User-Agent with HTTP 406** — deliberate
   anti-scraping. And several public Overpass endpoints serve a *regional
   extract* while speaking the same protocol: `overpass.osm.ch` answers a query
@@ -112,8 +131,32 @@ node scripts/ultraprospect.mjs --help
 |---|---|
 | `where <query>` | Resolve a place to a search area. Exits 2 with candidates when ambiguous. |
 | `scan` | Sweep both lanes over the area and fuse them. |
-| `match --apply <file>` | Fold an adjudication of `MATCH.todo.json` back into the run. |
+| `match --apply` | Fold an adjudication of `MATCH.todo.json` back into the run. |
+| `resolve` | Find each company's website and prove it is theirs. |
+| `enrich --tier 1\|2` | Read those sites; tier 2 also reads the openings from the ATS APIs. |
+| `score` | Rank by measured signals; fold your ICP verdicts in with `--apply`. |
+| `dossier --id` | The grounding packet for one company: fact sheet plus every page, in full. |
+| `check` | The gate. Exit 1 means do not present the output. |
+| `render` | `PROSPECTS.csv`, `prospects.json`, `REPORT.md`, a self-contained `index.html`. |
+| `watch --since` | What moved: who opened, closed, started hiring, gained a site. |
+| `orchestrate` | Fan the two judgement phases out across subagents. |
+| `mcp` | Serve it over MCP: where, scan, places, dossier, check. |
 | `doctor` | Check every upstream, including Overpass planet coverage. |
+
+### A run, end to end
+
+```bash
+ultraprospect where   "Vincennes" --country fr             # or refuse, and list the candidates
+RUN=$(ultraprospect scan --where "Vincennes" --country fr --min-effectif 20)
+ultraprospect resolve --run "$RUN" --queries                # the queries for YOU to search
+ultraprospect resolve --run "$RUN" --web-results hits.json  # ingest, fetch, corroborate
+ultraprospect enrich  --run "$RUN" --tier 1
+ultraprospect enrich  --run "$RUN" --tier 2 --limit 20
+ultraprospect score   --run "$RUN"
+ultraprospect dossier --run "$RUN" --id <id>                # write it up, cite [P#]
+ultraprospect check   --run "$RUN"                          # must exit 0
+ultraprospect render  --run "$RUN"
+```
 
 ```bash
 ultraprospect scan --where "Lyon" --section M --min-effectif 20
