@@ -791,3 +791,34 @@ export function divisionsOfSection(section: string): string[][] {
 
 /** All section letters, in nomenclature order. */
 export const NAF_SECTIONS: readonly string[] = NAF_SECTION_DIVISIONS.map(([s]) => s);
+
+/**
+ * What each section letter means, in plain words.
+ *
+ * The report groups by section, and a table of "G 128 / Q 77 / K 63" is a table
+ * nobody can read. These labels are part of the nomenclature's definition
+ * rather than of the data, so they are stated here rather than derived.
+ */
+export const NAF_SECTION_LABELS: Record<string, string> = {
+  A: "Agriculture, forestry, fishing",
+  B: "Mining and quarrying",
+  C: "Manufacturing",
+  D: "Electricity and gas",
+  E: "Water, waste, remediation",
+  F: "Construction",
+  G: "Trade and vehicle repair",
+  H: "Transport and storage",
+  I: "Hospitality and food service",
+  J: "Information and communication",
+  K: "Finance and insurance",
+  L: "Real estate",
+  M: "Professional, scientific, technical",
+  N: "Administrative and support services",
+  O: "Public administration",
+  P: "Education",
+  Q: "Health and social work",
+  R: "Arts, entertainment, recreation",
+  S: "Other services",
+  T: "Household employers",
+  U: "Extraterritorial bodies",
+};

@@ -30,10 +30,10 @@ export default defineConfig({
       // weekly upstream canaries. What IS unit-tested is everything where a bug
       // would be silent: the split ladder, the matcher, the name model.
       thresholds: {
-        statements: 46,
-        branches: 43,
-        functions: 52,
-        lines: 45,
+        statements: 49,
+        branches: 47,
+        functions: 55,
+        lines: 48,
       },
     },
   },

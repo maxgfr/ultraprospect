@@ -131,7 +131,10 @@ export const LICENCES = [
   "Geocoding: Nominatim (ODbL) and Base Adresse Nationale (Licence Ouverte 2.0)",
 ];
 
-export function emptyManifest(slug: string): RunManifest {
+export function emptyManifest(label: string): RunManifest {
+  // The slug is the short place name, not the geocoder's full administrative
+  // chain — it titles the report and the page.
+  const slug = shortLabel(label);
   return {
     version: 1,
     tool: "ultraprospect",

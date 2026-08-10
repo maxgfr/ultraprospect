@@ -18,7 +18,7 @@
 // refusal to guess. Anything non-zero means stop and fix, never present anyway.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { EXIT_FAILURE, EXIT_OK, EXIT_USAGE, UsageError, isInvokedDirectly, jsonLine, parseArgs, positionalText, setNoWrite } from "./engine.js";
+import { EXIT_FAILURE, EXIT_OK, EXIT_USAGE, UsageError, isInvokedDirectly, jsonLine, parseArgs, positionalText, setNoWrite, writeArtifact } from "./engine.js";
 import { brandEngine } from "./engine.js";
 import { runDoctor } from "./doctor.js";
 import { resolveWhere } from "./geocode.js";
@@ -31,12 +31,14 @@ import { enrichable, runEnrich } from "./enrich.js";
 import { applyFit, ranked, scoreAll } from "./score.js";
 import { buildDossierPacket, dossierPathFor } from "./dossier.js";
 import { formatReport, runCheck } from "./check.js";
+import { buildAll } from "./render.js";
+import { buildDelta, diffRuns } from "./watch.js";
 import type { FitVerdict } from "./types.js";
 import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, writePlaces, writeRunManifest } from "./run.js";
 import { clampInt, parseBbox, parseDistanceM } from "./util.js";
 import { VERSION } from "./version.js";
 
-export const COMMANDS = ["where", "scan", "match", "resolve", "enrich", "score", "dossier", "check", "doctor", "version"] as const;
+export const COMMANDS = ["where", "scan", "match", "resolve", "enrich", "score", "dossier", "check", "render", "watch", "doctor", "version"] as const;
 
 export const VALUE_FLAGS = [
   "where",
@@ -67,6 +69,9 @@ export const VALUE_FLAGS = [
   "concurrency",
   "icp",
   "id",
+  "min-score",
+  "min-fit",
+  "since",
 ] as const;
 
 export const BOOL_FLAGS = ["json", "no-osm", "no-sirene", "include-ceased", "no-people", "queries", "engine-search", "stdout", "help", "version"] as const;
@@ -85,6 +90,8 @@ COMMANDS
   score                  Rank by measured signals; fold your ICP verdicts in with --apply.
   dossier --id <id>      Print the grounding packet for one company, pages and all.
   check                  The gate: citations resolve, claims are cited, contacts were observed.
+  render                 CSV, JSON, report and a self-contained HTML page.
+  watch --since <run>    Diff this run against an earlier one: who opened, closed, started hiring.
   doctor                 Check node, network and the health of every upstream.
   version                Print the version.
 
@@ -132,6 +139,13 @@ DOSSIER
 
 ADJUDICATION (match)
   --apply <file>         A JSON array of {osmId, siret|siren, merge, why}. "-" reads stdin.
+
+DELIVERABLES (render)
+  --min-score <n>        Only rows at or above this measured score.
+  --min-fit <level>      Only rows you judged strong, possible or weak.
+
+CHANGE (watch)
+  --since <dir>          The earlier run to compare against.
 
 OUTPUT
   --out <dir>            Run root. Default ./${DEFAULT_OUT}
@@ -542,6 +556,67 @@ async function cmdCheck(values: Record<string, string>, bools: ReadonlySet<strin
   return EXIT_OK;
 }
 
+async function cmdRender(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
+  if (!values.run) throw new UsageError("render needs --run <dir>");
+  const runDir = resolveRun(values.run);
+  const places = readPlaces(runDir);
+  const manifest = requireManifest(runDir);
+
+  const outcome = buildAll(places, manifest, {
+    noPeople: bools.has("no-people"),
+    minScore: values["min-score"] ? clampInt(values["min-score"], 0, 10_000, 0) : undefined,
+    minFit: (values["min-fit"] as "strong" | "possible" | "weak" | undefined) ?? undefined,
+  });
+
+  for (const file of outcome.files) writeArtifact(join(runDir, file.path), file.content);
+
+  if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join(runDir, f.path)) }));
+  else for (const file of outcome.files) out(join(runDir, file.path));
+
+  say("");
+  if (manifest.truncated) {
+    say("  ⚠ this run is TRUNCATED — the report and the page both lead with that, and so must you.");
+  }
+  const privacy = outcome.files.some((f) => f.path === "PRIVACY.md");
+  if (privacy) say("  PRIVACY.md was written: this run holds named individuals. Read it before sharing the CSV.");
+  say(`next: open ${join(runDir, "index.html")}`);
+  return EXIT_OK;
+}
+
+async function cmdWatch(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
+  if (!values.run) throw new UsageError("watch needs --run <dir> (the newer run)");
+  if (!values.since) throw new UsageError("watch needs --since <dir> (the earlier run to compare against)");
+  const afterDir = resolveRun(values.run);
+  const beforeDir = resolveRun(values.since);
+  if (afterDir === beforeDir) throw new UsageError("--run and --since resolve to the same run; there is nothing to compare");
+
+  const delta = diffRuns(readPlaces(beforeDir), readPlaces(afterDir));
+  const markdown = buildDelta(delta, requireManifest(beforeDir), requireManifest(afterDir));
+  writeArtifact(join(afterDir, "DELTA.md"), markdown);
+
+  if (bools.has("json")) {
+    out(
+      jsonLine({
+        run: afterDir,
+        since: beforeDir,
+        appeared: delta.appeared.length,
+        disappeared: delta.disappeared.length,
+        closed: delta.closed.length,
+        startedHiring: delta.startedHiring.length,
+        newRoles: delta.newRoles.length,
+        gotWebsite: delta.gotWebsite.length,
+      }),
+    );
+  } else {
+    out(join(afterDir, "DELTA.md"));
+  }
+  say("");
+  say(
+    `  ${delta.startedHiring.length} started hiring · ${delta.appeared.length} new · ${delta.closed.length} ceased · ${delta.gotWebsite.length} gained a site`,
+  );
+  return EXIT_OK;
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   brandEngine();
   const parsed = parseArgs(argv, SPEC);
@@ -575,6 +650,10 @@ export async function main(argv: readonly string[]): Promise<number> {
       return cmdDossier(values, bools);
     case "check":
       return cmdCheck(values, bools);
+    case "render":
+      return cmdRender(values, bools);
+    case "watch":
+      return cmdWatch(values, bools);
     case "doctor":
       return runDoctor({ json: bools.has("json"), out, say });
     case "version":

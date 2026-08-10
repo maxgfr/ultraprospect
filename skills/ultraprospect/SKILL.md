@@ -64,6 +64,8 @@ gate. Read it rather than guessing a flag.
 | Rank what you found | `score --run <dir>` |
 | Write up one company from its evidence | `dossier --run <dir> --id <id>` |
 | Prove the write-up is grounded before anyone reads it | `check --run <dir>` |
+| Hand it over: CSV, report, one self-contained page | `render --run <dir>` |
+| See what moved since last month's sweep | `watch --run <new> --since <old>` |
 | Find out why a run came back thin | `doctor` |
 
 ## Cheat sheet
@@ -83,6 +85,9 @@ ultraprospect enrich --run <dir> --tier 2 --limit 20          # a page per role 
 ultraprospect score --run <dir>                               # rank by measured signals
 ultraprospect dossier --run <dir> --id <id>                   # the grounding packet, pages and all
 ultraprospect check --run <dir>                               # the gate. Exit 1 means do not present.
+ultraprospect render --run <dir>                              # CSV + JSON + REPORT.md + index.html
+ultraprospect render --run <dir> --min-fit possible           # only the ones you judged worth it
+ultraprospect watch --run <new> --since <old>                 # who opened, closed, started hiring
 ultraprospect scan --fixture <dir>                            # replay a recorded sweep, offline
 ```
 
@@ -155,7 +160,15 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    a naming convention is plausible, unfalsifiable at a glance, and will be
    emailed. The gate makes it impossible rather than discouraged.
 
-10. **Write from `places.json`.** Every field carries where it came from. A place
+10. **Render, and hand over what the render says.** `render` writes
+    `PROSPECTS.csv` (flat, CRM-shaped, with `score` and `fit` in separate
+    columns and each contact's source page beside it), `prospects.json`,
+    `REPORT.md`, and a self-contained `index.html` that makes no network
+    requests. If the run is truncated, both the report and the page lead with
+    that — repeat it, do not paraphrase it away. If `PRIVACY.md` was written,
+    the run holds named individuals and that file says what follows from it.
+
+11. **Write from `places.json`.** Every field carries where it came from. A place
    with `sources: ["osm","sirene"]` has both records attached; a place with one
    source has one, and the other half is not "missing data" you may fill in.
    `website.confidence` is `corroborated`, `unverified` or `declared` (a mapper
@@ -191,6 +204,9 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
   ownership; only the fetched page corroborating itself is.
 - Never present a run whose `check` exits non-zero. There is no "with caveats".
 - Never turn the `--icp` text into a number. The engine refuses to; so should you.
+- Never describe a `watch` disappearance as a closure. A company drops out of a
+  sweep for half a dozen reasons; only the register can say a business ceased,
+  and `DELTA.md` keeps the two apart for exactly that reason.
 
 ## Scope notes
 

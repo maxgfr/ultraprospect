@@ -1159,12 +1159,12 @@ function canonicalizeUrl(raw) {
     let port = u.port;
     if (proto === "http:" && port === "80" || proto === "https:" && port === "443") port = "";
     const path = u.pathname.replace(/\/+$/, "");
-    const keep = [];
+    const keep2 = [];
     for (const [k, v] of u.searchParams) {
-      if (!TRACKING_PARAMS.test(k)) keep.push([k, v]);
+      if (!TRACKING_PARAMS.test(k)) keep2.push([k, v]);
     }
-    keep.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
-    const search2 = keep.length ? "?" + keep.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&") : "";
+    keep2.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+    const search2 = keep2.length ? "?" + keep2.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&") : "";
     return `${proto}//${host}${port ? ":" + port : ""}${path}${search2}`.replace(/\/$/, "");
   } catch {
     return raw.trim().replace(/#.*$/, "").replace(/\/$/, "");
@@ -2112,6 +2112,13 @@ function bboxAround(lat, lon, radiusM) {
   const dLat = radiusM / 111320;
   const dLon = radiusM / (111320 * Math.max(0.01, Math.cos(lat * Math.PI / 180)));
   return [lat - dLat, lat + dLat, lon - dLon, lon + dLon];
+}
+function csvField(value) {
+  const s = value === void 0 || value === null ? "" : String(value);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function csvRow(values) {
+  return values.map(csvField).join(",");
 }
 function firstText(...values) {
   for (const v of values) if (typeof v === "string" && v.trim()) return v.trim();
@@ -3439,10 +3446,10 @@ function nafSection(code) {
   if (!Number.isFinite(div)) return void 0;
   return NAF_SECTION_DIVISIONS.find(([, lo, hi]) => div >= lo && div <= hi)?.[0];
 }
-function divisionsOfSection(section) {
+function divisionsOfSection(section2) {
   const byDivision = /* @__PURE__ */ new Map();
   for (const code of NAF_CODES) {
-    if (nafSection(code) !== section) continue;
+    if (nafSection(code) !== section2) continue;
     const div = code.slice(0, 2);
     const list2 = byDivision.get(div);
     if (list2) list2.push(code);
@@ -3451,6 +3458,29 @@ function divisionsOfSection(section) {
   return [...byDivision.values()];
 }
 var NAF_SECTIONS = NAF_SECTION_DIVISIONS.map(([s]) => s);
+var NAF_SECTION_LABELS = {
+  A: "Agriculture, forestry, fishing",
+  B: "Mining and quarrying",
+  C: "Manufacturing",
+  D: "Electricity and gas",
+  E: "Water, waste, remediation",
+  F: "Construction",
+  G: "Trade and vehicle repair",
+  H: "Transport and storage",
+  I: "Hospitality and food service",
+  J: "Information and communication",
+  K: "Finance and insurance",
+  L: "Real estate",
+  M: "Professional, scientific, technical",
+  N: "Administrative and support services",
+  O: "Public administration",
+  P: "Education",
+  Q: "Health and social work",
+  R: "Arts, entertainment, recreation",
+  S: "Other services",
+  T: "Household employers",
+  U: "Extraterritorial bodies"
+};
 
 // src/sirene.ts
 var BASE = "https://recherche-entreprises.api.gouv.fr";
@@ -3665,14 +3695,14 @@ async function fetchSirene(query, opts = {}) {
       if (depth === 0) {
         opts.onNote?.(`sirene: ${label} reports >= ${HARD_CAP} (the API clamps the count) \u2014 splitting by NAF section`);
         notes.push(`sirene: ${label} is at or above the ${HARD_CAP} cap; split into ${NAF_SECTIONS.length} NAF sections`);
-        for (const section2 of part.sections?.length ? part.sections : NAF_SECTIONS) {
-          await walk({ ...part, sections: [section2] }, `${label} / section ${section2}`, depth + 1);
+        for (const section3 of part.sections?.length ? part.sections : NAF_SECTIONS) {
+          await walk({ ...part, sections: [section3] }, `${label} / section ${section3}`, depth + 1);
         }
         return;
       }
-      const section = part.sections?.[0];
-      if (section) {
-        const divisions = divisionsOfSection(section);
+      const section2 = part.sections?.[0];
+      if (section2) {
+        const divisions = divisionsOfSection(section2);
         opts.onNote?.(`sirene: ${label} still at the cap \u2014 splitting into ${divisions.length} NAF divisions`);
         notes.push(`sirene: ${label} is at or above the ${HARD_CAP} cap; split into ${divisions.length} NAF divisions`);
         for (const codes of divisions) {
@@ -3768,7 +3798,8 @@ var LICENCES = [
   "French company data: base Sirene / RNE via recherche-entreprises.api.gouv.fr, Licence Ouverte 2.0",
   "Geocoding: Nominatim (ODbL) and Base Adresse Nationale (Licence Ouverte 2.0)"
 ];
-function emptyManifest(slug) {
+function emptyManifest(label) {
+  const slug = shortLabel(label);
   return {
     version: 1,
     tool: "ultraprospect",
@@ -5121,8 +5152,505 @@ function formatReport(report) {
   return lines.join("\n");
 }
 
+// src/csv.ts
+var HEADER = [
+  "id",
+  "name",
+  "score",
+  "fit",
+  "fit_why",
+  "angle",
+  "category",
+  "naf",
+  "section",
+  "headcount_band",
+  "revenue_eur",
+  "revenue_year",
+  "siren",
+  "siret",
+  "is_head_office",
+  "registered_since",
+  "street",
+  "postcode",
+  "city",
+  "insee_code",
+  "lat",
+  "lon",
+  "website",
+  "website_confidence",
+  "emails",
+  "contact_source",
+  "phones",
+  "socials",
+  "officers",
+  "is_hiring",
+  "open_roles",
+  "ats",
+  "cms",
+  "last_content_at",
+  "pages_read",
+  "sources",
+  "match_confidence"
+];
+var FIT_ORDER = ["weak", "possible", "strong"];
+function keep(place, opts) {
+  if (opts.minScore !== void 0 && (place.score?.total ?? 0) < opts.minScore) return false;
+  if (opts.minFit) {
+    const want = FIT_ORDER.indexOf(opts.minFit);
+    const got = place.score?.fit ? FIT_ORDER.indexOf(place.score.fit) : -1;
+    if (got < want) return false;
+  }
+  return true;
+}
+function streetOf(place) {
+  const a = place.address;
+  const type = a.typeVoie?.trim();
+  const name = a.libelleVoie?.trim();
+  if (!name) return [a.numero, type].filter(Boolean).join(" ");
+  const prefixed = type ? new RegExp(`^${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name) : false;
+  return [a.numero, prefixed ? void 0 : type, name].filter(Boolean).join(" ");
+}
+function toCsv(places, opts = {}) {
+  const rows = [csvRow(HEADER)];
+  for (const place of ranked(places).filter((p) => keep(p, opts))) {
+    const s = place.sirene;
+    const sg = place.signals;
+    const people = opts.noPeople ? "" : (s?.dirigeants ?? []).map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" \u2014 ")).join(" | ");
+    rows.push(
+      csvRow([
+        place.id,
+        place.name,
+        place.score?.total ?? 0,
+        place.score?.fit ?? "",
+        place.score?.why ?? "",
+        place.score?.angle ?? "",
+        place.category ?? "",
+        s?.nafCode ?? "",
+        s?.section ?? "",
+        s?.effectifTranche ? EFFECTIF_LABELS[s.effectifTranche] ?? s.effectifTranche : "",
+        s?.finances?.ca ?? "",
+        s?.finances?.annee ?? "",
+        s?.siren ?? "",
+        s?.siret ?? "",
+        s?.estSiege ? "yes" : s ? "no" : "",
+        s?.dateCreation ?? "",
+        streetOf(place),
+        place.address.codePostal ?? "",
+        place.address.commune ?? "",
+        place.address.codeCommune ?? "",
+        place.lat ?? "",
+        place.lon ?? "",
+        place.website?.url ?? "",
+        place.website?.confidence ?? "",
+        place.contacts.emails.map((e) => e.value).join(" | "),
+        // The page each contact came from, in the same order as the column
+        // beside it. A CRM row without this cannot be audited later.
+        place.contacts.emails.map((e) => e.from).join(" | "),
+        place.contacts.phones.map((p) => p.value).join(" | "),
+        place.contacts.socials.map((x) => x.value).join(" | "),
+        people,
+        // Three states, not two: an empty cell means a board was found and
+        // could not be read, which is not the same as "no".
+        sg?.isHiring === true ? "yes" : sg?.isHiring === false ? "no" : "",
+        sg?.openRoles ?? "",
+        sg?.atsProviders.join(" | ") ?? "",
+        sg?.cms ?? "",
+        sg?.lastContentAt ?? "",
+        place.pages.length,
+        place.sources.join("+"),
+        place.matchConfidence ?? ""
+      ])
+    );
+  }
+  return rows.join("\n") + "\n";
+}
+
+// src/render.ts
+var esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+function truncationBanner(manifest) {
+  if (!manifest.truncated) return [];
+  const lanes = manifest.lanes.filter((l) => l.truncated);
+  return [
+    "> \u26A0 **This run does not cover the whole territory.**",
+    ">",
+    ...lanes.map((l) => `> - **${l.lane}**: ${l.reason ?? "capped"} (${l.returned} returned)`),
+    ">",
+    "> Treat every count below as a floor, not a total.",
+    ""
+  ];
+}
+function activityLabel(place) {
+  const section2 = place.sirene?.section;
+  if (section2) return `${NAF_SECTION_LABELS[section2] ?? section2} (NAF ${section2})`;
+  const key = place.category?.split("=")[0];
+  return key ? `${key} (OSM tag)` : "unclassified";
+}
+function distribution(places) {
+  const bySection = /* @__PURE__ */ new Map();
+  for (const p of places) {
+    const key = activityLabel(p);
+    bySection.set(key, (bySection.get(key) ?? 0) + 1);
+  }
+  const byBand = [];
+  for (const band of EFFECTIF_BANDS) {
+    const n = places.filter((p) => p.sirene?.effectifTranche === band.code).length;
+    if (n > 0) byBand.push([band.label, n]);
+  }
+  return { bySection: [...bySection.entries()].sort((a, b) => b[1] - a[1]), byBand };
+}
+function buildReport(places, manifest) {
+  const l = [];
+  const order = ranked(places);
+  const withSite = places.filter((p) => p.website?.confidence === "corroborated");
+  const hiring = places.filter((p) => p.signals?.isHiring === true);
+  const unknownHiring = places.filter((p) => p.signals && p.signals.isHiring === void 0);
+  const { bySection, byBand } = distribution(places);
+  l.push(`# ${shortLabel(manifest.target.label || manifest.slug)}`);
+  l.push("");
+  l.push(...truncationBanner(manifest));
+  l.push(`${manifest.target.label}`);
+  l.push("");
+  l.push(`Swept ${manifest.builtAt.slice(0, 10)} with ultraprospect ${manifest.toolVersion}.`);
+  l.push("");
+  l.push("## Coverage");
+  l.push("");
+  l.push("| Lane | Returned | Complete | Note |");
+  l.push("|---|---:|---|---|");
+  for (const lane of manifest.lanes) {
+    l.push(`| ${lane.lane} | ${lane.returned} | ${lane.truncated ? "**no**" : "yes"} | ${lane.reason ?? ""} |`);
+  }
+  l.push("");
+  l.push(
+    `${places.length} companies after fusion (${manifest.counts.merged} matched across both lanes, ${manifest.counts.undecided} pairs left for adjudication).`
+  );
+  l.push("");
+  l.push("## What is there");
+  l.push("");
+  l.push(`- ${withSite.length} with a website we corroborated \xB7 ${places.length - withSite.length} without one`);
+  l.push(`- ${hiring.length} hiring right now (${hiring.reduce((n, p) => n + (p.signals?.openRoles ?? 0), 0)} open roles read from ATS APIs)`);
+  if (unknownHiring.length) l.push(`- ${unknownHiring.length} run a job board we could not read \u2014 their hiring is unknown, not absent`);
+  l.push(`- ${places.filter((p) => p.contacts.emails.length || p.contacts.phones.length).length} contactable from a published address or number`);
+  l.push("");
+  if (bySection.length) {
+    l.push("### By activity");
+    l.push("");
+    l.push("| Activity | Companies |");
+    l.push("|---|---:|");
+    for (const [key, n] of bySection.slice(0, 12)) l.push(`| ${key} | ${n} |`);
+    l.push("");
+  }
+  if (byBand.length) {
+    l.push("### By size");
+    l.push("");
+    l.push("| Headcount | Companies |");
+    l.push("|---|---:|");
+    for (const [label, n] of byBand) l.push(`| ${label} | ${n} |`);
+    l.push("");
+  }
+  l.push("## Ranked");
+  l.push("");
+  l.push("| # | Company | Score | Fit | Hiring | Website |");
+  l.push("|---:|---|---:|---|---|---|");
+  for (const [i, p] of order.slice(0, 50).entries()) {
+    const h = p.signals?.isHiring === true ? `${p.signals.openRoles}` : p.signals?.isHiring === false ? "\u2014" : "?";
+    l.push(`| ${i + 1} | ${p.name} | ${p.score?.total ?? 0} | ${p.score?.fit ?? ""} | ${h} | ${p.website?.url ?? ""} |`);
+  }
+  l.push("");
+  if (manifest.notes.length) {
+    l.push("## Run notes");
+    l.push("");
+    for (const n of manifest.notes.slice(-25)) l.push(`- ${n}`);
+    l.push("");
+  }
+  l.push("## Sources");
+  l.push("");
+  for (const licence of manifest.licences) l.push(`- ${licence}`);
+  l.push("");
+  l.push(`Extracted ${manifest.builtAt.slice(0, 10)}.`);
+  return l.join("\n") + "\n";
+}
+function mapSvg(places, manifest) {
+  const pts = places.filter((p) => typeof p.lat === "number" && typeof p.lon === "number");
+  if (pts.length === 0) return "";
+  const lats = pts.map((p) => p.lat);
+  const lons = pts.map((p) => p.lon);
+  const [s, n] = [Math.min(...lats), Math.max(...lats)];
+  const [w, e] = [Math.min(...lons), Math.max(...lons)];
+  const midLat = (s + n) / 2;
+  const kx = Math.cos(midLat * Math.PI / 180);
+  const width = 900;
+  const spanX = Math.max(1e-6, (e - w) * kx);
+  const spanY = Math.max(1e-6, n - s);
+  const height = Math.max(220, Math.min(620, Math.round(width * spanY / spanX)));
+  const x = (lon) => (lon - w) * kx * (width - 24) / spanX + 12;
+  const y = (lat) => height - 12 - (lat - s) * (height - 24) / spanY;
+  const max = Math.max(1, ...pts.map((p) => p.score?.total ?? 0));
+  const circles = pts.map((p) => {
+    const t = (p.score?.total ?? 0) / max;
+    const r = 2.5 + t * 5;
+    const cls = p.score?.fit === "strong" ? "pt strong" : p.website?.confidence === "corroborated" ? "pt sited" : "pt";
+    return `<circle class="${cls}" cx="${x(p.lon).toFixed(1)}" cy="${y(p.lat).toFixed(1)}" r="${r.toFixed(1)}"><title>${esc(p.name)} \u2014 ${p.score?.total ?? 0}</title></circle>`;
+  }).join("");
+  return `<figure class="map">
+<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Every company in ${esc(manifest.target.label)}, positioned by coordinate and sized by score">${circles}</svg>
+<figcaption>${pts.length} located companies. Larger is a higher measured score; filled points have a corroborated website.</figcaption>
+</figure>`;
+}
+function buildHtml(places, manifest) {
+  const order = ranked(places);
+  const rows = order.slice(0, 500).map((p) => {
+    const h = p.signals?.isHiring === true ? `${p.signals.openRoles}` : p.signals?.isHiring === false ? "\u2014" : "?";
+    const site = p.website?.url ? `<a href="${esc(p.website.url)}" rel="noreferrer nofollow">${esc(new URL(p.website.url).hostname)}</a>` : "";
+    return `<tr><td>${esc(p.name)}</td><td class="n">${p.score?.total ?? 0}</td><td>${esc(p.score?.fit ?? "")}</td><td class="n">${h}</td><td>${esc(p.sirene?.nafCode ?? p.category ?? "")}</td><td>${esc(p.address.commune ?? "")}</td><td>${site}</td></tr>`;
+  }).join("\n");
+  const banner = manifest.truncated ? `<div class="warn"><strong>This run does not cover the whole territory.</strong> ${manifest.lanes.filter((l) => l.truncated).map((l) => `${esc(l.lane)}: ${esc(l.reason ?? "capped")}`).join(" \xB7 ")} Every count below is a floor.</div>` : "";
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(shortLabel(manifest.target.label || manifest.slug))} \u2014 ultraprospect</title>
+<style>
+:root{--bg:#fff;--fg:#16181d;--muted:#5b6270;--line:#e3e6ec;--accent:#1c6dd0;--warnbg:#fff4e5;--warnfg:#7a4b00;--pt:#9aa3b2;--sited:#1c6dd0;--strong:#0a7d4f}
+@media (prefers-color-scheme:dark){:root{--bg:#11131a;--fg:#e8eaf0;--muted:#98a0b0;--line:#252a35;--accent:#6aa9ff;--warnbg:#3a2a06;--warnfg:#ffd68a;--pt:#4c5566;--sited:#6aa9ff;--strong:#3ddc9a}}
+*{box-sizing:border-box}
+body{margin:0;padding:2rem 1.25rem 4rem;background:var(--bg);color:var(--fg);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1100px;margin:0 auto}
+h1{font-size:1.6rem;margin:0 0 .25rem}
+.sub{color:var(--muted);margin:0 0 1.5rem}
+.warn{background:var(--warnbg);color:var(--warnfg);border-radius:8px;padding:.9rem 1rem;margin:0 0 1.5rem}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.75rem;margin:0 0 1.5rem}
+.card{border:1px solid var(--line);border-radius:8px;padding:.75rem .9rem}
+.card b{display:block;font-size:1.5rem;font-weight:650}
+.card span{color:var(--muted);font-size:.82rem}
+.map{margin:0 0 1.5rem}
+.map svg{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;background:transparent}
+.map figcaption{color:var(--muted);font-size:.82rem;margin-top:.4rem}
+circle.pt{fill:var(--pt);opacity:.65}
+circle.sited{fill:var(--sited);opacity:.8}
+circle.strong{fill:var(--strong);opacity:.95}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:.9rem}
+th,td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--line);white-space:nowrap}
+th{position:sticky;top:0;background:var(--bg);font-weight:600}
+td.n,th.n{text-align:right}
+tr:last-child td{border-bottom:0}
+a{color:var(--accent)}
+footer{color:var(--muted);font-size:.82rem;margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem}
+footer p{margin:.25rem 0}
+</style>
+</head>
+<body>
+<main>
+<h1>${esc(shortLabel(manifest.target.label || manifest.slug))}</h1>
+<p class="sub">${esc(manifest.target.label)} \xB7 swept ${esc(manifest.builtAt.slice(0, 10))} \xB7 ultraprospect ${esc(manifest.toolVersion)}</p>
+${banner}
+<div class="cards">
+<div class="card"><b>${places.length}</b><span>companies</span></div>
+<div class="card"><b>${places.filter((p) => p.website?.confidence === "corroborated").length}</b><span>with a proven website</span></div>
+<div class="card"><b>${places.filter((p) => p.signals?.isHiring === true).length}</b><span>hiring now</span></div>
+<div class="card"><b>${places.filter((p) => p.contacts.emails.length || p.contacts.phones.length).length}</b><span>contactable</span></div>
+<div class="card"><b>${manifest.counts.merged}</b><span>matched across lanes</span></div>
+</div>
+${mapSvg(places, manifest)}
+<div class="scroll">
+<table>
+<thead><tr><th>Company</th><th class="n">Score</th><th>Fit</th><th class="n">Roles</th><th>Activity</th><th>Town</th><th>Website</th></tr></thead>
+<tbody>
+${rows}
+</tbody>
+</table>
+</div>
+<footer>
+${manifest.licences.map((x) => `<p>${esc(x)}</p>`).join("\n")}
+<p>Extracted ${esc(manifest.builtAt.slice(0, 10))}. This page makes no network requests.</p>
+</footer>
+</main>
+</body>
+</html>
+`;
+}
+function buildPrivacyNote(places, manifest) {
+  const withOfficers = places.filter((p) => (p.sirene?.dirigeants.length ?? 0) > 0);
+  const withPeople = places.filter((p) => p.contacts.people.length > 0);
+  const namedEmails = places.flatMap((p) => p.contacts.emails.filter((e) => /^[a-z]+[._-][a-z]+@/i.test(e.value)));
+  if (withOfficers.length === 0 && withPeople.length === 0 && namedEmails.length === 0) return void 0;
+  return `# Personal data in this run
+
+Produced ${manifest.builtAt.slice(0, 10)} for ${manifest.target.label || manifest.slug}.
+
+This run contains data about identified people. Whoever holds it is a data
+controller under the GDPR, and that is a role rather than a formality.
+
+## What is in it, and where it came from
+
+| Category | Records | Source |
+|---|---:|---|
+| Company officers (name, role, sometimes year of birth) | ${withOfficers.reduce((n, p) => n + p.sirene.dirigeants.length, 0)} across ${withOfficers.length} companies | Registre national des entreprises, published open data |
+| People named on a company's own website | ${withPeople.reduce((n, p) => n + p.contacts.people.length, 0)} across ${withPeople.length} companies | Fetched web pages, each recorded with its page id |
+| Personal-looking email addresses | ${namedEmails.length} | Published verbatim on a fetched page \u2014 never constructed |
+
+Every one of these was **observed**. No address was derived from a naming
+pattern, no name was inferred from a role. The \`check\` gate re-reads each value
+against the page it came from and fails the run when one does not appear there.
+
+## What that means for you
+
+- **Basis.** B2B prospecting can rest on legitimate interest when the message
+  concerns the person's professional role. That is a judgement about your use.
+- **Information and opposition.** The people listed have a right to know they
+  are in this file and to object. Offer that in the first contact.
+- **Retention.** Decide how long this file lives, and delete it then. A
+  prospect list is not a permanent record.
+- **Minimisation.** If your use does not need the people, re-run with
+  \`--no-people\`: it strips them at scan time, before anything is written.
+
+## Attribution
+
+${manifest.licences.map((x) => `- ${x}`).join("\n")}
+`;
+}
+function buildAll(places, manifest, opts = {}) {
+  const files = [
+    { path: "PROSPECTS.csv", content: toCsv(places, opts) },
+    { path: "prospects.json", content: JSON.stringify(ranked(places), null, 2) + "\n" },
+    { path: "REPORT.md", content: buildReport(places, manifest) },
+    { path: "index.html", content: buildHtml(places, manifest) }
+  ];
+  const privacy = opts.noPeople ? void 0 : buildPrivacyNote(places, manifest);
+  if (privacy) files.push({ path: "PRIVACY.md", content: privacy });
+  return { files };
+}
+
+// src/watch.ts
+function identityOf(place) {
+  if (place.sirene?.siret) return `siret:${place.sirene.siret}`;
+  if (place.osm) return `osm:${place.osm.id}`;
+  return place.id;
+}
+function diffRuns(before, after) {
+  const prev = new Map(before.map((p) => [identityOf(p), p]));
+  const next = new Map(after.map((p) => [identityOf(p), p]));
+  const delta = {
+    appeared: [],
+    disappeared: [],
+    closed: [],
+    startedHiring: [],
+    stoppedHiring: [],
+    newRoles: [],
+    gotWebsite: [],
+    siteChanged: [],
+    wentDark: []
+  };
+  for (const [key, place] of next) {
+    const old = prev.get(key);
+    if (!old) {
+      delta.appeared.push(place);
+      continue;
+    }
+    if (old.sirene?.etatAdministratif === "A" && place.sirene?.etatAdministratif === "C") delta.closed.push(place);
+    const wasHiring = old.signals?.isHiring === true;
+    const isHiring = place.signals?.isHiring === true;
+    if (!wasHiring && isHiring) delta.startedHiring.push({ place, roles: place.signals?.openRoles ?? 0 });
+    if (wasHiring && place.signals?.isHiring === false) delta.stoppedHiring.push(place);
+    if (isHiring) {
+      const had = new Set(old.jobs.map((j) => j.title.toLowerCase()));
+      const fresh = place.jobs.filter((j) => !had.has(j.title.toLowerCase()));
+      if (fresh.length) delta.newRoles.push({ place, titles: fresh.map((j) => j.title) });
+    }
+    const oldSite = old.website?.confidence === "corroborated" ? old.website.url : void 0;
+    const newSite = place.website?.confidence === "corroborated" ? place.website.url : void 0;
+    if (!oldSite && newSite) delta.gotWebsite.push(place);
+    else if (oldSite && newSite && oldSite !== newSite) delta.siteChanged.push({ place, before: oldSite, after: newSite });
+    if (old.signals?.siteReachable === true && place.signals?.siteReachable === false) delta.wentDark.push(place);
+  }
+  for (const [key, place] of prev) if (!next.has(key)) delta.disappeared.push(place);
+  return delta;
+}
+function section(title, lines) {
+  if (lines.length === 0) return [];
+  return [`## ${title}`, "", ...lines, ""];
+}
+function buildDelta(delta, before, after) {
+  const l = [];
+  l.push(`# What changed \u2014 ${shortLabel(after.slug)}`);
+  l.push("");
+  l.push(`Comparing the sweep of ${before.builtAt.slice(0, 10)} with the one of ${after.builtAt.slice(0, 10)}.`);
+  l.push("");
+  if (before.truncated || after.truncated) {
+    l.push("> \u26A0 **One of these runs is truncated**, so an appearance or a disappearance here");
+    l.push("> may be a difference in coverage rather than a change on the ground.");
+    l.push("");
+  }
+  const total = delta.appeared.length + delta.disappeared.length + delta.closed.length + delta.startedHiring.length + delta.stoppedHiring.length + delta.newRoles.length + delta.gotWebsite.length + delta.siteChanged.length + delta.wentDark.length;
+  if (total === 0) {
+    l.push("Nothing moved.");
+    return l.join("\n") + "\n";
+  }
+  l.push(
+    ...section(
+      "Started hiring",
+      delta.startedHiring.map((x) => `- **${x.place.name}** \u2014 ${x.roles} open role(s)${x.place.website ? ` \xB7 ${x.place.website.url}` : ""}`)
+    )
+  );
+  l.push(
+    ...section(
+      "New roles at companies already hiring",
+      delta.newRoles.map((x) => `- **${x.place.name}** \u2014 ${x.titles.slice(0, 6).join(", ")}`)
+    )
+  );
+  l.push(
+    ...section(
+      "New to the territory",
+      delta.appeared.map((p) => `- **${p.name}**${p.address.commune ? ` \u2014 ${p.address.commune}` : ""}`)
+    )
+  );
+  l.push(
+    ...section(
+      "Now marked ceased by the register",
+      delta.closed.map((p) => `- **${p.name}** \u2014 SIRET ${p.sirene?.siret ?? "?"}`)
+    )
+  );
+  l.push(
+    ...section(
+      "Gone from the sweep",
+      delta.disappeared.map((p) => `- ${p.name}`)
+    )
+  );
+  l.push(
+    ...section(
+      "Now has a website",
+      delta.gotWebsite.map((p) => `- **${p.name}** \u2014 ${p.website?.url}`)
+    )
+  );
+  l.push(
+    ...section(
+      "Moved their website",
+      delta.siteChanged.map((x) => `- **${x.place.name}** \u2014 ${x.before} \u2192 ${x.after}`)
+    )
+  );
+  l.push(
+    ...section(
+      "Stopped hiring",
+      delta.stoppedHiring.map((p) => `- ${p.name}`)
+    )
+  );
+  l.push(
+    ...section(
+      "Site went unreachable",
+      delta.wentDark.map((p) => `- ${p.name} \u2014 ${p.website?.url ?? ""}`)
+    )
+  );
+  l.push("---");
+  l.push("");
+  l.push("\u201CGone from the sweep\u201D is not the same as \u201Cclosed\u201D: a company can drop out because");
+  l.push("a filter changed, because an Overpass tile failed, or because a mapper deleted a");
+  l.push("node. Only the register can say a business ceased, and that is its own section.");
+  return l.join("\n") + "\n";
+}
+
 // src/cli.ts
-var COMMANDS = ["where", "scan", "match", "resolve", "enrich", "score", "dossier", "check", "doctor", "version"];
+var COMMANDS = ["where", "scan", "match", "resolve", "enrich", "score", "dossier", "check", "render", "watch", "doctor", "version"];
 var VALUE_FLAGS = [
   "where",
   "lat",
@@ -5151,7 +5679,10 @@ var VALUE_FLAGS = [
   "max-pages",
   "concurrency",
   "icp",
-  "id"
+  "id",
+  "min-score",
+  "min-fit",
+  "since"
 ];
 var BOOL_FLAGS = ["json", "no-osm", "no-sirene", "include-ceased", "no-people", "queries", "engine-search", "stdout", "help", "version"];
 var HELP = `ultraprospect ${VERSION} \u2014 turn a place into a qualified prospect list
@@ -5168,6 +5699,8 @@ COMMANDS
   score                  Rank by measured signals; fold your ICP verdicts in with --apply.
   dossier --id <id>      Print the grounding packet for one company, pages and all.
   check                  The gate: citations resolve, claims are cited, contacts were observed.
+  render                 CSV, JSON, report and a self-contained HTML page.
+  watch --since <run>    Diff this run against an earlier one: who opened, closed, started hiring.
   doctor                 Check node, network and the health of every upstream.
   version                Print the version.
 
@@ -5215,6 +5748,13 @@ DOSSIER
 
 ADJUDICATION (match)
   --apply <file>         A JSON array of {osmId, siret|siren, merge, why}. "-" reads stdin.
+
+DELIVERABLES (render)
+  --min-score <n>        Only rows at or above this measured score.
+  --min-fit <level>      Only rows you judged strong, possible or weak.
+
+CHANGE (watch)
+  --since <dir>          The earlier run to compare against.
 
 OUTPUT
   --out <dir>            Run root. Default ./${DEFAULT_OUT}
@@ -5568,6 +6108,59 @@ async function cmdCheck(values, bools) {
   say(`next: ultraprospect render --run ${runDir}`);
   return EXIT_OK;
 }
+async function cmdRender(values, bools) {
+  if (!values.run) throw new UsageError("render needs --run <dir>");
+  const runDir = resolveRun(values.run);
+  const places = readPlaces(runDir);
+  const manifest = requireManifest(runDir);
+  const outcome = buildAll(places, manifest, {
+    noPeople: bools.has("no-people"),
+    minScore: values["min-score"] ? clampInt(values["min-score"], 0, 1e4, 0) : void 0,
+    minFit: values["min-fit"] ?? void 0
+  });
+  for (const file of outcome.files) writeArtifact(join9(runDir, file.path), file.content);
+  if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join9(runDir, f.path)) }));
+  else for (const file of outcome.files) out(join9(runDir, file.path));
+  say("");
+  if (manifest.truncated) {
+    say("  \u26A0 this run is TRUNCATED \u2014 the report and the page both lead with that, and so must you.");
+  }
+  const privacy = outcome.files.some((f) => f.path === "PRIVACY.md");
+  if (privacy) say("  PRIVACY.md was written: this run holds named individuals. Read it before sharing the CSV.");
+  say(`next: open ${join9(runDir, "index.html")}`);
+  return EXIT_OK;
+}
+async function cmdWatch(values, bools) {
+  if (!values.run) throw new UsageError("watch needs --run <dir> (the newer run)");
+  if (!values.since) throw new UsageError("watch needs --since <dir> (the earlier run to compare against)");
+  const afterDir = resolveRun(values.run);
+  const beforeDir = resolveRun(values.since);
+  if (afterDir === beforeDir) throw new UsageError("--run and --since resolve to the same run; there is nothing to compare");
+  const delta = diffRuns(readPlaces(beforeDir), readPlaces(afterDir));
+  const markdown = buildDelta(delta, requireManifest(beforeDir), requireManifest(afterDir));
+  writeArtifact(join9(afterDir, "DELTA.md"), markdown);
+  if (bools.has("json")) {
+    out(
+      jsonLine({
+        run: afterDir,
+        since: beforeDir,
+        appeared: delta.appeared.length,
+        disappeared: delta.disappeared.length,
+        closed: delta.closed.length,
+        startedHiring: delta.startedHiring.length,
+        newRoles: delta.newRoles.length,
+        gotWebsite: delta.gotWebsite.length
+      })
+    );
+  } else {
+    out(join9(afterDir, "DELTA.md"));
+  }
+  say("");
+  say(
+    `  ${delta.startedHiring.length} started hiring \xB7 ${delta.appeared.length} new \xB7 ${delta.closed.length} ceased \xB7 ${delta.gotWebsite.length} gained a site`
+  );
+  return EXIT_OK;
+}
 async function main(argv) {
   brandEngine();
   const parsed = parseArgs(argv, SPEC);
@@ -5599,6 +6192,10 @@ async function main(argv) {
       return cmdDossier(values, bools);
     case "check":
       return cmdCheck(values, bools);
+    case "render":
+      return cmdRender(values, bools);
+    case "watch":
+      return cmdWatch(values, bools);
     case "doctor":
       return runDoctor({ json: bools.has("json"), out, say });
     case "version":
