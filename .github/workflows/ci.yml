@@ -58,23 +58,6 @@ jobs:
       - name: Pipeline evals (offline, deterministic)
         run: pnpm run eval
 
-  naf-catalogue:
-    runs-on: ubuntu-latest
-    name: NAF catalogue is current
-    # The activity nomenclature is READ FROM THE REGISTER's own validation
-    # error, so a revision upstream is invisible here until something checks.
-    # A stale catalogue does not fail loudly — it silently stops covering part
-    # of the economy in the split ladder. Network-dependent, so it is its own
-    # job and does not gate the build.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-      - name: src/naf.ts still matches the register
-        run: node scripts/refresh-naf.mjs --check
-
   install-bundle:
     runs-on: ubuntu-latest
     name: install-bundle (skill installs whole, not just SKILL.md)

@@ -4198,29 +4198,6 @@ function divisionsOfSection(section2) {
   return [...byDivision.values()];
 }
 var NAF_SECTIONS = NAF_SECTION_DIVISIONS.map(([s]) => s);
-var NAF_SECTION_LABELS = {
-  A: "Agriculture, forestry, fishing",
-  B: "Mining and quarrying",
-  C: "Manufacturing",
-  D: "Electricity and gas",
-  E: "Water, waste, remediation",
-  F: "Construction",
-  G: "Trade and vehicle repair",
-  H: "Transport and storage",
-  I: "Hospitality and food service",
-  J: "Information and communication",
-  K: "Finance and insurance",
-  L: "Real estate",
-  M: "Professional, scientific, technical",
-  N: "Administrative and support services",
-  O: "Public administration",
-  P: "Education",
-  Q: "Health and social work",
-  R: "Arts, entertainment, recreation",
-  S: "Other services",
-  T: "Household employers",
-  U: "Extraterritorial bodies"
-};
 
 // src/sirene.ts
 var BASE = "https://recherche-entreprises.api.gouv.fr";
@@ -4897,7 +4874,24 @@ var DIRECTORY_HOSTS = [
   "booking.com",
   "airbnb.",
   "indeed.com",
-  "glassdoor."
+  "glassdoor.",
+  // Public-sector and sector directories, all seen ranking above a company's
+  // own site in real searches. education.gouv.fr's school annuaire is the one
+  // that actually displaced a school's website in a Saint-Mandé run.
+  "education.gouv.fr",
+  "ville-data.com",
+  "college-lycee.com",
+  "adresses-ecoles.fr",
+  "enseignement-prive.info",
+  "restaurantguru.com",
+  "restopolitan.com",
+  "restaurants-de-france.fr",
+  "uniiti.com",
+  "kazfeed.com",
+  "linternaute.com",
+  "journaldunet.com",
+  "figaro.fr",
+  "wikipedia.org"
 ];
 var SOCIAL_HOSTS = ["facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "youtube.com", "tiktok.com", "pinterest.", "wa.me"];
 function classifyHost(url) {
@@ -4954,6 +4948,13 @@ ${pageText}`).toLowerCase();
     return { ok: false, evidence: [], reason: "the page carries neither the company's name, its address nor its SIREN" };
   }
   return { ok: true, evidence };
+}
+function buildResolveTodo(places, town) {
+  return {
+    version: 1,
+    generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    items: needsResolving(places).map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town) }))
+  };
 }
 function needsResolving(places) {
   return places.filter((p) => !p.website || p.website.confidence === "declared");
@@ -5034,7 +5035,7 @@ async function runResolve(runDir, places, store, opts = {}) {
       if (kind === "directory") continue;
       const fetched = await fetchPage2(runDir, place.id, url, "home", store);
       if (!fetched.ok) {
-        if (fetched.reason === "no-readable-text") {
+        if (fetched.reason === "no-readable-text" && (!place.website || place.website.confidence !== "unverified")) {
           place.website = {
             url,
             confidence: "unverified",
@@ -5057,7 +5058,9 @@ async function runResolve(runDir, places, store, opts = {}) {
         settled = true;
         break;
       }
-      place.website = { url: page.record.url, confidence: "unverified", evidence: [page.record.id, check.reason ?? "no corroboration"] };
+      if (!place.website || place.website.confidence !== "unverified") {
+        place.website = { url: page.record.url, confidence: "unverified", evidence: [page.record.id, check.reason ?? "no corroboration"] };
+      }
       outcome.rejected++;
       settled = true;
     }
@@ -5965,6 +5968,31 @@ function formatReport(report) {
   return lines.join("\n");
 }
 
+// src/naf-labels.ts
+var NAF_SECTION_LABELS = {
+  A: "Agriculture, forestry, fishing",
+  B: "Mining and quarrying",
+  C: "Manufacturing",
+  D: "Electricity and gas",
+  E: "Water, waste, remediation",
+  F: "Construction",
+  G: "Trade and vehicle repair",
+  H: "Transport and storage",
+  I: "Hospitality and food service",
+  J: "Information and communication",
+  K: "Finance and insurance",
+  L: "Real estate",
+  M: "Professional, scientific, technical",
+  N: "Administrative and support services",
+  O: "Public administration",
+  P: "Education",
+  Q: "Health and social work",
+  R: "Arts, entertainment, recreation",
+  S: "Other services",
+  T: "Household employers",
+  U: "Extraterritorial bodies"
+};
+
 // src/csv.ts
 var HEADER = [
   "id",
@@ -6644,6 +6672,26 @@ ${JSON.stringify({ ok: report.ok, errors: report.errors, warnings: report.warnin
 }
 
 // src/orchestrate.ts
+var RESOLVE_SCHEMA = {
+  type: "object",
+  required: ["hits"],
+  properties: {
+    hits: {
+      type: "array",
+      description: "Every result from every query, pooled. Duplicates are fine \u2014 the engine de-duplicates and verifies.",
+      items: {
+        type: "object",
+        required: ["placeId", "url"],
+        properties: {
+          placeId: { type: "string", description: "The place this hit is for. Never guess it." },
+          url: { type: "string" },
+          title: { type: "string" },
+          snippet: { type: "string" }
+        }
+      }
+    }
+  }
+};
 var MATCH_SCHEMA = {
   type: "object",
   required: ["verdicts"],
@@ -6672,6 +6720,25 @@ var DOSSIER_SCHEMA = {
   }
 };
 var PHASES = [
+  {
+    name: "resolve",
+    worklist: "RESOLVE.todo.json",
+    role: "searcher",
+    title: "Find each company's website",
+    schema: RESOLVE_SCHEMA,
+    // Twelve companies is two or three searches each — enough work to be worth
+    // a subagent, small enough that the pooled result stays readable.
+    batchSize: 12,
+    ids: (parsed) => Array.isArray(parsed?.items) ? parsed.items.map((i) => i.placeId) : void 0,
+    prerequisite: (run, engineAbs) => `node ${engineAbs} resolve --run ${run} --queries`,
+    description: (n) => `Search the web for ${n} companies' own websites`,
+    applyHint: (run, engineAbs) => [
+      "Pool every returned `hits` array into ONE JSON array and feed it back:",
+      `  node ${engineAbs} resolve --run ${run} --web-results hits.json`,
+      "The engine fetches each candidate and keeps it only if the page corroborates",
+      "itself. You are not deciding which URL is right \u2014 you are finding candidates."
+    ]
+  },
   {
     name: "match",
     worklist: "MATCH.todo.json",
@@ -6718,9 +6785,16 @@ var PHASES = [
   }
 ];
 var PREAMBLE = [
-  "Two phases, both of them judgement rather than retrieval.",
+  "Three phases: one search, two judgement. None of them is bulk fetching.",
   "",
-  "Enrichment is NOT fanned out on purpose: it is I/O against other people's",
+  "  resolve  \u2014 find each company's website. This is the one that decides",
+  "             whether the run has any content: skipped, a Vincennes sweep",
+  "             corroborated 11 sites out of 1164. It fans out because a",
+  "             SEARCH is per-company thinking, not a request loop.",
+  "  match    \u2014 adjudicate the pairs the matcher would not decide.",
+  "  dossier  \u2014 write one company up from its own packet.",
+  "",
+  "Enrichment is NOT a phase, on purpose: it is I/O against other people's",
   "servers, and spreading it across subagents multiplies the request rate while",
   "the per-host pacing that keeps this tool welcome only governs one process.",
   "",
@@ -6737,6 +6811,7 @@ function emitOrchestration(runDir, engineAbs, opts = {}) {
     // role. Including the extension here produces adjudicator.md.md, which the
     // workflow then cannot find.
     (run, engine, phases) => ({
+      searcher: searcherContract(run, engine),
       adjudicator: adjudicatorContract(
         run,
         engine,
@@ -6746,6 +6821,44 @@ function emitOrchestration(runDir, engineAbs, opts = {}) {
     }),
     { ...opts, runbookPreamble: PREAMBLE }
   );
+}
+function searcherContract(run, engineAbs) {
+  return `# Searcher
+
+You find the websites. **This is the stage the whole run rests on** \u2014 everything
+the enrichment stage learns about a company comes from the URL you find, and a
+sweep that skips this reports a town with no web presence.
+
+## Read
+
+\`${run}/RESOLVE.todo.json\` \u2014 each item has a \`placeId\`, the company's name, and
+two or three \`queries\` already phrased for it.
+
+## Do
+
+**Run your own WebSearch, once per query.** Different queries are different
+angles, not rephrasings: the shopfront name, the legal name, and the SIREN in
+quotes, which is the highest-precision query there is.
+
+Pool EVERY result \u2014 duplicates, directories, obvious noise, all of it. You are
+finding candidates, not deciding which is right: the engine fetches each one and
+keeps it only if the page carries the company's name, address or SIREN.
+Filtering here would throw away the evidence it needs, and directory hosts are
+excluded by the engine anyway.
+
+**Tag every hit with the \`placeId\` it came from.** An untagged pool is
+attributed by name token, which works and is lossier. Never guess a placeId onto
+a hit you are unsure about \u2014 a mis-tagged hit is how one company's dossier ends
+up describing another's website.
+
+## Return
+
+\`{"hits": [{"placeId": "\u2026", "url": "\u2026", "title": "\u2026", "snippet": "\u2026"}]}\`
+
+Do not fetch the pages and do not write to the run \u2014 the orchestrator folds your
+hits with \`node ${engineAbs} resolve --run ${run} --web-results\`, and the engine
+does the fetching and the corroborating.
+`;
 }
 function adjudicatorContract(run, engineAbs, phase) {
   return `# Adjudicator
@@ -7161,14 +7274,18 @@ async function cmdResolve(values, bools) {
   const targets = needsResolving(places).slice(0, limit ?? Number.POSITIVE_INFINITY);
   if (bools.has("queries")) {
     const town = shortLabel(requireManifest(runDir).target.label);
-    const plan = targets.map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town) }));
+    const todo = buildResolveTodo(places, town);
+    const plan = limit ? todo.items.slice(0, limit) : todo.items;
+    writeJson(runDir, "RESOLVE.todo.json", { ...todo, items: plan });
     if (bools.has("json")) out(jsonLine(plan));
     else for (const item of plan) for (const q of item.queries) out(q);
     say("");
-    say(`resolve: ${targets.length} place(s) need a website, ${plan.reduce((n, p) => n + p.queries.length, 0)} quer(y|ies) to run.`);
+    say(`resolve: ${plan.length} place(s) need a website, ${plan.reduce((n, p) => n + p.queries.length, 0)} quer(y|ies) to run.`);
+    say(`  worklist: ${join12(runDir, "RESOLVE.todo.json")}`);
     say("  Run your own WebSearch once per query. Pool EVERY hit into ONE JSON array,");
     say('  duplicates and all: [{"url": "\u2026", "title": "\u2026", "snippet": "\u2026", "placeId": "\u2026"}]');
     say(`next: ultraprospect resolve --run ${runDir} --web-results <file>`);
+    say(`  or fan it out:  ultraprospect orchestrate --run ${runDir} --phase resolve`);
     return EXIT_OK;
   }
   let webResults;
@@ -7180,6 +7297,16 @@ async function cmdResolve(values, bools) {
     } catch (e) {
       throw new UsageError(`--web-results is not valid JSON: ${e.message}`);
     }
+  }
+  if (!webResults?.length && !bools.has("engine-search") && targets.length > 0) {
+    say(`resolve: ${targets.length} place(s) need a website and no search results were supplied.`);
+    say("  This lane is YOUR WebSearch. Without it, only the handful of sites OSM already");
+    say("  tagged can be checked, and the run will look like a territory with no websites.");
+    say("");
+    say(`next: ultraprospect resolve --run ${runDir} --queries        # the queries to run`);
+    say(`  then: ultraprospect resolve --run ${runDir} --web-results hits.json`);
+    say(`  or:   ultraprospect resolve --run ${runDir} --engine-search  # keyless fallback, much weaker`);
+    throw Object.assign(new Error("no search results supplied"), { exitCode: EXIT_USAGE, handled: true });
   }
   const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }))));
   const outcome = await runResolve(runDir, places, store, {

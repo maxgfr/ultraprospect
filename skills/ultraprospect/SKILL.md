@@ -59,7 +59,7 @@ gate. Read it rather than guessing a flag.
 | List every company in a town, street or radius | `scan --where "<place>"` |
 | Same, narrowed to an industry or a company size | `scan --where "<place>" --section J,M --min-effectif 10` |
 | Answer the pairs the matcher would not decide | `match --run <dir> --apply verdicts.json` |
-| Find each company's website, and prove it is theirs | `resolve --run <dir> --queries` then `--web-results` |
+| Find each company's website (your WebSearch) | `resolve --run <dir> --queries`, then `--web-results` |
 | Read those websites — what they do, who they hire | `enrich --run <dir> --tier 1`, then `--tier 2 --limit 20` |
 | Rank what you found | `score --run <dir>` |
 | Write up one company from its evidence | `dossier --run <dir> --id <id>` |
@@ -123,15 +123,23 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    files under an enseigne. When you cannot tell, say `merge: false` — two rows
    are recoverable, one wrong merge is not.
 
-5. **Find the websites — you are the search engine.** Four in five places arrive
-   without one, and everything downstream grows from that URL. Run `resolve
-   --queries`: it prints the queries, sized and phrased, for the places that
-   need one. **Run your own WebSearch once per query**, pool every hit into ONE
-   JSON array — duplicates and all, `[{"url","title","snippet","placeId"}]` —
-   and pass it back with `--web-results`. The engine then FETCHES each candidate
-   and keeps it only if the page carries the company's SIREN, its street
-   address, or the distinctive part of its name. A domain that ranked first and
-   corroborates nothing is recorded as `unverified`, never as the website.
+5. **Find the websites — this is your job, and the run rests on it.** Four in
+   five places arrive without one, and everything downstream grows from that
+   URL. `resolve` will **refuse to run** without search results rather than
+   quietly check the handful OSM already tagged: on a real Vincennes sweep that
+   silence produced 11 corroborated sites out of 1164, which reads as a town
+   with no web presence instead of as a search nobody ran.
+
+   So: `resolve --queries` writes `RESOLVE.todo.json` and prints the queries.
+   **Run your own WebSearch once per query.** Pool EVERY hit into one JSON array
+   — duplicates, directories, noise and all, `[{"placeId","url","title",
+   "snippet"}]` — and pass it back with `--web-results`. Do not filter: you are
+   finding candidates, not choosing. The engine fetches each one and keeps it
+   only if the page carries the company's SIREN, its street address or the
+   distinctive part of its name; a domain that ranked first and corroborates
+   nothing is recorded as `unverified`, never as the website.
+
+   With many places, fan it out: `orchestrate --run <dir> --phase resolve`.
 
 6. **Enrich in two tiers, and spend the second one deliberately.** Tier 1 reads
    the homepage and the legal notice on every corroborated site: four requests,
@@ -188,7 +196,8 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | Register lane returned 0 outside France | Expected. The register is French; only the OSM lane applies. |
 | A merged place looks like two companies | Adjudication was skipped or answered too generously. Check `matchConfidence` and the raw lanes in `osm.json` / `sirene.json`. |
 | Thousands of dormant one-person companies | Add `--min-effectif`; ceased companies are already excluded unless `--include-ceased`. |
-| `resolve` found almost nothing | It was run without `--web-results`. Only OSM's own tags were tried. Run `--queries` first and do the searching. |
+| `resolve` exits 2 saying no results were supplied | Working as designed. Run `--queries`, do the searching, pass `--web-results`. |
+| A company's own domain shows as `unverified` | The page did not carry its name, address or SIREN. Often a JavaScript-only site — the evidence string says which. It is a candidate, not a confirmed site. |
 | `enrich` says "no place has a corroborated website" | `resolve` has not run, or corroborated nothing. Enrichment only ever reads sites we proved belong to the company. |
 | A company with a careers page shows `isHiring` unset | Deliberate. A board was detected but its openings could not be read, and "not hiring" would be a different claim. |
 | `check` says a contact is not on its page | Believe it. Either the value was constructed, or the page changed since it was read. Both mean it must not ship. |
@@ -232,11 +241,12 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | Subagents but no Workflow tool | `orchestrate --run <dir>`, dispatch each agent with the contract in `orchestration/agents/<role>.md` |
 | Neither | `orchestrate --run <dir> --eco` and work down `RUNBOOK.md` yourself |
 
-Two phases fan out — `match` and `dossier` — and both are judgement. Enrichment
-is not one of them: it is I/O against other people's servers, and parallelising
-it across subagents multiplies the request rate while the per-host pacing only
-governs one process. **Fan-out is an optimisation for thinking, never for
-fetching.**
+Three phases fan out — `resolve`, `match` and `dossier`. Searching for a
+company's website is per-company thinking, and it is the phase the run rests on.
+Enrichment is deliberately not one of them: reading those websites is I/O
+against other people's servers, and parallelising it across subagents multiplies
+the request rate while the per-host pacing only governs one process. **Fan-out
+is an optimisation for thinking, never for fetching.**
 
 Subagents never write; the folds stay with you, the orchestrator. Re-run
 `orchestrate` whenever a worklist changes.

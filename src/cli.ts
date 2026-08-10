@@ -26,7 +26,7 @@ import { resolveWhere } from "./geocode.js";
 import { runScan, writeScan } from "./scan.js";
 import { loadFixture, recordFixture } from "./fixture.js";
 import { applyVerdicts, type MatchVerdict } from "./match.js";
-import { needsResolving, queriesFor, runResolve, type WebHit } from "./resolve.js";
+import { buildResolveTodo, needsResolving, runResolve, type WebHit } from "./resolve.js";
 import { newPageStore } from "./pages.js";
 import { enrichable, runEnrich } from "./enrich.js";
 import { applyFit, ranked, scoreAll } from "./score.js";
@@ -38,7 +38,7 @@ import { createAdapter } from "./mcp/adapter.js";
 import { emitOrchestration } from "./orchestrate.js";
 import { runStdioServer, startHttpServer } from "./engine.js";
 import type { FitVerdict } from "./types.js";
-import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, shortLabel, writePlaces, writeRunManifest } from "./run.js";
+import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, shortLabel, writeJson, writePlaces, writeRunManifest } from "./run.js";
 import { clampInt, parseBbox, parseDistanceM } from "./util.js";
 import { VERSION } from "./version.js";
 
@@ -416,14 +416,21 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
     // The run's own town backfills a place that has no address of its own —
     // most OSM nodes have no addr:city, and a bare shop name is not a query.
     const town = shortLabel(requireManifest(runDir).target.label);
-    const plan = targets.map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town) }));
+    const todo = buildResolveTodo(places, town);
+    const plan = limit ? todo.items.slice(0, limit) : todo.items;
+    // Written as a worklist, not just printed: that is what makes the lane
+    // fannable by `orchestrate`, and website discovery is the stage that
+    // decides whether a run has any content at all.
+    writeJson(runDir, "RESOLVE.todo.json", { ...todo, items: plan });
     if (bools.has("json")) out(jsonLine(plan));
     else for (const item of plan) for (const q of item.queries) out(q);
     say("");
-    say(`resolve: ${targets.length} place(s) need a website, ${plan.reduce((n, p) => n + p.queries.length, 0)} quer(y|ies) to run.`);
+    say(`resolve: ${plan.length} place(s) need a website, ${plan.reduce((n, p) => n + p.queries.length, 0)} quer(y|ies) to run.`);
+    say(`  worklist: ${join(runDir, "RESOLVE.todo.json")}`);
     say("  Run your own WebSearch once per query. Pool EVERY hit into ONE JSON array,");
     say('  duplicates and all: [{"url": "…", "title": "…", "snippet": "…", "placeId": "…"}]');
     say(`next: ultraprospect resolve --run ${runDir} --web-results <file>`);
+    say(`  or fan it out:  ultraprospect orchestrate --run ${runDir} --phase resolve`);
     return EXIT_OK;
   }
 
@@ -436,6 +443,24 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
     } catch (e) {
       throw new UsageError(`--web-results is not valid JSON: ${(e as Error).message}`);
     }
+  }
+
+  // Refuse rather than do almost nothing.
+  //
+  // Without hits, resolve can only re-check the websites OSM already had — on a
+  // real Vincennes sweep that is 11 corroborated sites out of 1164, reported as
+  // "992 left without a site", which reads as a territory with no web presence
+  // instead of as a search nobody ran. The searching is the agent's half of
+  // this lane, and silently skipping it produces a confidently empty run.
+  if (!webResults?.length && !bools.has("engine-search") && targets.length > 0) {
+    say(`resolve: ${targets.length} place(s) need a website and no search results were supplied.`);
+    say("  This lane is YOUR WebSearch. Without it, only the handful of sites OSM already");
+    say("  tagged can be checked, and the run will look like a territory with no websites.");
+    say("");
+    say(`next: ultraprospect resolve --run ${runDir} --queries        # the queries to run`);
+    say(`  then: ultraprospect resolve --run ${runDir} --web-results hits.json`);
+    say(`  or:   ultraprospect resolve --run ${runDir} --engine-search  # keyless fallback, much weaker`);
+    throw Object.assign(new Error("no search results supplied"), { exitCode: EXIT_USAGE, handled: true });
   }
 
   const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }) as any)));

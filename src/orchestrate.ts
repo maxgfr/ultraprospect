@@ -21,6 +21,27 @@
 import { orchestrateRun, type OrchestrateOptions, type OrchestrateResult, type PhaseDefinition, type PhaseInfo } from "./engine.js";
 import type { MatchTodo, Place } from "./types.js";
 
+const RESOLVE_SCHEMA = {
+  type: "object",
+  required: ["hits"],
+  properties: {
+    hits: {
+      type: "array",
+      description: "Every result from every query, pooled. Duplicates are fine — the engine de-duplicates and verifies.",
+      items: {
+        type: "object",
+        required: ["placeId", "url"],
+        properties: {
+          placeId: { type: "string", description: "The place this hit is for. Never guess it." },
+          url: { type: "string" },
+          title: { type: "string" },
+          snippet: { type: "string" },
+        },
+      },
+    },
+  },
+};
+
 const MATCH_SCHEMA = {
   type: "object",
   required: ["verdicts"],
@@ -51,6 +72,25 @@ const DOSSIER_SCHEMA = {
 };
 
 const PHASES: PhaseDefinition<any>[] = [
+  {
+    name: "resolve",
+    worklist: "RESOLVE.todo.json",
+    role: "searcher",
+    title: "Find each company's website",
+    schema: RESOLVE_SCHEMA,
+    // Twelve companies is two or three searches each — enough work to be worth
+    // a subagent, small enough that the pooled result stays readable.
+    batchSize: 12,
+    ids: (parsed: { items?: { placeId: string }[] } | undefined) => (Array.isArray(parsed?.items) ? parsed.items.map((i) => i.placeId) : undefined),
+    prerequisite: (run, engineAbs) => `node ${engineAbs} resolve --run ${run} --queries`,
+    description: (n) => `Search the web for ${n} companies' own websites`,
+    applyHint: (run, engineAbs) => [
+      "Pool every returned `hits` array into ONE JSON array and feed it back:",
+      `  node ${engineAbs} resolve --run ${run} --web-results hits.json`,
+      "The engine fetches each candidate and keeps it only if the page corroborates",
+      "itself. You are not deciding which URL is right — you are finding candidates.",
+    ],
+  },
   {
     name: "match",
     worklist: "MATCH.todo.json",
@@ -105,9 +145,16 @@ const PHASES: PhaseDefinition<any>[] = [
 ];
 
 const PREAMBLE = [
-  "Two phases, both of them judgement rather than retrieval.",
+  "Three phases: one search, two judgement. None of them is bulk fetching.",
   "",
-  "Enrichment is NOT fanned out on purpose: it is I/O against other people's",
+  "  resolve  — find each company's website. This is the one that decides",
+  "             whether the run has any content: skipped, a Vincennes sweep",
+  "             corroborated 11 sites out of 1164. It fans out because a",
+  "             SEARCH is per-company thinking, not a request loop.",
+  "  match    — adjudicate the pairs the matcher would not decide.",
+  "  dossier  — write one company up from its own packet.",
+  "",
+  "Enrichment is NOT a phase, on purpose: it is I/O against other people's",
   "servers, and spreading it across subagents multiplies the request rate while",
   "the per-host pacing that keeps this tool welcome only governs one process.",
   "",
@@ -125,6 +172,7 @@ export function emitOrchestration(runDir: string, engineAbs: string, opts: Orche
     // role. Including the extension here produces adjudicator.md.md, which the
     // workflow then cannot find.
     (run, engine, phases: PhaseInfo[]) => ({
+      searcher: searcherContract(run, engine),
       adjudicator: adjudicatorContract(
         run,
         engine,
@@ -134,6 +182,45 @@ export function emitOrchestration(runDir: string, engineAbs: string, opts: Orche
     }),
     { ...opts, runbookPreamble: PREAMBLE },
   );
+}
+
+function searcherContract(run: string, engineAbs: string): string {
+  return `# Searcher
+
+You find the websites. **This is the stage the whole run rests on** — everything
+the enrichment stage learns about a company comes from the URL you find, and a
+sweep that skips this reports a town with no web presence.
+
+## Read
+
+\`${run}/RESOLVE.todo.json\` — each item has a \`placeId\`, the company's name, and
+two or three \`queries\` already phrased for it.
+
+## Do
+
+**Run your own WebSearch, once per query.** Different queries are different
+angles, not rephrasings: the shopfront name, the legal name, and the SIREN in
+quotes, which is the highest-precision query there is.
+
+Pool EVERY result — duplicates, directories, obvious noise, all of it. You are
+finding candidates, not deciding which is right: the engine fetches each one and
+keeps it only if the page carries the company's name, address or SIREN.
+Filtering here would throw away the evidence it needs, and directory hosts are
+excluded by the engine anyway.
+
+**Tag every hit with the \`placeId\` it came from.** An untagged pool is
+attributed by name token, which works and is lossier. Never guess a placeId onto
+a hit you are unsure about — a mis-tagged hit is how one company's dossier ends
+up describing another's website.
+
+## Return
+
+\`{"hits": [{"placeId": "…", "url": "…", "title": "…", "snippet": "…"}]}\`
+
+Do not fetch the pages and do not write to the run — the orchestrator folds your
+hits with \`node ${engineAbs} resolve --run ${run} --web-results\`, and the engine
+does the fetching and the corroborating.
+`;
 }
 
 function adjudicatorContract(run: string, engineAbs: string, phase: PhaseInfo | undefined): string {

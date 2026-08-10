@@ -98,7 +98,7 @@ written on the page as `01.43.28.30.07` matches.
 
 ## Fanning it out
 
-Two phases, both judgement rather than retrieval:
+Three phases, all judgement or search rather than bulk retrieval:
 
 ```bash
 ultraprospect orchestrate --run <dir>          # emits both, plus the runbook
@@ -106,15 +106,18 @@ ultraprospect orchestrate --run <dir> --list   # which phases are ready
 ultraprospect orchestrate --run <dir> --eco    # runbook and contracts only
 ```
 
+- **resolve** — search for each company's website, 12 per agent. The phase the
+  run rests on: skipped, a Vincennes sweep corroborated 11 sites out of 1164.
 - **match** — adjudicate the undecided pairs, 20 per agent.
 - **dossier** — one company per agent; a packet carries the full text of every
   page fetched for it, so two per context mostly means running out of room
   halfway through the second.
 
-Enrichment is deliberately not a phase. It is I/O against other people's
-servers, and spreading it across subagents multiplies the request rate while the
-per-host pacing only governs one process. **Fan-out is an optimisation for
-thinking, never for fetching.**
+Enrichment is deliberately not a phase. Searching is per-company thinking;
+READING the sites is I/O against other people's servers, and spreading that
+across subagents multiplies the request rate while the per-host pacing only
+governs one process. **Fan-out is an optimisation for thinking, never for
+fetching.**
 
 Subagents never write to the run. They return a fragment; you fold it — with
 `match --apply`, or by saving the dossier and running the gate. One writer,

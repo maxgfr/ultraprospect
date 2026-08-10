@@ -15,7 +15,7 @@
 // because a page about who a company's prospects are should not phone anybody
 // while it is being read.
 import { EFFECTIF_BANDS } from "./sirene.js";
-import { NAF_SECTION_LABELS } from "./naf.js";
+import { NAF_SECTION_LABELS } from "./naf-labels.js";
 import { ranked } from "./score.js";
 import { toCsv, type CsvOptions } from "./csv.js";
 import { shortLabel } from "./run.js";

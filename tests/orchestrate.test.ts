@@ -17,7 +17,15 @@ import { emitOrchestration } from "../src/orchestrate.js";
 let runDir: string;
 const ENGINE = "/abs/path/to/ultraprospect.mjs";
 
-function writeRun(pairs: number, placesWithPages: number): void {
+function writeRun(pairs: number, placesWithPages: number, toResolve = 3): void {
+  writeFileSync(
+    join(runDir, "RESOLVE.todo.json"),
+    JSON.stringify({
+      version: 1,
+      generatedAt: "",
+      items: Array.from({ length: toResolve }, (_, i) => ({ placeId: `osm:n${i}`, name: `C${i}`, queries: [`C${i} Town`] })),
+    }),
+  );
   writeFileSync(
     join(runDir, "MATCH.todo.json"),
     JSON.stringify({
@@ -90,13 +98,27 @@ describe("emitOrchestration", () => {
     expect(dossierPhase?.items).toBe(0);
   });
 
-  it("does NOT offer enrichment as a phase", () => {
-    // Policy, not omission: enrichment is I/O against other people's servers,
-    // and spreading it across subagents multiplies the request rate while the
-    // per-host pacing only governs one process.
+  it("fans out the three judgement phases and NOT enrichment", () => {
+    // Policy, not omission. Searching for a company's website is per-company
+    // thinking and fans out; reading that website is I/O against other
+    // people's servers, and spreading it across subagents multiplies the
+    // request rate while the per-host pacing only governs one process.
     writeRun(3, 1);
     const result = emitOrchestration(runDir, ENGINE);
-    expect(result.phases.map((p) => p.name)).toEqual(["match", "dossier"]);
+    expect(result.phases.map((p) => p.name)).toEqual(["resolve", "match", "dossier"]);
+    expect(result.phases.map((p) => p.name)).not.toContain("enrich");
+  });
+
+  it("gives the searcher a contract that says pool everything and tag every hit", () => {
+    // The searcher's two failure modes are filtering the pool (which throws
+    // away the evidence the engine corroborates with) and guessing a placeId
+    // (which is how one company's dossier describes another's website).
+    writeRun(3, 1);
+    emitOrchestration(runDir, ENGINE);
+    const text = readFileSync(join(runDir, "orchestration", "agents", "searcher.md"), "utf8");
+    expect(text).toContain("Pool EVERY result");
+    expect(text).toContain("Never guess a placeId");
+    expect(text.toLowerCase()).toContain("do not fetch");
   });
 
   it("names the command that produces a missing worklist", () => {
@@ -104,13 +126,14 @@ describe("emitOrchestration", () => {
     // workflow over an absent file.
     const result = emitOrchestration(runDir, ENGINE);
     expect(result.phases.every((p) => !p.ready)).toBe(true);
-    expect(result.phases[0]!.prerequisite).toContain("scan");
+    expect(result.phases.find((p) => p.name === "resolve")!.prerequisite).toContain("resolve --run");
+    expect(result.phases.find((p) => p.name === "match")!.prerequisite).toContain("scan");
   });
 
   it("tells subagents not to write, in every contract", () => {
     writeRun(2, 1);
     emitOrchestration(runDir, ENGINE);
-    for (const role of ["adjudicator", "writer"]) {
+    for (const role of ["searcher", "adjudicator", "writer"]) {
       const text = readFileSync(join(runDir, "orchestration", "agents", `${role}.md`), "utf8");
       expect(text.toLowerCase()).toContain("do not write");
     }

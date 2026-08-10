@@ -68,6 +68,23 @@ const DIRECTORY_HOSTS = [
   "airbnb.",
   "indeed.com",
   "glassdoor.",
+  // Public-sector and sector directories, all seen ranking above a company's
+  // own site in real searches. education.gouv.fr's school annuaire is the one
+  // that actually displaced a school's website in a Saint-Mandé run.
+  "education.gouv.fr",
+  "ville-data.com",
+  "college-lycee.com",
+  "adresses-ecoles.fr",
+  "enseignement-prive.info",
+  "restaurantguru.com",
+  "restopolitan.com",
+  "restaurants-de-france.fr",
+  "uniiti.com",
+  "kazfeed.com",
+  "linternaute.com",
+  "journaldunet.com",
+  "figaro.fr",
+  "wikipedia.org",
 ];
 
 const SOCIAL_HOSTS = ["facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "youtube.com", "tiktok.com", "pinterest.", "wa.me"];
@@ -114,6 +131,29 @@ export function queriesFor(place: Place, fallbackTown?: string): string[] {
   // almost always the company's own legal-notice page.
   if (place.sirene?.siren) queries.push(`"${place.sirene.siren}"`);
   return [...new Set(queries)].slice(0, 3);
+}
+
+/** One place's search plan, as written to RESOLVE.todo.json. */
+export interface ResolveTodoItem {
+  placeId: string;
+  name: string;
+  queries: string[];
+}
+
+export interface ResolveTodo {
+  version: 1;
+  generatedAt: string;
+  /**
+   * What the agent has to go and search.
+   *
+   * A worklist file rather than just stdout, because that is what makes the
+   * lane fannable: `orchestrate` walks it, hands each subagent a batch, and the
+   * hits come back to one writer. Website discovery is the stage that decides
+   * whether a run has any content at all — on a real Vincennes sweep, skipping
+   * it left 11 corroborated sites out of 1164 — so it has to be as
+   * orchestratable as adjudication and dossier-writing.
+   */
+  items: ResolveTodoItem[];
 }
 
 /** A hit the agent's WebSearch produced, or one of ours. */
@@ -212,6 +252,14 @@ export interface ResolveOutcome {
 }
 
 /** Places that still need a website, or whose website is only a mapper's claim. */
+export function buildResolveTodo(places: readonly Place[], town?: string): ResolveTodo {
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    items: needsResolving(places).map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town) })),
+  };
+}
+
 export function needsResolving(places: readonly Place[]): Place[] {
   return places.filter((p) => !p.website || p.website.confidence === "declared");
 }
@@ -309,7 +357,8 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
 
       const fetched = await fetchPage(runDir, place.id, url, "home", store);
       if (!fetched.ok) {
-        if (fetched.reason === "no-readable-text") {
+        // Same first-wins rule as a corroboration failure below.
+        if (fetched.reason === "no-readable-text" && (!place.website || place.website.confidence !== "unverified")) {
           // The site is real and a human can open it; only we could not read
           // it. Recording "no website" here would be a false absence — measured
           // on restaurant-elgringo.fr, which answers 200 with 37 bytes.
@@ -337,9 +386,14 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
         settled = true;
         break;
       }
-      // Keep the candidate visible, but never as a website. A named reason is
-      // what lets someone re-open the decision later.
-      place.website = { url: page.record.url, confidence: "unverified", evidence: [page.record.id, check.reason ?? "no corroboration"] };
+      // Keep the candidate visible, but never as a website, and keep the FIRST
+      // one — candidates arrive best-ranked first, and letting a later
+      // rejection overwrite an earlier one recorded a ministry's school
+      // directory in place of the school's own domain, purely because it was
+      // tried third.
+      if (!place.website || place.website.confidence !== "unverified") {
+        place.website = { url: page.record.url, confidence: "unverified", evidence: [page.record.id, check.reason ?? "no corroboration"] };
+      }
       outcome.rejected++;
       settled = true;
     }
