@@ -110,13 +110,18 @@ async function offline() {
 
 async function network() {
   console.log("eval: network canaries (live upstreams — a red run means go look at the API)\n");
-  const { politeUa } = await import(join(root, "scripts", "ultraprospect.mjs")).catch(() => ({ politeUa: undefined }));
-  const ua = typeof politeUa === "function" ? politeUa() : "ultraprospect-eval (+https://github.com/maxgfr/ultraprospect)";
+  // From the BUILT BUNDLE, so the canary probes the client this skill actually
+  // ships rather than a second implementation that could drift from it.
+  const bundle = await import(join(root, "scripts", "ultraprospect.mjs"));
+  const ua = typeof bundle.politeUa === "function" ? bundle.politeUa() : "ultraprospect-eval (+https://github.com/maxgfr/ultraprospect)";
   const get = async (url) => {
     const res = await fetch(url, { headers: { "user-agent": ua } });
     return { status: res.status, body: await res.text() };
   };
 
+  // ---- The upstreams that are not register connectors ------------------------
+  // Geocoding, OSM and the job boards belong to no country's register, so they
+  // stay written out here.
   const nominatim = await get("https://nominatim.openstreetmap.org/search?q=Vincennes&format=jsonv2&limit=1&addressdetails=1");
   const nomJson = JSON.parse(nominatim.body);
   check("nominatim still returns boundingbox + osm_type", Boolean(nomJson[0]?.boundingbox && nomJson[0]?.osm_type));
@@ -125,29 +130,43 @@ async function network() {
   const ban = await get("https://api-adresse.data.gouv.fr/search/?q=8+bd+du+port+Amiens&limit=1");
   check("BAN still returns properties.citycode", Boolean(JSON.parse(ban.body)?.features?.[0]?.properties?.citycode));
 
-  const sirene = await get("https://recherche-entreprises.api.gouv.fr/search?q=doctolib&per_page=1");
-  const sirJson = JSON.parse(sirene.body);
-  check("register still returns results[].siege", Boolean(sirJson?.results?.[0]?.siege));
-  check("register still returns matching_etablissements", Array.isArray(sirJson?.results?.[0]?.matching_etablissements));
-  check("register still keys finances by year", Object.keys(sirJson?.results?.[0]?.finances ?? {}).every((k) => /^\d{4}$/.test(k)));
-
-  // The two undocumented behaviours the SIRENE lane is built around. If either
-  // ever changes, the splitter is doing unnecessary work — or worse, the wrong
-  // work — and this is the only thing that would say so.
-  const capped = await get("https://recherche-entreprises.api.gouv.fr/search?code_commune=94080&per_page=1");
-  check(
-    "register still CLAMPS total_results at 10 000",
-    JSON.parse(capped.body)?.total_results === 10000,
-    "if this changed, the NAF split ladder can trust the count again",
-  );
-
-  const withFilter = await get("https://recherche-entreprises.api.gouv.fr/near_point?lat=48.8566&long=2.3522&radius=0.3&etat_administratif=A&per_page=1");
-  const without = await get("https://recherche-entreprises.api.gouv.fr/near_point?lat=48.8566&long=2.3522&radius=0.3&per_page=1");
-  check(
-    "/near_point still IGNORES etat_administratif",
-    JSON.parse(withFilter.body)?.total_results === JSON.parse(without.body)?.total_results,
-    "if it now honours it, the client-side filter is redundant",
-  );
+  // ---- The register connectors, driven by the connector table itself --------
+  //
+  // NOT a hand-written list. `CONNECTORS` is the single source of truth for
+  // which register serves which country, and five things read it: the sweep
+  // lane, `confirm`, `doctor`, `manifest.licences` and this. Adding a country
+  // adds its canary, with nothing to remember — the same principle
+  // engine-repin.yml already states about `sync-engine.mjs --list`: "the
+  // automation cannot drift from the list it is supposed to be watching."
+  //
+  // Each connector asserts the shape ITS OWN parser depends on, including the
+  // two undocumented French behaviours the whole anti-cap split ladder rests
+  // on: the 10 000 clamp on total_results, and /near_point silently ignoring
+  // filters it does not implement.
+  const connectors = bundle.CONNECTORS ?? [];
+  if (connectors.length === 0) {
+    check("the connector table reached the eval", false, "the bundle exported no CONNECTORS — every register canary was skipped");
+  }
+  for (const connector of connectors) {
+    let results;
+    try {
+      results = await connector.canary({ onNote: () => {} });
+    } catch (e) {
+      check(`${connector.id} canary ran`, false, `threw: ${e?.message ?? e}`);
+      continue;
+    }
+    for (const result of results) {
+      // A connector that cannot be probed right now — no key, an upstream
+      // between deployments — is INCONCLUSIVE, never red. The Overpass lesson
+      // below is the same one: a canary that goes red for somebody else's
+      // afternoon is a canary people learn to ignore.
+      if (result.inconclusive) {
+        console.log(`  --    ${connector.id}: ${result.name}${result.detail ? ` — ${result.detail}` : ""}`);
+        continue;
+      }
+      check(`${connector.id}: ${result.name}`, result.ok, result.detail);
+    }
+  }
 
   // What this canary is actually asking: does an identifying User-Agent still
   // get served? The reference instance answers 406 to a browser string, and if
@@ -180,6 +199,28 @@ async function network() {
   }
   if (verdict) check(`overpass ${verdict.ok ? "still serves" : "now REFUSES"} an identifying User-Agent`, verdict.ok, verdict.detail);
   else console.log("  --    overpass: every mirror was busy — inconclusive, not drift");
+
+  // ---- The ATS boards --------------------------------------------------------
+  //
+  // The fifth upstream, and until now the only one nothing probed. It decides
+  // whether `isHiring` is a finding or an absence: a board that changed shape
+  // makes every company look like it is not hiring, which is precisely the
+  // failure the skill promises not to make.
+  const greenhouse = await get("https://boards-api.greenhouse.io/v1/boards/gitlab/jobs");
+  const ghJson = JSON.parse(greenhouse.body || "{}");
+  check(
+    "greenhouse still returns jobs[] with title and absolute_url",
+    Array.isArray(ghJson?.jobs) && ghJson.jobs.length > 0 && Boolean(ghJson.jobs[0]?.title),
+    "if this drifts, every company on Greenhouse reads as not hiring",
+  );
+
+  const lever = await get("https://api.lever.co/v0/postings/leverdemo?mode=json");
+  const leverJson = JSON.parse(lever.body || "[]");
+  check(
+    "lever still returns an array of postings with text and hostedUrl",
+    Array.isArray(leverJson) && leverJson.length > 0 && Boolean(leverJson[0]?.text),
+    "if this drifts, every company on Lever reads as not hiring",
+  );
 }
 
 if (suite === "offline") await offline();

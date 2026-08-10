@@ -1,12 +1,18 @@
-// `doctor` — is every upstream reachable right now?
+// `doctor` — is every upstream this run needs reachable right now?
 //
-// This skill depends on five public services it does not own, three of them
-// volunteer-run. When a run comes back thin the first question is always
+// This skill depends entirely on public services it does not own, several of
+// them volunteer-run. When a run comes back thin the first question is always
 // whether the data was missing or the service was down, and answering it after
-// the fact is impossible. So `doctor` asks all of them the cheapest question
-// each will answer, and reports latency next to reachability — a mirror that
+// the fact is impossible. So `doctor` asks each of them the cheapest question
+// it will answer, and reports latency next to reachability — a mirror that
 // takes 40 seconds is technically up and practically unusable.
+//
+// The register probes come from `CONNECTORS` and are NARROWED TO THE COUNTRY
+// asked about. Probing all nine for a run over Lyon would ask a row of public
+// services about nothing, on exactly the day someone is running `doctor`
+// because something is already slow.
 import { EXIT_FAILURE, EXIT_OK, cacheDir, httpGet, httpJson } from "./engine.js";
+import { CONNECTORS } from "./registry/index.js";
 import { politeUa } from "./net.js";
 import { OVERPASS_MIRRORS } from "./overpass.js";
 import { VERSION } from "./version.js";
@@ -19,6 +25,8 @@ export interface DoctorProbe {
   detail: string;
   /** False when the run can still proceed without this one. */
   required: boolean;
+  /** True when nothing was asked — a connector with no key, typically. Not a failure. */
+  skipped?: boolean;
 }
 
 async function timed(fn: () => Promise<{ ok: boolean; detail: string }>): Promise<{ ok: boolean; detail: string; ms: number }> {
@@ -74,7 +82,12 @@ async function probeOverpass(url: string): Promise<DoctorProbe> {
   return { name: "overpass", target: new URL(url).host, required: false, ...r };
 }
 
-export async function probeAll(): Promise<DoctorProbe[]> {
+/**
+ * @param countryCode Narrows the register probes to the country in play.
+ *   Omitted, every connector is probed — then the question really is "which of
+ *   these is up".
+ */
+export async function probeAll(countryCode?: string): Promise<DoctorProbe[]> {
   const probes: DoctorProbe[] = [];
 
   probes.push({
@@ -101,14 +114,37 @@ export async function probeAll(): Promise<DoctorProbe[]> {
   });
   probes.push({ name: "ban", target: "api-adresse.data.gouv.fr", required: false, ...ban });
 
-  const sirene = await timed(async () => {
-    const res = await httpJson("GET", "https://recherche-entreprises.api.gouv.fr/search?q=test&per_page=1", undefined, {
-      timeoutMs: 25_000,
-      userAgent: politeUa(),
+  // ---- The register connectors ----------------------------------------------
+  //
+  // Driven by the connector table, and NARROWED TO THE COUNTRY IN PLAY. Probing
+  // all of them for a run over Lyon would ask nine public services about
+  // nothing, which is discourteous and slow on exactly the day someone is
+  // running `doctor` because something is already slow. Without a country the
+  // whole table is probed, because then the question really is "which of these
+  // is up".
+  const applicable = countryCode ? CONNECTORS.filter((c) => c.countries.includes("*") || c.countries.includes(countryCode.toLowerCase())) : CONNECTORS;
+  for (const connector of applicable) {
+    const availability = connector.availability({});
+    if (!availability.available) {
+      // Not a failure. A connector needing a key it was not given is a fact
+      // about this invocation, and `doctor` says what to do about it.
+      probes.push({
+        name: connector.id,
+        target: new URL(connector.docsUrl).host,
+        required: false,
+        ok: true,
+        skipped: true,
+        detail: `${availability.reason}. ${availability.how ?? ""}`.trim(),
+        ms: 0,
+      });
+      continue;
+    }
+    const probe = await timed(async () => {
+      const result = await connector.probe({});
+      return { ok: result.ok, detail: result.detail };
     });
-    return { ok: res.ok && typeof res.data?.total_results === "number", detail: res.ok ? "answers register queries" : `HTTP ${res.status}` };
-  });
-  probes.push({ name: "fr-sirene", target: "recherche-entreprises.api.gouv.fr", required: false, ...sirene });
+    probes.push({ name: connector.id, target: new URL(connector.docsUrl).host, required: false, ...probe });
+  }
 
   // Mirrors are probed in parallel: they are independent, and doing it serially
   // turns a diagnostic into a two-minute wait on exactly the bad day it is for.
@@ -123,8 +159,8 @@ export interface DoctorIo {
   say: (line: string) => void;
 }
 
-export async function runDoctor(io: DoctorIo): Promise<number> {
-  const probes = await probeAll();
+export async function runDoctor(io: DoctorIo, countryCode?: string): Promise<number> {
+  const probes = await probeAll(countryCode);
   const overpass = probes.filter((p) => p.name === "overpass");
   const liveMirrors = overpass.filter((p) => p.ok).length;
   // Every required probe, plus at least one Overpass mirror — losing all of
@@ -141,12 +177,13 @@ export async function runDoctor(io: DoctorIo): Promise<number> {
   io.out(`cache: ${cacheDir()}`);
   io.out("");
   for (const p of probes) {
-    const mark = p.ok ? "ok  " : p.required ? "FAIL" : "down";
+    const mark = p.skipped ? "--  " : p.ok ? "ok  " : p.required ? "FAIL" : "down";
     const ms = p.ms ? `${String(p.ms).padStart(5)} ms` : "        ";
-    io.out(`  ${mark}  ${p.name.padEnd(10)} ${ms}  ${p.target.padEnd(34)} ${p.detail}`);
+    io.out(`  ${mark}  ${p.name.padEnd(20)} ${ms}  ${p.target.padEnd(38)} ${p.detail}`);
   }
   io.out("");
   io.out(`  ${liveMirrors}/${overpass.length} Overpass mirrors answering`);
+  if (countryCode) io.out(`  register connectors shown are the ones serving ${countryCode}; omit --country to probe them all`);
 
   if (!healthy) {
     io.say("");

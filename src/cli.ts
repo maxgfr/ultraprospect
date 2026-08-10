@@ -57,6 +57,23 @@ import { DEFAULT_OUT, licencesFor, newRun, readPlaces, requireManifest, resolveR
 import { clampInt, parseBbox, parseDistanceM } from "./util.js";
 import { VERSION } from "./version.js";
 
+/**
+ * Re-exported for the eval suite, which drives the weekly canaries.
+ *
+ * `evals/run.mjs` imports from the BUILT BUNDLE rather than from src/, so that
+ * what the canary probes is what the skill actually ships. Anything it needs
+ * has to leave through this file — the bundle's entry point is cli.ts and tsup
+ * exports nothing else.
+ *
+ * It used to import `politeUa` this way behind a `.catch`, which silently
+ * resolved to undefined for as long as that has been there: the bundle never
+ * exported it, so every canary ran under the fallback string instead of the
+ * User-Agent this tool actually sends. A canary that probes a different client
+ * than the one in production is not probing production.
+ */
+export { CONNECTORS } from "./registry/index.js";
+export { politeUa } from "./net.js";
+
 export const COMMANDS = [
   "where",
   "scan",
@@ -149,7 +166,7 @@ COMMANDS
   watch --since <run>    Diff this run against an earlier one: who opened, closed, started hiring.
   orchestrate            Emit the fan-out: one search phase and two judgement phases.
   mcp                    Serve the run over MCP: where, scan, places, dossier, check.
-  doctor                 Check node, network and the health of every upstream this run needs.
+  doctor                 Check node, network and every upstream. --country narrows the registers.
   version                Print the version.
 
 TARGETING (scan, where)
@@ -948,7 +965,8 @@ export async function main(argv: readonly string[]): Promise<number> {
     case "mcp":
       return cmdMcp(values);
     case "doctor":
-      return runDoctor({ json: bools.has("json"), out, say });
+      // `--country` narrows the register probes to the ones that serve it.
+      return runDoctor({ json: bools.has("json"), out, say }, values.country);
     case "version":
       out(VERSION);
       return EXIT_OK;

@@ -2725,748 +2725,6 @@ function brandEngine() {
   });
 }
 
-// src/net.ts
-var CONTACT_URL = "https://github.com/maxgfr/ultraprospect";
-function politeUa() {
-  return `ultraprospect/${VERSION} (+${CONTACT_URL})`;
-}
-
-// src/util.ts
-function haversineM(aLat, aLon, bLat, bLon) {
-  const R = 63710088e-1;
-  const toRad = (d) => d * Math.PI / 180;
-  const dLat = toRad(bLat - aLat);
-  const dLon = toRad(bLon - aLon);
-  const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
-}
-function foldAccents(s) {
-  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-}
-var LEGAL_FORMS = /\b(?:sarl|sas|sasu|eurl|sa|sci|scp|scm|selarl|snc|gie|eirl|earl|scop|scic|asso(?:ciation)?|societe|ste|ets|etablissements?|entreprise|cie|compagnie|groupe|holding|france|international|gmbh|ltd|llc|inc|bv|nv|spa|srl|plc|ag)\b/g;
-function normalizeName(raw) {
-  return foldAccents(raw).toLowerCase().replace(/[’']/g, " ").replace(/[^a-z0-9]+/g, " ").replace(LEGAL_FORMS, " ").replace(/\s+/g, " ").trim();
-}
-function tokenSet(s) {
-  return new Set(s.split(" ").filter((t) => t.length > 1));
-}
-function jaccard(a, b) {
-  if (a.size === 0 || b.size === 0) return 0;
-  let inter = 0;
-  for (const t of a) if (b.has(t)) inter++;
-  return inter / (a.size + b.size - inter);
-}
-function trigrams(s) {
-  const padded = `  ${s} `;
-  const out2 = /* @__PURE__ */ new Set();
-  for (let i = 0; i < padded.length - 2; i++) out2.add(padded.slice(i, i + 3));
-  return out2;
-}
-var GENERIC_TRADE_WORDS = /* @__PURE__ */ new Set([
-  "creche",
-  "ecole",
-  "college",
-  "lycee",
-  "boulangerie",
-  "patisserie",
-  "boucherie",
-  "pharmacie",
-  "restaurant",
-  "brasserie",
-  "cafe",
-  "bar",
-  "tabac",
-  "presse",
-  "garage",
-  "hotel",
-  "salon",
-  "coiffure",
-  "agence",
-  "cabinet",
-  "centre",
-  "maison",
-  "clinique",
-  "institut",
-  "bureau",
-  "magasin",
-  "boutique",
-  "atelier",
-  "banque",
-  "immobilier",
-  "opticien",
-  "pressing",
-  "fleuriste",
-  "librairie",
-  "supermarche",
-  "epicerie",
-  "traiteur",
-  "primeur",
-  "poissonnerie",
-  "fromagerie",
-  "caviste",
-  "auto",
-  "ecole",
-  "taxi",
-  "clinic",
-  "shop",
-  "store",
-  "market",
-  "school",
-  "office"
-]);
-function isNameContained(a, b) {
-  const ta = tokenSet(a);
-  const tb = tokenSet(b);
-  if (ta.size === 0 || tb.size === 0) return false;
-  const [small, large] = ta.size <= tb.size ? [ta, tb] : [tb, ta];
-  for (const t of small) if (!large.has(t)) return false;
-  if (small.size >= 2) return true;
-  const only = [...small][0];
-  return only.length >= 6 && !GENERIC_TRADE_WORDS.has(only);
-}
-function nameVariants(raw) {
-  const variants = [raw];
-  const outside = raw.replace(/\([^)]*\)/g, " ").trim();
-  if (outside && outside !== raw) variants.push(outside);
-  for (const m of raw.matchAll(/\(([^)]+)\)/g)) {
-    for (const part of m[1].split(/[,;]/)) {
-      const v = part.trim();
-      if (v) variants.push(v);
-    }
-  }
-  return [...new Set(variants.filter(Boolean))];
-}
-function nameSimilarity(a, b) {
-  let best = 0;
-  for (const va of nameVariants(a)) {
-    for (const vb of nameVariants(b)) {
-      const na = normalizeName(va);
-      const nb = normalizeName(vb);
-      if (!na || !nb) continue;
-      if (na === nb) return 1;
-      const contained = isNameContained(na, nb) ? 0.88 : 0;
-      const tok = jaccard(tokenSet(na), tokenSet(nb));
-      const tri = jaccard(trigrams(na), trigrams(nb));
-      best = Math.max(best, contained, tok, tri);
-      if (best >= 1) return 1;
-    }
-  }
-  return best;
-}
-function bestNameMatch(probe, candidates) {
-  let best = { name: void 0, score: 0 };
-  for (const c of candidates) {
-    const score = nameSimilarity(probe, c);
-    if (score > best.score) best = { name: c, score };
-  }
-  return best;
-}
-function bboxQuadrants(bbox) {
-  const [s, n, w, e] = bbox;
-  const midLat = (s + n) / 2;
-  const midLon = (w + e) / 2;
-  return [
-    [s, midLat, w, midLon],
-    [s, midLat, midLon, e],
-    [midLat, n, w, midLon],
-    [midLat, n, midLon, e]
-  ];
-}
-function bboxAround(lat, lon, radiusM) {
-  const dLat = radiusM / 111320;
-  const dLon = radiusM / (111320 * Math.max(0.01, Math.cos(lat * Math.PI / 180)));
-  return [lat - dLat, lat + dLat, lon - dLon, lon + dLon];
-}
-function csvField(value) {
-  const s = value === void 0 || value === null ? "" : String(value);
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-function csvRow(values) {
-  return values.map(csvField).join(",");
-}
-function firstText(...values) {
-  for (const v of values) if (typeof v === "string" && v.trim()) return v.trim();
-  return void 0;
-}
-function uniqueBy(items, key) {
-  const seen = /* @__PURE__ */ new Set();
-  const out2 = [];
-  for (const item of items) {
-    const k = key(item);
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out2.push(item);
-  }
-  return out2;
-}
-function clampInt(value, min, max, fallback) {
-  const n = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, Math.trunc(n)));
-}
-function parseDistanceM(raw) {
-  const m = /^\s*([0-9]+(?:[.,][0-9]+)?)\s*(m|km)?\s*$/i.exec(raw);
-  if (!m) return void 0;
-  const value = Number.parseFloat(m[1].replace(",", "."));
-  if (!Number.isFinite(value) || value <= 0) return void 0;
-  return (m[2] ?? "m").toLowerCase() === "km" ? Math.round(value * 1e3) : Math.round(value);
-}
-function parseBbox(raw) {
-  const parts = raw.split(",").map((p) => Number.parseFloat(p.trim()));
-  if (parts.length !== 4 || parts.some((p) => !Number.isFinite(p))) return void 0;
-  const [s, w, n, e] = parts;
-  if (s >= n || w >= e) return void 0;
-  return [s, n, w, e];
-}
-
-// src/overpass.ts
-var OVERPASS_MIRRORS = [
-  "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter",
-  "https://overpass.private.coffee/api/interpreter",
-  "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
-];
-var OSM_TAG_GROUPS = {
-  shop: '["shop"]',
-  office: '["office"]',
-  craft: '["craft"]',
-  healthcare: '["healthcare"]',
-  club: '["club"]',
-  amenity: '["amenity"~"^(restaurant|cafe|bar|pub|fast_food|food_court|ice_cream|biergarten|bank|bureau_de_change|atm|pharmacy|clinic|doctors|dentist|veterinary|driving_school|language_school|prep_school|music_school|training|childcare|kindergarten|school|college|university|hospital|nursing_home|social_facility|funeral_directors|fuel|car_wash|car_rental|car_sharing|charging_station|cinema|theatre|nightclub|casino|marketplace|post_office|coworking_space|studio|internet_cafe|animal_boarding|animal_shelter|vehicle_inspection)$"]',
-  tourism: '["tourism"~"^(hotel|motel|hostel|guest_house|apartment|chalet|camp_site|caravan_site|museum|gallery)$"]',
-  leisure: '["leisure"~"^(fitness_centre|sports_centre|sports_hall|dance|escape_game|bowling_alley|amusement_arcade|adult_gaming_centre|horse_riding|golf_course|marina|hackerspace|trampoline_park)$"]'
-};
-function areaIdFor(target) {
-  if (target.osmType !== "relation" || typeof target.osmId !== "number") return void 0;
-  return 36e8 + target.osmId;
-}
-function scopeClause(area, bbox) {
-  if (area !== void 0) return { header: `area(${area})->.searchArea;
-`, suffix: "(area.searchArea)" };
-  const [s, n, w, e] = bbox;
-  return { header: "", suffix: `(${s},${w},${n},${e})` };
-}
-function buildQuery(area, bbox, opts = {}) {
-  const groups = opts.groups?.length ? opts.groups : Object.keys(OSM_TAG_GROUPS);
-  const filters = [...groups.map((g) => OSM_TAG_GROUPS[g]).filter((f) => Boolean(f)), ...opts.extraFilters ?? []];
-  const { header: header2, suffix } = scopeClause(area, bbox);
-  const body = filters.map((f) => `  nwr${f}${suffix};`).join("\n");
-  return `[out:json][timeout:${opts.timeoutS ?? 90}];
-${header2}(
-${body}
-);
-out center tags;`;
-}
-function overpassError(body) {
-  if (body.trimStart().startsWith("{")) return void 0;
-  const m = /<strong[^>]*>Error<\/strong>:\s*([^<]+)/i.exec(body);
-  return (m?.[1] ?? body.slice(0, 160)).replace(/\s+/g, " ").trim();
-}
-function isInstanceBusy(message) {
-  return /dispatcher|open64|too busy|rate.?limit|HTTP 50[234]|HTTP 429|HTTP 0\b|not JSON|fetch failed|aborted|socket|ETIMEDOUT|ECONNRESET/i.test(message);
-}
-function isQueryTooBig(message) {
-  return /query timed out|out of memory|too many results|memory limit/i.test(message);
-}
-async function runOnce(query, opts) {
-  const mirrors = opts.mirrors ?? OVERPASS_MIRRORS;
-  const failures = [];
-  for (const mirror of mirrors) {
-    await awaitHostSlot(mirror, 1e3);
-    let body;
-    try {
-      const res = await httpGet(`${mirror}?data=${encodeURIComponent(query)}`, {
-        timeoutMs: (opts.timeoutS ?? 90) * 1e3 + 15e3,
-        // An identifying User-Agent is not optional here: the reference instance
-        // answers 406 to a browser string. See src/net.ts.
-        userAgent: politeUa(),
-        // Well above the engine's HTML default: a dense arrondissement answers
-        // with several megabytes of JSON, and a truncated body would parse as a
-        // syntax error and be retried on every mirror in turn for nothing.
-        maxBytes: 64 * 1024 * 1024,
-        // Overpass is slow by nature and its failures are capacity failures;
-        // retrying the same heavy query at the same instance just doubles the
-        // load that caused it. Rotation and splitting are the recovery here.
-        retries: 0
-      });
-      body = res.body ?? "";
-      if (!res.ok && !body) {
-        failures.push(`${mirror}: HTTP ${res.status}`);
-        continue;
-      }
-    } catch (e) {
-      failures.push(`${mirror}: ${e.message}`);
-      continue;
-    }
-    const err = overpassError(body);
-    if (err) {
-      failures.push(`${mirror}: ${err}`);
-      if (isQueryTooBig(err)) return { error: err, mirror, tooBig: true };
-      continue;
-    }
-    try {
-      return { json: JSON.parse(body), mirror };
-    } catch {
-      failures.push(`${mirror}: response was not JSON`);
-    }
-  }
-  const joined = failures.join(" | ");
-  return { error: joined, tooBig: failures.every((f) => isQueryTooBig(f) || isInstanceBusy(f)) };
-}
-function toPoi(el) {
-  const tags = el?.tags ?? {};
-  const lat = el?.lat ?? el?.center?.lat;
-  const lon = el?.lon ?? el?.center?.lon;
-  if (typeof lat !== "number" || typeof lon !== "number") return void 0;
-  const osmType = el?.type === "way" || el?.type === "relation" ? el.type : "node";
-  return {
-    id: `${osmType[0]}${el.id}`,
-    osmType,
-    osmId: el.id,
-    name: tags.name ?? tags["name:fr"] ?? tags.brand ?? tags.operator,
-    lat,
-    lon,
-    tags
-  };
-}
-async function fetchOsmPois(target, opts = {}) {
-  const maxDepth = opts.maxSplitDepth ?? 3;
-  const notes = [];
-  const mirrorsUsed = /* @__PURE__ */ new Set();
-  const byId = /* @__PURE__ */ new Map();
-  let partitions = 0;
-  let incomplete = false;
-  const area = target.radiusM ? void 0 : areaIdFor(target);
-  const rootBbox = target.radiusM ? bboxAround(target.lat, target.lon, target.radiusM) : target.bbox;
-  async function walk(bbox, useArea, depth) {
-    const query = buildQuery(useArea, bbox, opts);
-    const { json, error, mirror, tooBig } = await runOnce(query, opts);
-    if (mirror) mirrorsUsed.add(mirror);
-    if (error) {
-      if (useArea !== void 0) {
-        notes.push(`overpass: the administrative-area query failed (${error}); fell back to the bounding box, which extends past the commune boundary`);
-        opts.onNote?.("overpass: area query failed, falling back to bbox (edges will overshoot the boundary)");
-        return walk(bbox, void 0, depth);
-      }
-      if (tooBig && depth < maxDepth) {
-        notes.push(`overpass: splitting a too-large area at depth ${depth} (${error})`);
-        opts.onNote?.(`overpass: area too large, splitting into 4 (depth ${depth + 1})`);
-        for (const q of bboxQuadrants(bbox)) await walk(q, void 0, depth + 1);
-        return;
-      }
-      incomplete = true;
-      notes.push(`overpass: gave up on a tile after depth ${depth} \u2014 ${error}`);
-      opts.onNote?.("overpass: a tile could not be fetched; the OSM lane is INCOMPLETE");
-      return;
-    }
-    partitions++;
-    for (const el of json?.elements ?? []) {
-      const poi = toPoi(el);
-      if (poi && !byId.has(poi.id)) byId.set(poi.id, poi);
-    }
-  }
-  await walk(rootBbox, area, 0);
-  return {
-    pois: [...byId.values()],
-    mirrorsUsed: [...mirrorsUsed],
-    partitions: Math.max(1, partitions),
-    notes,
-    incomplete
-  };
-}
-function poiCategory(poi) {
-  for (const key of ["shop", "office", "craft", "healthcare", "amenity", "tourism", "leisure", "club"]) {
-    const v = poi.tags[key];
-    if (v && v !== "yes") return `${key}=${v}`;
-    if (v === "yes") return key;
-  }
-  return void 0;
-}
-function poiWebsite(poi) {
-  const raw = poi.tags.website ?? poi.tags["contact:website"] ?? poi.tags.url;
-  if (!raw) return void 0;
-  const first = raw.split(/[;\s]+/)[0];
-  if (!first) return void 0;
-  return /^https?:\/\//i.test(first) ? first : `https://${first}`;
-}
-
-// src/doctor.ts
-async function timed(fn) {
-  const t0 = Date.now();
-  try {
-    const r = await fn();
-    return { ...r, ms: Date.now() - t0 };
-  } catch (e) {
-    return { ok: false, detail: e.message, ms: Date.now() - t0 };
-  }
-}
-var OVERPASS_PING = "[out:json][timeout:25];node[amenity=cafe](48.8550,2.3300,48.8680,2.3550);out count;";
-var PLANET_FLOOR = 50;
-var OVERPASS_PROBE_TIMEOUT_MS = 45e3;
-async function probeOverpass(url) {
-  const r = await timed(async () => {
-    const res = await httpGet(`${url}?data=${encodeURIComponent(OVERPASS_PING)}`, { timeoutMs: OVERPASS_PROBE_TIMEOUT_MS, userAgent: politeUa(), retries: 0 });
-    const body = res.body ?? "";
-    if (!body.trimStart().startsWith("{")) {
-      const m = /<strong[^>]*>Error<\/strong>:\s*([^<]+)/i.exec(body);
-      return { ok: false, detail: (m?.[1] ?? `HTTP ${res.status}`).replace(/\s+/g, " ").trim().slice(0, 90) };
-    }
-    const count = Number.parseInt(JSON.parse(body)?.elements?.[0]?.tags?.nodes ?? "0", 10);
-    if (!Number.isFinite(count) || count < PLANET_FLOOR) {
-      return { ok: false, detail: `regional extract, not planet-wide (${count} caf\xE9s in central Paris) \u2014 excluded` };
-    }
-    return { ok: true, detail: `planet data (${count} caf\xE9s in central Paris)` };
-  });
-  return { name: "overpass", target: new URL(url).host, required: false, ...r };
-}
-async function probeAll() {
-  const probes = [];
-  probes.push({
-    name: "node",
-    target: process.version,
-    ok: Number.parseInt(process.versions.node.split(".")[0], 10) >= 18,
-    ms: 0,
-    detail: Number.parseInt(process.versions.node.split(".")[0], 10) >= 18 ? "supported" : "ultraprospect needs Node 18 or newer",
-    required: true
-  });
-  const nominatim = await timed(async () => {
-    const res = await httpJson("GET", "https://nominatim.openstreetmap.org/search?q=paris&format=jsonv2&limit=1", void 0, {
-      timeoutMs: 2e4,
-      userAgent: politeUa()
-    });
-    return { ok: res.ok && Array.isArray(res.data) && res.data.length > 0, detail: res.ok ? "geocodes" : `HTTP ${res.status}` };
-  });
-  probes.push({ name: "nominatim", target: "nominatim.openstreetmap.org", required: true, ...nominatim });
-  const ban = await timed(async () => {
-    const res = await httpJson("GET", "https://api-adresse.data.gouv.fr/search/?q=paris&limit=1", void 0, { timeoutMs: 15e3, userAgent: politeUa() });
-    return { ok: res.ok && Array.isArray(res.data?.features), detail: res.ok ? "geocodes French addresses" : `HTTP ${res.status}` };
-  });
-  probes.push({ name: "ban", target: "api-adresse.data.gouv.fr", required: false, ...ban });
-  const sirene = await timed(async () => {
-    const res = await httpJson("GET", "https://recherche-entreprises.api.gouv.fr/search?q=test&per_page=1", void 0, {
-      timeoutMs: 25e3,
-      userAgent: politeUa()
-    });
-    return { ok: res.ok && typeof res.data?.total_results === "number", detail: res.ok ? "answers register queries" : `HTTP ${res.status}` };
-  });
-  probes.push({ name: "fr-sirene", target: "recherche-entreprises.api.gouv.fr", required: false, ...sirene });
-  probes.push(...await Promise.all(OVERPASS_MIRRORS.map(probeOverpass)));
-  return probes;
-}
-async function runDoctor(io) {
-  const probes = await probeAll();
-  const overpass = probes.filter((p) => p.name === "overpass");
-  const liveMirrors = overpass.filter((p) => p.ok).length;
-  const healthy = probes.filter((p) => p.required).every((p) => p.ok) && liveMirrors > 0;
-  if (io.json) {
-    io.out(JSON.stringify({ version: VERSION, cacheDir: cacheDir(), healthy, liveOverpassMirrors: liveMirrors, probes }, null, 2));
-    return healthy ? EXIT_OK : EXIT_FAILURE;
-  }
-  io.out(`ultraprospect ${VERSION}`);
-  io.out(`cache: ${cacheDir()}`);
-  io.out("");
-  for (const p of probes) {
-    const mark = p.ok ? "ok  " : p.required ? "FAIL" : "down";
-    const ms = p.ms ? `${String(p.ms).padStart(5)} ms` : "        ";
-    io.out(`  ${mark}  ${p.name.padEnd(10)} ${ms}  ${p.target.padEnd(34)} ${p.detail}`);
-  }
-  io.out("");
-  io.out(`  ${liveMirrors}/${overpass.length} Overpass mirrors answering`);
-  if (!healthy) {
-    io.say("");
-    io.say("ultraprospect: an upstream this skill cannot work without is unreachable.");
-    io.say("next: re-run `ultraprospect doctor` in a few minutes, or check your network");
-    return EXIT_FAILURE;
-  }
-  if (liveMirrors < overpass.length) {
-    io.say("");
-    io.say(`note: ${overpass.length - liveMirrors} Overpass mirror(s) are down; runs will rotate onto the ones that answer.`);
-  }
-  return EXIT_OK;
-}
-
-// src/geocode.ts
-var NOMINATIM = "https://nominatim.openstreetmap.org/search";
-var BAN = "https://api-adresse.data.gouv.fr/search/";
-var NOMINATIM_DELAY_MS = 1100;
-var DISTINCT_PLACE_M = 1e4;
-var AMBIGUITY_RATIO = 0.85;
-async function resolveWhere(query, opts = {}) {
-  const q = query.trim();
-  if (!q) return { ok: false, candidates: [], reason: "empty query" };
-  const hits = await nominatimSearch(q, opts);
-  if (hits.length === 0) {
-    return { ok: false, candidates: [], reason: `no geocoder result for "${q}"` };
-  }
-  const picked = opts.pick ? hits[opts.pick - 1] : hits[0];
-  if (!picked) {
-    return { ok: false, candidates: hits.map(toCandidate), reason: `--pick ${opts.pick} is out of range (${hits.length} candidates)` };
-  }
-  if (!opts.pick) {
-    const rival = hits.slice(1).find((h) => isRival(hits[0], h));
-    if (rival) {
-      return {
-        ok: false,
-        candidates: hits.map(toCandidate),
-        reason: `"${q}" is ambiguous \u2014 several distinct places match with comparable confidence`
-      };
-    }
-  }
-  const target = await toTarget(q, picked, opts);
-  return { ok: true, target };
-}
-function isRival(top, other) {
-  const ti = top.importance ?? 0;
-  const oi = other.importance ?? 0;
-  if (ti > 0 && oi / ti < AMBIGUITY_RATIO) return false;
-  const [tLat, tLon] = [Number(top.lat), Number(top.lon)];
-  const [oLat, oLon] = [Number(other.lat), Number(other.lon)];
-  if (![tLat, tLon, oLat, oLon].every(Number.isFinite)) return false;
-  return haversineM(tLat, tLon, oLat, oLon) > DISTINCT_PLACE_M;
-}
-function toCandidate(h) {
-  return {
-    label: h.display_name ?? "(unnamed)",
-    lat: Number(h.lat),
-    lon: Number(h.lon),
-    kind: firstText(h.addresstype, h.type) ?? "place",
-    source: "nominatim"
-  };
-}
-async function nominatimSearch(q, opts) {
-  const url = new URL(NOMINATIM);
-  url.searchParams.set("q", q);
-  url.searchParams.set("format", "jsonv2");
-  url.searchParams.set("limit", "5");
-  url.searchParams.set("addressdetails", "1");
-  if (opts.country) url.searchParams.set("countrycodes", opts.country.toLowerCase());
-  if (opts.lang) url.searchParams.set("accept-language", opts.lang);
-  await awaitHostSlot(url.href, NOMINATIM_DELAY_MS);
-  const res = await httpJson("GET", url.href, void 0, { timeoutMs: 2e4, acceptLanguage: opts.lang, userAgent: politeUa() });
-  if (!res.ok || !Array.isArray(res.data)) return [];
-  return res.data;
-}
-async function toTarget(query, hit, opts) {
-  const lat = Number(hit.lat);
-  const lon = Number(hit.lon);
-  const bb = hit.boundingbox?.map(Number) ?? [];
-  const bbox = bb.length === 4 && bb.every(Number.isFinite) ? [bb[0], bb[1], bb[2], bb[3]] : [lat - 0.01, lat + 0.01, lon - 0.015, lon + 0.015];
-  const countryCode = hit.address?.country_code?.toLowerCase();
-  const target = {
-    query,
-    label: hit.display_name ?? query,
-    lat,
-    lon,
-    bbox,
-    countryCode,
-    osmType: hit.osm_type === "relation" || hit.osm_type === "way" || hit.osm_type === "node" ? hit.osm_type : void 0,
-    osmId: typeof hit.osm_id === "number" ? hit.osm_id : void 0,
-    postcode: hit.address?.postcode,
-    source: "nominatim",
-    radiusM: opts.radiusM
-  };
-  if (countryCode === "fr") {
-    const insee = await banCityCode(query);
-    if (insee) {
-      target.codeCommune = insee.citycode;
-      target.postcode ??= insee.postcode;
-    }
-  }
-  return target;
-}
-async function banCityCode(query) {
-  const url = new URL(BAN);
-  url.searchParams.set("q", query);
-  url.searchParams.set("limit", "1");
-  await awaitHostSlot(url.href);
-  const res = await httpJson("GET", url.href, void 0, { timeoutMs: 15e3, userAgent: politeUa() });
-  const props = res.ok ? res.data?.features?.[0]?.properties : void 0;
-  if (!props) return void 0;
-  return { citycode: props.citycode, postcode: props.postcode };
-}
-
-// src/registry/types.ts
-function recordKey(rec) {
-  return `${rec.connectorId}:${rec.establishmentId ?? rec.id}`;
-}
-
-// src/match.ts
-var MAX_DISTANCE_M = 150;
-var MERGE_HIGH = 0.72;
-var MERGE_LOW = 0.4;
-var MIN_IDENTITY = 0.25;
-var CELL = 2e-3;
-function cellKey(lat, lon) {
-  return `${Math.floor(lat / CELL)}:${Math.floor(lon / CELL)}`;
-}
-function buildIndex(records) {
-  const index = /* @__PURE__ */ new Map();
-  for (const r of records) {
-    if (typeof r.lat !== "number" || typeof r.lon !== "number") continue;
-    const key = cellKey(r.lat, r.lon);
-    const bucket = index.get(key);
-    if (bucket) bucket.push(r);
-    else index.set(key, [r]);
-  }
-  return index;
-}
-function nearby(index, lat, lon) {
-  const out2 = [];
-  const baseLat = Math.floor(lat / CELL);
-  const baseLon = Math.floor(lon / CELL);
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      const bucket = index.get(`${baseLat + dy}:${baseLon + dx}`);
-      if (bucket) out2.push(...bucket);
-    }
-  }
-  return out2;
-}
-function registerNames(r) {
-  return r.names.filter((n) => Boolean(n?.trim()));
-}
-function poiAddress(poi) {
-  return {
-    numero: poi.tags["addr:housenumber"],
-    libelleVoie: poi.tags["addr:street"],
-    codePostal: poi.tags["addr:postcode"],
-    commune: poi.tags["addr:city"]
-  };
-}
-function sameStreet(a, b, bType) {
-  if (!a || !b) return false;
-  const norm = (s) => foldAccents(s).toLowerCase().replace(/^(rue|avenue|av|boulevard|bd|quai|place|pl|impasse|allee|chemin|route|rte|cours|square|passage)\s+/i, "").replace(/\bde\s+la\b|\bdes\b|\bdu\b|\bde\b|\ble\b|\bla\b|\bl\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
-  const na = norm(a);
-  const nb = norm(bType ? `${bType} ${b}` : b);
-  return na.length > 2 && na === nb;
-}
-function scorePair(poi, rec) {
-  const distanceM = typeof rec.lat === "number" && typeof rec.lon === "number" ? haversineM(poi.lat, poi.lon, rec.lat, rec.lon) : Number.POSITIVE_INFINITY;
-  const zero = { score: 0, parts: { distance: 0, name: 0, enseigne: 0, address: 0 }, distanceM };
-  if (!Number.isFinite(distanceM) || distanceM > MAX_DISTANCE_M) return zero;
-  const poiName = poi.name ?? "";
-  const best = poiName ? bestNameMatch(poiName, registerNames(rec)) : { name: void 0, score: 0 };
-  const nameScore = best.score;
-  const brand2 = poi.tags.brand ?? poi.tags.operator ?? "";
-  const trading = rec.tradingNames ?? [];
-  const enseigneScore = brand2 && trading.length ? Math.max(0, ...trading.map((e) => nameSimilarity(brand2, e))) : 0;
-  const pa = poiAddress(poi);
-  const numberAgrees = Boolean(
-    pa.numero && rec.address.numero && pa.numero.replace(/\s/g, "").toLowerCase() === rec.address.numero.replace(/\s/g, "").toLowerCase()
-  );
-  const streetAgrees = sameStreet(pa.libelleVoie, rec.address.libelleVoie, rec.address.typeVoie);
-  const addressScore = numberAgrees && streetAgrees ? 1 : streetAgrees ? 0.6 : 0;
-  const nameSupported = nameScore >= 0.4 || enseigneScore >= 0.4;
-  const addressIdentity = addressScore === 1 ? nameSupported ? 0.9 : 0.6 : addressScore * 0.5;
-  const identity = Math.max(nameScore, enseigneScore, addressIdentity);
-  if (identity < MIN_IDENTITY) return zero;
-  const proximity = 1 - Math.min(1, distanceM / MAX_DISTANCE_M);
-  const score = 0.8 * identity + 0.2 * proximity;
-  return { score, parts: { distance: proximity, name: nameScore, enseigne: enseigneScore, address: addressScore }, distanceM, matchedName: best.name };
-}
-function toCandidate2(poi, rec, scored) {
-  return {
-    osmId: poi.id,
-    connectorId: rec.connectorId,
-    registryId: rec.establishmentId ?? rec.id,
-    legalId: rec.establishmentId ? rec.id : void 0,
-    registryName: rec.legalName ?? rec.names[0],
-    // The name the score came from, which is often NOT nomComplet.
-    matchedName: scored.matchedName,
-    osmName: poi.name,
-    score: Number(scored.score.toFixed(4)),
-    parts: {
-      distance: Number(scored.parts.distance.toFixed(4)),
-      name: Number(scored.parts.name.toFixed(4)),
-      enseigne: Number(scored.parts.enseigne.toFixed(4)),
-      address: Number(scored.parts.address.toFixed(4))
-    },
-    distanceM: Math.round(scored.distanceM)
-  };
-}
-function matchLanes(pois, records) {
-  const index = buildIndex(records);
-  const scored = [];
-  for (const poi of pois) {
-    for (const rec of nearby(index, poi.lat, poi.lon)) {
-      const s = scorePair(poi, rec);
-      if (s.score >= MERGE_LOW) scored.push({ poi, rec, s });
-    }
-  }
-  scored.sort((a, b) => b.s.score - a.s.score);
-  const merged = /* @__PURE__ */ new Map();
-  const usedPoi = /* @__PURE__ */ new Set();
-  const usedRec = /* @__PURE__ */ new Set();
-  const undecided = [];
-  for (const { poi, rec, s } of scored) {
-    const key = recordKey(rec);
-    if (usedPoi.has(poi.id) || usedRec.has(key)) continue;
-    if (s.score >= MERGE_HIGH) {
-      const by = s.parts.address >= 1 && s.parts.name < 0.5 && s.parts.enseigne < 0.5 ? "address" : s.parts.enseigne > s.parts.name ? "enseigne" : "name";
-      merged.set(key, { osmId: poi.id, score: Number(s.score.toFixed(3)), by });
-      usedPoi.add(poi.id);
-      usedRec.add(key);
-    } else {
-      undecided.push(toCandidate2(poi, rec, s));
-    }
-  }
-  return { merged, undecided };
-}
-function buildMatchTodo(undecided) {
-  return {
-    version: 1,
-    generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    // Strongest first: the agent works down a list that gets easier to reject,
-    // and can stop when the evidence thins out.
-    pairs: [...undecided].sort((a, b) => b.score - a.score)
-  };
-}
-function verdictKey(v, known) {
-  const raw = v.registryId?.trim();
-  if (!raw) return void 0;
-  if (known.has(raw)) return raw;
-  if (v.connectorId) {
-    const qualified = `${v.connectorId}:${raw}`;
-    if (known.has(qualified)) return qualified;
-  }
-  const suffixed = [...known].filter((k) => k.endsWith(`:${raw}`));
-  return suffixed.length === 1 ? suffixed[0] : void 0;
-}
-function applyVerdicts(places, verdicts) {
-  const byOsm = /* @__PURE__ */ new Map();
-  const byRecord = /* @__PURE__ */ new Map();
-  for (const p of places) {
-    if (p.osm) byOsm.set(p.osm.id, p);
-    if (p.registry) byRecord.set(recordKey(p.registry), p);
-  }
-  const known = new Set(byRecord.keys());
-  let mergedCount = 0;
-  let skipped = 0;
-  const unknown = [];
-  for (const v of verdicts) {
-    if (!v.merge) {
-      skipped++;
-      continue;
-    }
-    const key = verdictKey(v, known);
-    const osmPlace = byOsm.get(v.osmId);
-    const recPlace = key ? byRecord.get(key) : void 0;
-    if (!osmPlace || !recPlace || osmPlace === recPlace) {
-      unknown.push(`${v.osmId} <-> ${key ?? v.registryId ?? "?"}`);
-      continue;
-    }
-    osmPlace.registry = recPlace.registry;
-    osmPlace.registryEvidence = recPlace.registryEvidence ?? { mode: "sweep", how: "agent-adjudicated" };
-    osmPlace.sources = [.../* @__PURE__ */ new Set([...osmPlace.sources, "registry"])];
-    osmPlace.matchConfidence = 1;
-    osmPlace.address = { ...recPlace.address, ...osmPlace.address };
-    recPlace.id = "";
-    mergedCount++;
-  }
-  for (let i = places.length - 1; i >= 0; i--) if (places[i].id === "") places.splice(i, 1);
-  return { merged: mergedCount, skipped, unknown };
-}
-
 // src/classification/nace.ts
 var NACE_SECTION_DIVISIONS = [
   ["A", 1, 3],
@@ -3520,6 +2778,419 @@ function naceSection(code) {
   if (!Number.isFinite(div)) return void 0;
   return NACE_SECTION_DIVISIONS.find(([, lo, hi]) => div >= lo && div <= hi)?.[0];
 }
+
+// src/net.ts
+var CONTACT_URL = "https://github.com/maxgfr/ultraprospect";
+function politeUa() {
+  return `ultraprospect/${VERSION} (+${CONTACT_URL})`;
+}
+
+// src/registry/cz-ares.ts
+var BASE = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty";
+var CONNECTOR_ID = "cz-ares";
+var REQUEST_DELAY_MS = 400;
+async function call(method, path, body) {
+  const url = `${BASE}${path}`;
+  await awaitHostSlot(url, REQUEST_DELAY_MS);
+  const res = await httpJson(method, url, body, { timeoutMs: 25e3, retries: 1, userAgent: politeUa() });
+  return res.ok ? res.data : void 0;
+}
+function addressOf(raw) {
+  if (!raw) return {};
+  const psc = raw?.psc != null ? String(raw.psc) : void 0;
+  return {
+    raw: raw?.textovaAdresa ?? void 0,
+    libelleVoie: raw?.nazevUlice ?? raw?.nazevCastiObce ?? void 0,
+    numero: raw?.cisloDomovni != null ? String(raw.cisloDomovni) : void 0,
+    codePostal: psc,
+    commune: raw?.nazevObce ?? void 0,
+    // The state's own municipality code, the closest thing Czechia has to an
+    // INSEE code.
+    codeCommune: raw?.kodObce != null ? String(raw.kodObce) : void 0,
+    pays: raw?.nazevStatu ?? "\u010Cesk\xE1 republika"
+  };
+}
+function principalActivity(codes) {
+  if (!Array.isArray(codes)) return {};
+  for (const raw of codes) {
+    const code = typeof raw === "string" ? raw : void 0;
+    if (!code) continue;
+    const section2 = naceSection(code);
+    if (section2) return { code, section: section2 };
+  }
+  return { code: typeof codes[0] === "string" ? codes[0] : void 0 };
+}
+function toRecord(subject) {
+  const ico = subject?.ico;
+  if (!ico) return void 0;
+  const { code, section: section2 } = principalActivity(subject?.czNace2008);
+  const registrations = subject?.seznamRegistraci ?? {};
+  const live = registrations.stavZdrojeVr === "AKTIVNI" || registrations.stavZdrojeRes === "AKTIVNI";
+  const dead3 = registrations.stavZdrojeVr === "ZANIKLY" || registrations.stavZdrojeRes === "ZANIKLY";
+  return {
+    connectorId: CONNECTOR_ID,
+    id: String(ico),
+    names: [subject?.obchodniJmeno].filter(Boolean),
+    legalName: subject?.obchodniJmeno ?? void 0,
+    officers: [],
+    address: addressOf(subject?.sidlo),
+    countryCode: "cz",
+    activityCode: code,
+    section: section2,
+    activityScheme: "nace",
+    legalForm: subject?.pravniForma ?? void 0,
+    dateCreated: subject?.datumVzniku ?? void 0,
+    dateClosed: subject?.datumZaniku ?? void 0,
+    status: dead3 ? "ceased" : live ? "active" : "unknown",
+    sourceUrl: `https://ares.gov.cz/ekonomicke-subjekty/${ico}`,
+    national: { ico: String(ico), dic: subject?.dic ?? void 0, czNace2008: subject?.czNace2008 ?? void 0 }
+  };
+}
+var czAres = {
+  id: CONNECTOR_ID,
+  countries: ["cz"],
+  label: "Czechia \u2014 ARES (Ministry of Finance register of economic subjects)",
+  licence: "Czech company data: ARES, Ministerstvo financ\xED \u010CR, open data",
+  activityScheme: "nace",
+  activityPrefix: "cz-nace",
+  docsUrl: "https://ares.gov.cz/stranky/vyvojar-info",
+  availability() {
+    return { available: true };
+  },
+  async lookup(query) {
+    const name = query.names.find((n) => n?.trim());
+    if (!name) return [];
+    const limit = Math.min(20, query.limit ?? 5);
+    const body = { obchodniJmeno: name, start: 0, pocet: limit };
+    if (query.locality) body.sidlo = { nazevObce: query.locality };
+    const data = await call("POST", "/vyhledat", body);
+    return (data?.ekonomickeSubjekty ?? []).map(toRecord).filter((r) => Boolean(r));
+  },
+  async verifyId(id) {
+    const digits = id.value.replace(/\D/g, "");
+    if (!digits || digits.length > 8) return void 0;
+    if (id.kind !== "vat" && id.kind !== "ico" && id.kind !== "company-number") return void 0;
+    return toRecord(await call("GET", `/${digits.padStart(8, "0")}`));
+  },
+  async canary() {
+    const one = await call("GET", "/00177041");
+    const found = await call("POST", "/vyhledat", { obchodniJmeno: "\u0160koda Auto", start: 0, pocet: 2 });
+    const rec = toRecord(one);
+    return [
+      { name: "ARES still answers a GET by I\u010CO", ok: Boolean(one?.ico) },
+      {
+        name: "ARES still answers a POST name search with ekonomickeSubjekty[]",
+        ok: Array.isArray(found?.ekonomickeSubjekty) && found.ekonomickeSubjekty.length > 0
+      },
+      { name: "ARES still returns sidlo with nazevObce and psc", ok: Boolean(one?.sidlo?.nazevObce && one?.sidlo?.psc) },
+      {
+        name: "ARES czNace2008 still resolves to a NACE section",
+        ok: Boolean(rec?.section),
+        detail: "the array is ragged \u2014 5-digit, 3-digit and placeholder codes in one record"
+      }
+    ];
+  },
+  async probe() {
+    const rec = toRecord(await call("GET", "/00177041"));
+    return { ok: Boolean(rec), detail: rec ? `resolved ${rec.legalName}` : "no answer" };
+  }
+};
+
+// src/registry/eu-vies.ts
+var BASE2 = "https://ec.europa.eu/taxation_customs/vies/rest-api";
+var CONNECTOR_ID2 = "eu-vies";
+var REQUEST_DELAY_MS2 = 1e3;
+var VIES_COUNTRIES = [
+  "at",
+  "be",
+  "bg",
+  "cy",
+  "cz",
+  "de",
+  "dk",
+  "ee",
+  "es",
+  "fi",
+  "fr",
+  "gr",
+  "hr",
+  "hu",
+  "ie",
+  "it",
+  "lt",
+  "lu",
+  "lv",
+  "mt",
+  "nl",
+  "pl",
+  "pt",
+  "ro",
+  "se",
+  "si",
+  "sk"
+];
+function vatPrefix(countryCode) {
+  const cc = countryCode.toUpperCase();
+  return cc === "GR" ? "EL" : cc;
+}
+function disclosed(value) {
+  const s = typeof value === "string" ? value.trim() : "";
+  if (!s || s === "---") return void 0;
+  return s;
+}
+function parseViesAddress(raw, countryCode) {
+  const address = { raw, pays: countryCode.toUpperCase() };
+  if (!raw) return address;
+  const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return address;
+  address.libelleVoie = lines[0];
+  const tail = lines.slice(1).join(" ");
+  const m = /\b([A-Z]{0,2}-?\d{4,6})\s+(.+)$/.exec(tail);
+  if (m) {
+    address.codePostal = m[1];
+    address.commune = m[2];
+  } else if (tail) {
+    address.commune = tail;
+  }
+  return address;
+}
+function viesVerdict(data) {
+  if (data?.isValid === true) return "valid";
+  return data?.userError === "INVALID" ? "invalid" : "inconclusive";
+}
+async function checkVat(countryCode, number) {
+  const cc = vatPrefix(countryCode);
+  const digits = number.replace(/^[A-Z]{2}/i, "").replace(/[\s.-]/g, "");
+  if (!digits) return void 0;
+  const url = `${BASE2}/ms/${cc}/vat/${encodeURIComponent(digits)}`;
+  await awaitHostSlot(url, REQUEST_DELAY_MS2);
+  const res = await httpJson("GET", url, void 0, { timeoutMs: 2e4, retries: 1, userAgent: politeUa() });
+  if (!res.ok) return void 0;
+  const name = disclosed(res.data?.name);
+  const rawAddress = disclosed(res.data?.address);
+  const userError = typeof res.data?.userError === "string" ? res.data.userError : void 0;
+  const verdict = viesVerdict(res.data);
+  return {
+    verdict,
+    identified: Boolean(name),
+    name,
+    address: rawAddress ? parseViesAddress(rawAddress, cc) : void 0,
+    countryCode: cc.toLowerCase(),
+    vatNumber: `${cc}${digits}`,
+    userError
+  };
+}
+var euVies = {
+  id: CONNECTOR_ID2,
+  countries: [...VIES_COUNTRIES],
+  label: "EU \u2014 VAT registration check via VIES (identity disclosed by some member states only)",
+  licence: "VAT registration status: VIES, European Commission (DG TAXUD)",
+  activityScheme: "none",
+  activityPrefix: "vat",
+  docsUrl: "https://ec.europa.eu/taxation_customs/vies/",
+  availability() {
+    return { available: true };
+  },
+  async verifyId(id, ctx) {
+    if (id.kind !== "vat") return void 0;
+    const answer = await checkVat(id.countryCode, id.value);
+    if (!answer) return void 0;
+    if (answer.verdict === "inconclusive") {
+      ctx.onNote?.(
+        `vies: ${answer.vatNumber} could not be checked \u2014 ${answer.userError ?? "no answer"}. That is this member state's system, not a fact about the number.`
+      );
+      return void 0;
+    }
+    if (answer.verdict === "invalid") {
+      ctx.onNote?.(
+        `vies: ${answer.vatNumber} is not registered for intra-community trade. VIES only knows numbers enabled for intra-EU transactions, so this is not evidence that the number is wrong.`
+      );
+      return void 0;
+    }
+    if (!answer.identified) {
+      ctx.onNote?.(
+        `vies: ${answer.vatNumber} is a live VAT registration, but ${answer.countryCode.toUpperCase()} does not disclose the trader's name through VIES`
+      );
+      return void 0;
+    }
+    return {
+      connectorId: CONNECTOR_ID2,
+      id: answer.vatNumber,
+      names: [answer.name],
+      legalName: answer.name,
+      officers: [],
+      address: answer.address ?? {},
+      countryCode: answer.countryCode,
+      status: "active",
+      activityScheme: "none",
+      sourceUrl: "https://ec.europa.eu/taxation_customs/vies/",
+      national: { vatNumber: answer.vatNumber, viesDisclosesIdentity: true }
+    };
+  },
+  async canary() {
+    const checks = [];
+    const it = await checkVat("IT", "00488410010");
+    checks.push({
+      name: "VIES still discloses the trader name for at least one member state (IT)",
+      ok: it?.verdict === "valid" && it.identified,
+      detail: it?.name ? `named "${it.name}"` : "no name returned \u2014 the connector can no longer confirm identity anywhere"
+    });
+    const de = await checkVat("DE", "811193231");
+    checks.push({
+      name: "VIES still REDACTS the trader name for DE",
+      // A member state being down is not drift. Germany answers
+      // MS_UNAVAILABLE often enough that treating it as a failure would put a
+      // red canary in front of the reader most weeks, which is how a canary
+      // stops being read at all.
+      inconclusive: de?.verdict === "inconclusive",
+      ok: de?.verdict === "valid" ? !de.identified : true,
+      detail: de?.verdict === "inconclusive" ? `DE answered ${de.userError ?? "nothing"} \u2014 its own system, not a change in policy` : de?.identified ? `DE now discloses ("${de.name}") \u2014 the German path can confirm identity through VIES` : "still '---', as measured"
+    });
+    const invalid = await checkVat("DE", "000000000");
+    checks.push({
+      name: "VIES still distinguishes INVALID from a member state being unavailable",
+      ok: invalid?.verdict === "invalid",
+      detail: `userError=${invalid?.userError ?? "none"} \u2014 an MS_UNAVAILABLE read as "invalid" reports somebody else's outage as a fact about a company`,
+      inconclusive: invalid?.verdict === "inconclusive"
+    });
+    return checks;
+  },
+  async probe() {
+    const answer = await checkVat("IT", "00488410010");
+    return { ok: answer?.verdict === "valid", detail: answer ? `${answer.verdict}, identity ${answer.identified ? "disclosed" : "redacted"}` : "no answer" };
+  }
+};
+
+// src/registry/fi-prh.ts
+var BASE3 = "https://avoindata.prh.fi/opendata-ytj-api/v3";
+var CONNECTOR_ID3 = "fi-prh";
+var REQUEST_DELAY_MS3 = 400;
+async function get(path) {
+  const url = `${BASE3}${path}`;
+  await awaitHostSlot(url, REQUEST_DELAY_MS3);
+  const res = await httpJson("GET", url, void 0, { timeoutMs: 25e3, retries: 1, userAgent: politeUa() });
+  return res.ok ? res.data : void 0;
+}
+function pickText(list2, language = "3") {
+  if (!Array.isArray(list2) || list2.length === 0) return void 0;
+  return list2.find((d) => d?.languageCode === language)?.description ?? list2[0]?.description ?? void 0;
+}
+function pickCity(list2) {
+  if (!Array.isArray(list2) || list2.length === 0) return void 0;
+  return list2.find((o) => o?.languageCode === "1")?.city ?? list2[0]?.city ?? void 0;
+}
+function addressOf2(list2) {
+  const street = list2?.find((a2) => a2?.type === 1);
+  const postal = list2?.find((a2) => a2?.type === 2);
+  const a = street ?? postal ?? list2?.[0];
+  if (!a) return {};
+  const line = [a?.street, a?.buildingNumber].filter(Boolean).join(" ");
+  const city = pickCity(a?.postOffices);
+  return {
+    raw: [line, a?.postCode, city].filter(Boolean).join(" ") || void 0,
+    libelleVoie: a?.street || void 0,
+    numero: a?.buildingNumber || void 0,
+    codePostal: a?.postCode ?? void 0,
+    commune: city,
+    codeCommune: a?.postOffices?.[0]?.municipalityCode ?? void 0,
+    pays: "Finland"
+  };
+}
+function toRecord2(company) {
+  const id = company?.businessId?.value;
+  if (!id) return void 0;
+  const all = company?.names ?? [];
+  const current2 = all.filter((n) => n?.name && !n.endDate);
+  const expired = all.filter((n) => n?.name && n.endDate).map((n) => n.name);
+  const legalName = current2.find((n) => n.type === "1")?.name ?? current2[0]?.name;
+  const tradingNames = current2.filter((n) => n.type === "2" || n.type === "3").map((n) => n.name);
+  const activityCode = company?.mainBusinessLine?.type ?? void 0;
+  const status = company?.endDate ? "ceased" : company?.tradeRegisterStatus === "1" ? "active" : "unknown";
+  return {
+    connectorId: CONNECTOR_ID3,
+    id: String(id),
+    // Current names first, expired ones last: the matcher takes the best score
+    // over the whole list, so an old shopfront name still matches without ever
+    // being printed as the company's identity.
+    names: [...tradingNames, legalName, ...expired].filter((n) => Boolean(n)),
+    legalName,
+    tradingNames,
+    officers: [],
+    address: addressOf2(company?.addresses),
+    countryCode: "fi",
+    activityCode,
+    section: activityCode ? naceSection(activityCode) : void 0,
+    activityScheme: "nace",
+    legalForm: pickText(company?.companyForms?.[0]?.descriptions) ?? company?.companyForms?.[0]?.type ?? void 0,
+    dateCreated: company?.registrationDate ?? company?.businessId?.registrationDate ?? void 0,
+    dateClosed: company?.endDate ?? void 0,
+    status,
+    sourceUrl: `https://tietopalvelu.ytj.fi/yritys/${id}`,
+    national: { businessId: id, euId: company?.euId?.value ?? void 0 }
+  };
+}
+var fiPrh = {
+  id: CONNECTOR_ID3,
+  countries: ["fi"],
+  label: "Finland \u2014 PRH / YTJ open data",
+  licence: "Finnish company data: PRH / YTJ open data, CC BY 4.0",
+  activityScheme: "nace",
+  activityPrefix: "tol",
+  docsUrl: "https://avoindata.prh.fi/ytj_en.html",
+  availability() {
+    return { available: true };
+  },
+  async lookup(query) {
+    const name = query.names.find((n) => n?.trim());
+    if (!name) return [];
+    const params = new URLSearchParams({ name });
+    if (query.postcode) params.set("postCode", query.postcode);
+    else if (query.locality) params.set("location", query.locality);
+    const data = await get(`/companies?${params.toString()}`);
+    const limit = query.limit ?? 5;
+    return (data?.companies ?? []).slice(0, limit).map(toRecord2).filter((r) => Boolean(r));
+  },
+  async verifyId(id) {
+    let businessId;
+    if (id.kind === "vat") {
+      const digits = id.value.replace(/\D/g, "");
+      if (digits.length === 8) businessId = `${digits.slice(0, 7)}-${digits.slice(7)}`;
+    } else if (/^\d{7}-\d$/.test(id.value.trim())) {
+      businessId = id.value.trim();
+    }
+    if (!businessId) return void 0;
+    const data = await get(`/companies?businessId=${encodeURIComponent(businessId)}`);
+    return toRecord2(data?.companies?.[0]);
+  },
+  async canary() {
+    const data = await get("/companies?businessId=0112038-9");
+    const company = data?.companies?.[0];
+    const rec = toRecord2(company);
+    return [
+      { name: "PRH still answers a businessId lookup with companies[]", ok: Boolean(company?.businessId?.value) },
+      {
+        name: "PRH status is still NOT a liveness flag (a live company still reports status 2)",
+        ok: company?.status === "2" && !company?.endDate,
+        detail: "if status ever became a liveness flag, tradeRegisterStatus is no longer needed"
+      },
+      {
+        name: "PRH still returns addresses[].postOffices[].city with a numeric type",
+        ok: typeof company?.addresses?.[0]?.type === "number" && Boolean(company?.addresses?.[0]?.postOffices?.[0]?.city)
+      },
+      {
+        name: "PRH still returns names[] as a history with type and endDate",
+        ok: Array.isArray(company?.names) && company.names.some((n) => n?.type) && company.names.some((n) => n?.endDate),
+        detail: "reading this array without honouring endDate attaches a name the company dropped decades ago"
+      },
+      { name: "PRH still resolves a current legal name (type 1, no endDate)", ok: Boolean(rec?.legalName) }
+    ];
+  },
+  async probe() {
+    const data = await get("/companies?businessId=0112038-9");
+    const rec = toRecord2(data?.companies?.[0]);
+    return { ok: Boolean(rec), detail: rec ? `resolved ${rec.legalName}` : "no answer" };
+  }
+};
 
 // src/classification/naf-codes.ts
 var NAF_CODES = [
@@ -4268,12 +3939,200 @@ function divisionsOfSection(section2) {
   return [...byDivision.values()];
 }
 
+// src/util.ts
+function haversineM(aLat, aLon, bLat, bLon) {
+  const R = 63710088e-1;
+  const toRad = (d) => d * Math.PI / 180;
+  const dLat = toRad(bLat - aLat);
+  const dLon = toRad(bLon - aLon);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+function foldAccents(s) {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+var LEGAL_FORMS = /\b(?:sarl|sas|sasu|eurl|sa|sci|scp|scm|selarl|snc|gie|eirl|earl|scop|scic|asso(?:ciation)?|societe|ste|ets|etablissements?|entreprise|cie|compagnie|groupe|holding|france|international|gmbh|ltd|llc|inc|bv|nv|spa|srl|plc|ag)\b/g;
+function normalizeName(raw) {
+  return foldAccents(raw).toLowerCase().replace(/[’']/g, " ").replace(/[^a-z0-9]+/g, " ").replace(LEGAL_FORMS, " ").replace(/\s+/g, " ").trim();
+}
+function tokenSet(s) {
+  return new Set(s.split(" ").filter((t) => t.length > 1));
+}
+function jaccard(a, b) {
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const t of a) if (b.has(t)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+function trigrams(s) {
+  const padded = `  ${s} `;
+  const out2 = /* @__PURE__ */ new Set();
+  for (let i = 0; i < padded.length - 2; i++) out2.add(padded.slice(i, i + 3));
+  return out2;
+}
+var GENERIC_TRADE_WORDS = /* @__PURE__ */ new Set([
+  "creche",
+  "ecole",
+  "college",
+  "lycee",
+  "boulangerie",
+  "patisserie",
+  "boucherie",
+  "pharmacie",
+  "restaurant",
+  "brasserie",
+  "cafe",
+  "bar",
+  "tabac",
+  "presse",
+  "garage",
+  "hotel",
+  "salon",
+  "coiffure",
+  "agence",
+  "cabinet",
+  "centre",
+  "maison",
+  "clinique",
+  "institut",
+  "bureau",
+  "magasin",
+  "boutique",
+  "atelier",
+  "banque",
+  "immobilier",
+  "opticien",
+  "pressing",
+  "fleuriste",
+  "librairie",
+  "supermarche",
+  "epicerie",
+  "traiteur",
+  "primeur",
+  "poissonnerie",
+  "fromagerie",
+  "caviste",
+  "auto",
+  "ecole",
+  "taxi",
+  "clinic",
+  "shop",
+  "store",
+  "market",
+  "school",
+  "office"
+]);
+function isNameContained(a, b) {
+  const ta = tokenSet(a);
+  const tb = tokenSet(b);
+  if (ta.size === 0 || tb.size === 0) return false;
+  const [small, large] = ta.size <= tb.size ? [ta, tb] : [tb, ta];
+  for (const t of small) if (!large.has(t)) return false;
+  if (small.size >= 2) return true;
+  const only = [...small][0];
+  return only.length >= 6 && !GENERIC_TRADE_WORDS.has(only);
+}
+function nameVariants(raw) {
+  const variants = [raw];
+  const outside = raw.replace(/\([^)]*\)/g, " ").trim();
+  if (outside && outside !== raw) variants.push(outside);
+  for (const m of raw.matchAll(/\(([^)]+)\)/g)) {
+    for (const part of m[1].split(/[,;]/)) {
+      const v = part.trim();
+      if (v) variants.push(v);
+    }
+  }
+  return [...new Set(variants.filter(Boolean))];
+}
+function nameSimilarity(a, b) {
+  let best = 0;
+  for (const va of nameVariants(a)) {
+    for (const vb of nameVariants(b)) {
+      const na = normalizeName(va);
+      const nb = normalizeName(vb);
+      if (!na || !nb) continue;
+      if (na === nb) return 1;
+      const contained = isNameContained(na, nb) ? 0.88 : 0;
+      const tok = jaccard(tokenSet(na), tokenSet(nb));
+      const tri = jaccard(trigrams(na), trigrams(nb));
+      best = Math.max(best, contained, tok, tri);
+      if (best >= 1) return 1;
+    }
+  }
+  return best;
+}
+function bestNameMatch(probe, candidates) {
+  let best = { name: void 0, score: 0 };
+  for (const c of candidates) {
+    const score = nameSimilarity(probe, c);
+    if (score > best.score) best = { name: c, score };
+  }
+  return best;
+}
+function bboxQuadrants(bbox) {
+  const [s, n, w, e] = bbox;
+  const midLat = (s + n) / 2;
+  const midLon = (w + e) / 2;
+  return [
+    [s, midLat, w, midLon],
+    [s, midLat, midLon, e],
+    [midLat, n, w, midLon],
+    [midLat, n, midLon, e]
+  ];
+}
+function bboxAround(lat, lon, radiusM) {
+  const dLat = radiusM / 111320;
+  const dLon = radiusM / (111320 * Math.max(0.01, Math.cos(lat * Math.PI / 180)));
+  return [lat - dLat, lat + dLat, lon - dLon, lon + dLon];
+}
+function csvField(value) {
+  const s = value === void 0 || value === null ? "" : String(value);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function csvRow(values) {
+  return values.map(csvField).join(",");
+}
+function firstText(...values) {
+  for (const v of values) if (typeof v === "string" && v.trim()) return v.trim();
+  return void 0;
+}
+function uniqueBy(items, key) {
+  const seen = /* @__PURE__ */ new Set();
+  const out2 = [];
+  for (const item of items) {
+    const k = key(item);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out2.push(item);
+  }
+  return out2;
+}
+function clampInt(value, min, max, fallback) {
+  const n = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+}
+function parseDistanceM(raw) {
+  const m = /^\s*([0-9]+(?:[.,][0-9]+)?)\s*(m|km)?\s*$/i.exec(raw);
+  if (!m) return void 0;
+  const value = Number.parseFloat(m[1].replace(",", "."));
+  if (!Number.isFinite(value) || value <= 0) return void 0;
+  return (m[2] ?? "m").toLowerCase() === "km" ? Math.round(value * 1e3) : Math.round(value);
+}
+function parseBbox(raw) {
+  const parts = raw.split(",").map((p) => Number.parseFloat(p.trim()));
+  if (parts.length !== 4 || parts.some((p) => !Number.isFinite(p))) return void 0;
+  const [s, w, n, e] = parts;
+  if (s >= n || w >= e) return void 0;
+  return [s, n, w, e];
+}
+
 // src/registry/fr-sirene.ts
-var BASE = "https://recherche-entreprises.api.gouv.fr";
-var CONNECTOR_ID = "fr-sirene";
+var BASE4 = "https://recherche-entreprises.api.gouv.fr";
+var CONNECTOR_ID4 = "fr-sirene";
 var HARD_CAP = 1e4;
 var PER_PAGE = 25;
-var REQUEST_DELAY_MS = 200;
+var REQUEST_DELAY_MS4 = 200;
 var PAGE_CONCURRENCY = 4;
 var EFFECTIF_BANDS = [
   { code: "NN", floor: -1, label: "non d\xE9termin\xE9" },
@@ -4300,7 +4159,7 @@ function endpointFor(query) {
 }
 function buildUrl(query, page, perPage) {
   const endpoint = endpointFor(query);
-  const url = new URL(`${BASE}/${endpoint}`);
+  const url = new URL(`${BASE4}/${endpoint}`);
   if (endpoint === "near_point" && query.point) {
     url.searchParams.set("lat", String(query.point.lat));
     url.searchParams.set("long", String(query.point.lon));
@@ -4320,7 +4179,7 @@ function buildUrl(query, page, perPage) {
 }
 async function fetchPage(query, page, perPage = PER_PAGE) {
   const url = buildUrl(query, page, perPage);
-  await awaitHostSlot(url, REQUEST_DELAY_MS);
+  await awaitHostSlot(url, REQUEST_DELAY_MS4);
   const res = await httpJson("GET", url, void 0, { timeoutMs: 3e4, retries: 2, userAgent: politeUa() });
   if (!res.ok) {
     const message = firstText(res.data?.erreur, res.data?.detail, res.error) ?? `HTTP ${res.status}`;
@@ -4374,7 +4233,7 @@ function statusOf(raw) {
 function expandRecord(entity) {
   const siren = String(entity?.siren ?? "");
   const base = {
-    connectorId: CONNECTOR_ID,
+    connectorId: CONNECTOR_ID4,
     id: siren,
     countryCode: "fr",
     activityScheme: "nace",
@@ -4560,7 +4419,7 @@ async function fetchSirene(query, opts = {}) {
     coverage: {
       lane: "registry",
       mode: "sweep",
-      connectorId: CONNECTOR_ID,
+      connectorId: CONNECTOR_ID4,
       requested: maxResults,
       returned: records.length,
       truncated,
@@ -4572,13 +4431,13 @@ async function fetchSirene(query, opts = {}) {
 function bandsAtLeast(minHeadcount) {
   return EFFECTIF_BANDS.filter((b) => b.floor >= 0 && b.floor >= minHeadcount).map((b) => b.code);
 }
-async function get(url) {
-  await awaitHostSlot(url, REQUEST_DELAY_MS);
+async function get2(url) {
+  await awaitHostSlot(url, REQUEST_DELAY_MS4);
   const res = await httpJson("GET", url, void 0, { timeoutMs: 3e4, retries: 1, userAgent: politeUa() });
   return { ok: res.ok, data: res.data, status: res.status };
 }
 var frSirene = {
-  id: CONNECTOR_ID,
+  id: CONNECTOR_ID4,
   countries: ["fr"],
   label: "France \u2014 Sirene / RNE via recherche-entreprises.api.gouv.fr",
   licence: "French company data: base Sirene / RNE via recherche-entreprises.api.gouv.fr, Licence Ouverte 2.0",
@@ -4632,7 +4491,7 @@ var frSirene = {
   },
   async canary() {
     const checks = [];
-    const search2 = await get(`${BASE}/search?q=doctolib&per_page=1`);
+    const search2 = await get2(`${BASE4}/search?q=doctolib&per_page=1`);
     const first = search2.data?.results?.[0];
     checks.push({ name: "register still returns results[].siege", ok: Boolean(first?.siege) });
     checks.push({ name: "register still returns matching_etablissements", ok: Array.isArray(first?.matching_etablissements) });
@@ -4640,20 +4499,20 @@ var frSirene = {
       name: "register still keys finances by year",
       ok: Object.keys(first?.finances ?? {}).every((k) => /^\d{4}$/.test(k))
     });
-    const capped = await get(`${BASE}/search?code_commune=94080&per_page=1`);
+    const capped = await get2(`${BASE4}/search?code_commune=94080&per_page=1`);
     checks.push({
       name: "register still CLAMPS total_results at 10 000",
       ok: capped.data?.total_results === HARD_CAP,
       detail: "if this changed, the NAF split ladder can trust the count again"
     });
-    const withFilter = await get(`${BASE}/near_point?lat=48.8566&long=2.3522&radius=0.3&etat_administratif=A&per_page=1`);
-    const without = await get(`${BASE}/near_point?lat=48.8566&long=2.3522&radius=0.3&per_page=1`);
+    const withFilter = await get2(`${BASE4}/near_point?lat=48.8566&long=2.3522&radius=0.3&etat_administratif=A&per_page=1`);
+    const without = await get2(`${BASE4}/near_point?lat=48.8566&long=2.3522&radius=0.3&per_page=1`);
     checks.push({
       name: "/near_point still IGNORES etat_administratif",
       ok: withFilter.data?.total_results === without.data?.total_results,
       detail: "if it now honours it, the client-side filter is redundant"
     });
-    const rejected = await get(`${BASE}/search?activite_principale=__invalid__&per_page=1`);
+    const rejected = await get2(`${BASE4}/search?activite_principale=__invalid__&per_page=1`);
     const listed = [...String(rejected.data?.erreur ?? "").matchAll(/'(\d{2}\.\d{2}[A-Z])'/g)].length;
     checks.push({
       name: "register still lists the whole NAF catalogue in its rejection message",
@@ -4663,413 +4522,11 @@ var frSirene = {
     return checks;
   },
   async probe() {
-    const res = await get(`${BASE}/search?q=test&per_page=1`);
+    const res = await get2(`${BASE4}/search?q=test&per_page=1`);
     return {
       ok: res.ok && typeof res.data?.total_results === "number",
       detail: res.ok ? `HTTP ${res.status}, total_results present` : `HTTP ${res.status}`
     };
-  }
-};
-
-// src/registry/cz-ares.ts
-var BASE2 = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty";
-var CONNECTOR_ID2 = "cz-ares";
-var REQUEST_DELAY_MS2 = 400;
-async function call(method, path, body) {
-  const url = `${BASE2}${path}`;
-  await awaitHostSlot(url, REQUEST_DELAY_MS2);
-  const res = await httpJson(method, url, body, { timeoutMs: 25e3, retries: 1, userAgent: politeUa() });
-  return res.ok ? res.data : void 0;
-}
-function addressOf(raw) {
-  if (!raw) return {};
-  const psc = raw?.psc != null ? String(raw.psc) : void 0;
-  return {
-    raw: raw?.textovaAdresa ?? void 0,
-    libelleVoie: raw?.nazevUlice ?? raw?.nazevCastiObce ?? void 0,
-    numero: raw?.cisloDomovni != null ? String(raw.cisloDomovni) : void 0,
-    codePostal: psc,
-    commune: raw?.nazevObce ?? void 0,
-    // The state's own municipality code, the closest thing Czechia has to an
-    // INSEE code.
-    codeCommune: raw?.kodObce != null ? String(raw.kodObce) : void 0,
-    pays: raw?.nazevStatu ?? "\u010Cesk\xE1 republika"
-  };
-}
-function principalActivity(codes) {
-  if (!Array.isArray(codes)) return {};
-  for (const raw of codes) {
-    const code = typeof raw === "string" ? raw : void 0;
-    if (!code) continue;
-    const section2 = naceSection(code);
-    if (section2) return { code, section: section2 };
-  }
-  return { code: typeof codes[0] === "string" ? codes[0] : void 0 };
-}
-function toRecord(subject) {
-  const ico = subject?.ico;
-  if (!ico) return void 0;
-  const { code, section: section2 } = principalActivity(subject?.czNace2008);
-  const registrations = subject?.seznamRegistraci ?? {};
-  const live = registrations.stavZdrojeVr === "AKTIVNI" || registrations.stavZdrojeRes === "AKTIVNI";
-  const dead3 = registrations.stavZdrojeVr === "ZANIKLY" || registrations.stavZdrojeRes === "ZANIKLY";
-  return {
-    connectorId: CONNECTOR_ID2,
-    id: String(ico),
-    names: [subject?.obchodniJmeno].filter(Boolean),
-    legalName: subject?.obchodniJmeno ?? void 0,
-    officers: [],
-    address: addressOf(subject?.sidlo),
-    countryCode: "cz",
-    activityCode: code,
-    section: section2,
-    activityScheme: "nace",
-    legalForm: subject?.pravniForma ?? void 0,
-    dateCreated: subject?.datumVzniku ?? void 0,
-    dateClosed: subject?.datumZaniku ?? void 0,
-    status: dead3 ? "ceased" : live ? "active" : "unknown",
-    sourceUrl: `https://ares.gov.cz/ekonomicke-subjekty/${ico}`,
-    national: { ico: String(ico), dic: subject?.dic ?? void 0, czNace2008: subject?.czNace2008 ?? void 0 }
-  };
-}
-var czAres = {
-  id: CONNECTOR_ID2,
-  countries: ["cz"],
-  label: "Czechia \u2014 ARES (Ministry of Finance register of economic subjects)",
-  licence: "Czech company data: ARES, Ministerstvo financ\xED \u010CR, open data",
-  activityScheme: "nace",
-  activityPrefix: "cz-nace",
-  docsUrl: "https://ares.gov.cz/stranky/vyvojar-info",
-  availability() {
-    return { available: true };
-  },
-  async lookup(query) {
-    const name = query.names.find((n) => n?.trim());
-    if (!name) return [];
-    const limit = Math.min(20, query.limit ?? 5);
-    const body = { obchodniJmeno: name, start: 0, pocet: limit };
-    if (query.locality) body.sidlo = { nazevObce: query.locality };
-    const data = await call("POST", "/vyhledat", body);
-    return (data?.ekonomickeSubjekty ?? []).map(toRecord).filter((r) => Boolean(r));
-  },
-  async verifyId(id) {
-    const digits = id.value.replace(/\D/g, "");
-    if (!digits || digits.length > 8) return void 0;
-    if (id.kind !== "vat" && id.kind !== "ico" && id.kind !== "company-number") return void 0;
-    return toRecord(await call("GET", `/${digits.padStart(8, "0")}`));
-  },
-  async canary() {
-    const one = await call("GET", "/00177041");
-    const found = await call("POST", "/vyhledat", { obchodniJmeno: "\u0160koda Auto", start: 0, pocet: 2 });
-    const rec = toRecord(one);
-    return [
-      { name: "ARES still answers a GET by I\u010CO", ok: Boolean(one?.ico) },
-      {
-        name: "ARES still answers a POST name search with ekonomickeSubjekty[]",
-        ok: Array.isArray(found?.ekonomickeSubjekty) && found.ekonomickeSubjekty.length > 0
-      },
-      { name: "ARES still returns sidlo with nazevObce and psc", ok: Boolean(one?.sidlo?.nazevObce && one?.sidlo?.psc) },
-      {
-        name: "ARES czNace2008 still resolves to a NACE section",
-        ok: Boolean(rec?.section),
-        detail: "the array is ragged \u2014 5-digit, 3-digit and placeholder codes in one record"
-      }
-    ];
-  },
-  async probe() {
-    const rec = toRecord(await call("GET", "/00177041"));
-    return { ok: Boolean(rec), detail: rec ? `resolved ${rec.legalName}` : "no answer" };
-  }
-};
-
-// src/registry/eu-vies.ts
-var BASE3 = "https://ec.europa.eu/taxation_customs/vies/rest-api";
-var CONNECTOR_ID3 = "eu-vies";
-var REQUEST_DELAY_MS3 = 1e3;
-var VIES_COUNTRIES = [
-  "at",
-  "be",
-  "bg",
-  "cy",
-  "cz",
-  "de",
-  "dk",
-  "ee",
-  "es",
-  "fi",
-  "fr",
-  "gr",
-  "hr",
-  "hu",
-  "ie",
-  "it",
-  "lt",
-  "lu",
-  "lv",
-  "mt",
-  "nl",
-  "pl",
-  "pt",
-  "ro",
-  "se",
-  "si",
-  "sk"
-];
-function vatPrefix(countryCode) {
-  const cc = countryCode.toUpperCase();
-  return cc === "GR" ? "EL" : cc;
-}
-function disclosed(value) {
-  const s = typeof value === "string" ? value.trim() : "";
-  if (!s || s === "---") return void 0;
-  return s;
-}
-function parseViesAddress(raw, countryCode) {
-  const address = { raw, pays: countryCode.toUpperCase() };
-  if (!raw) return address;
-  const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length === 0) return address;
-  address.libelleVoie = lines[0];
-  const tail = lines.slice(1).join(" ");
-  const m = /\b([A-Z]{0,2}-?\d{4,6})\s+(.+)$/.exec(tail);
-  if (m) {
-    address.codePostal = m[1];
-    address.commune = m[2];
-  } else if (tail) {
-    address.commune = tail;
-  }
-  return address;
-}
-function viesVerdict(data) {
-  if (data?.isValid === true) return "valid";
-  return data?.userError === "INVALID" ? "invalid" : "inconclusive";
-}
-async function checkVat(countryCode, number) {
-  const cc = vatPrefix(countryCode);
-  const digits = number.replace(/^[A-Z]{2}/i, "").replace(/[\s.-]/g, "");
-  if (!digits) return void 0;
-  const url = `${BASE3}/ms/${cc}/vat/${encodeURIComponent(digits)}`;
-  await awaitHostSlot(url, REQUEST_DELAY_MS3);
-  const res = await httpJson("GET", url, void 0, { timeoutMs: 2e4, retries: 1, userAgent: politeUa() });
-  if (!res.ok) return void 0;
-  const name = disclosed(res.data?.name);
-  const rawAddress = disclosed(res.data?.address);
-  const userError = typeof res.data?.userError === "string" ? res.data.userError : void 0;
-  const verdict = viesVerdict(res.data);
-  return {
-    verdict,
-    identified: Boolean(name),
-    name,
-    address: rawAddress ? parseViesAddress(rawAddress, cc) : void 0,
-    countryCode: cc.toLowerCase(),
-    vatNumber: `${cc}${digits}`,
-    userError
-  };
-}
-var euVies = {
-  id: CONNECTOR_ID3,
-  countries: [...VIES_COUNTRIES],
-  label: "EU \u2014 VAT registration check via VIES (identity disclosed by some member states only)",
-  licence: "VAT registration status: VIES, European Commission (DG TAXUD)",
-  activityScheme: "none",
-  activityPrefix: "vat",
-  docsUrl: "https://ec.europa.eu/taxation_customs/vies/",
-  availability() {
-    return { available: true };
-  },
-  async verifyId(id, ctx) {
-    if (id.kind !== "vat") return void 0;
-    const answer = await checkVat(id.countryCode, id.value);
-    if (!answer) return void 0;
-    if (answer.verdict === "inconclusive") {
-      ctx.onNote?.(
-        `vies: ${answer.vatNumber} could not be checked \u2014 ${answer.userError ?? "no answer"}. That is this member state's system, not a fact about the number.`
-      );
-      return void 0;
-    }
-    if (answer.verdict === "invalid") {
-      ctx.onNote?.(
-        `vies: ${answer.vatNumber} is not registered for intra-community trade. VIES only knows numbers enabled for intra-EU transactions, so this is not evidence that the number is wrong.`
-      );
-      return void 0;
-    }
-    if (!answer.identified) {
-      ctx.onNote?.(
-        `vies: ${answer.vatNumber} is a live VAT registration, but ${answer.countryCode.toUpperCase()} does not disclose the trader's name through VIES`
-      );
-      return void 0;
-    }
-    return {
-      connectorId: CONNECTOR_ID3,
-      id: answer.vatNumber,
-      names: [answer.name],
-      legalName: answer.name,
-      officers: [],
-      address: answer.address ?? {},
-      countryCode: answer.countryCode,
-      status: "active",
-      activityScheme: "none",
-      sourceUrl: "https://ec.europa.eu/taxation_customs/vies/",
-      national: { vatNumber: answer.vatNumber, viesDisclosesIdentity: true }
-    };
-  },
-  async canary() {
-    const checks = [];
-    const it = await checkVat("IT", "00488410010");
-    checks.push({
-      name: "VIES still discloses the trader name for at least one member state (IT)",
-      ok: it?.verdict === "valid" && it.identified,
-      detail: it?.name ? `named "${it.name}"` : "no name returned \u2014 the connector can no longer confirm identity anywhere"
-    });
-    const de = await checkVat("DE", "811193231");
-    checks.push({
-      name: "VIES still REDACTS the trader name for DE",
-      ok: de?.verdict === "valid" && !de.identified,
-      detail: de?.identified ? `DE now discloses ("${de.name}") \u2014 the German path can confirm identity through VIES` : "still '---', as measured"
-    });
-    const invalid = await checkVat("DE", "000000000");
-    checks.push({
-      name: "VIES still distinguishes INVALID from a member state being unavailable",
-      ok: invalid?.verdict === "invalid",
-      detail: `userError=${invalid?.userError ?? "none"} \u2014 an MS_UNAVAILABLE read as "invalid" reports somebody else's outage as a fact about a company`,
-      inconclusive: invalid?.verdict === "inconclusive"
-    });
-    return checks;
-  },
-  async probe() {
-    const answer = await checkVat("IT", "00488410010");
-    return { ok: answer?.verdict === "valid", detail: answer ? `${answer.verdict}, identity ${answer.identified ? "disclosed" : "redacted"}` : "no answer" };
-  }
-};
-
-// src/registry/fi-prh.ts
-var BASE4 = "https://avoindata.prh.fi/opendata-ytj-api/v3";
-var CONNECTOR_ID4 = "fi-prh";
-var REQUEST_DELAY_MS4 = 400;
-async function get2(path) {
-  const url = `${BASE4}${path}`;
-  await awaitHostSlot(url, REQUEST_DELAY_MS4);
-  const res = await httpJson("GET", url, void 0, { timeoutMs: 25e3, retries: 1, userAgent: politeUa() });
-  return res.ok ? res.data : void 0;
-}
-function pickText(list2, language = "3") {
-  if (!Array.isArray(list2) || list2.length === 0) return void 0;
-  return list2.find((d) => d?.languageCode === language)?.description ?? list2[0]?.description ?? void 0;
-}
-function pickCity(list2) {
-  if (!Array.isArray(list2) || list2.length === 0) return void 0;
-  return list2.find((o) => o?.languageCode === "1")?.city ?? list2[0]?.city ?? void 0;
-}
-function addressOf2(list2) {
-  const street = list2?.find((a2) => a2?.type === 1);
-  const postal = list2?.find((a2) => a2?.type === 2);
-  const a = street ?? postal ?? list2?.[0];
-  if (!a) return {};
-  const line = [a?.street, a?.buildingNumber].filter(Boolean).join(" ");
-  const city = pickCity(a?.postOffices);
-  return {
-    raw: [line, a?.postCode, city].filter(Boolean).join(" ") || void 0,
-    libelleVoie: a?.street || void 0,
-    numero: a?.buildingNumber || void 0,
-    codePostal: a?.postCode ?? void 0,
-    commune: city,
-    codeCommune: a?.postOffices?.[0]?.municipalityCode ?? void 0,
-    pays: "Finland"
-  };
-}
-function toRecord2(company) {
-  const id = company?.businessId?.value;
-  if (!id) return void 0;
-  const all = company?.names ?? [];
-  const current2 = all.filter((n) => n?.name && !n.endDate);
-  const expired = all.filter((n) => n?.name && n.endDate).map((n) => n.name);
-  const legalName = current2.find((n) => n.type === "1")?.name ?? current2[0]?.name;
-  const tradingNames = current2.filter((n) => n.type === "2" || n.type === "3").map((n) => n.name);
-  const activityCode = company?.mainBusinessLine?.type ?? void 0;
-  const status = company?.endDate ? "ceased" : company?.tradeRegisterStatus === "1" ? "active" : "unknown";
-  return {
-    connectorId: CONNECTOR_ID4,
-    id: String(id),
-    // Current names first, expired ones last: the matcher takes the best score
-    // over the whole list, so an old shopfront name still matches without ever
-    // being printed as the company's identity.
-    names: [...tradingNames, legalName, ...expired].filter((n) => Boolean(n)),
-    legalName,
-    tradingNames,
-    officers: [],
-    address: addressOf2(company?.addresses),
-    countryCode: "fi",
-    activityCode,
-    section: activityCode ? naceSection(activityCode) : void 0,
-    activityScheme: "nace",
-    legalForm: pickText(company?.companyForms?.[0]?.descriptions) ?? company?.companyForms?.[0]?.type ?? void 0,
-    dateCreated: company?.registrationDate ?? company?.businessId?.registrationDate ?? void 0,
-    dateClosed: company?.endDate ?? void 0,
-    status,
-    sourceUrl: `https://tietopalvelu.ytj.fi/yritys/${id}`,
-    national: { businessId: id, euId: company?.euId?.value ?? void 0 }
-  };
-}
-var fiPrh = {
-  id: CONNECTOR_ID4,
-  countries: ["fi"],
-  label: "Finland \u2014 PRH / YTJ open data",
-  licence: "Finnish company data: PRH / YTJ open data, CC BY 4.0",
-  activityScheme: "nace",
-  activityPrefix: "tol",
-  docsUrl: "https://avoindata.prh.fi/ytj_en.html",
-  availability() {
-    return { available: true };
-  },
-  async lookup(query) {
-    const name = query.names.find((n) => n?.trim());
-    if (!name) return [];
-    const params = new URLSearchParams({ name });
-    if (query.postcode) params.set("postCode", query.postcode);
-    else if (query.locality) params.set("location", query.locality);
-    const data = await get2(`/companies?${params.toString()}`);
-    const limit = query.limit ?? 5;
-    return (data?.companies ?? []).slice(0, limit).map(toRecord2).filter((r) => Boolean(r));
-  },
-  async verifyId(id) {
-    let businessId;
-    if (id.kind === "vat") {
-      const digits = id.value.replace(/\D/g, "");
-      if (digits.length === 8) businessId = `${digits.slice(0, 7)}-${digits.slice(7)}`;
-    } else if (/^\d{7}-\d$/.test(id.value.trim())) {
-      businessId = id.value.trim();
-    }
-    if (!businessId) return void 0;
-    const data = await get2(`/companies?businessId=${encodeURIComponent(businessId)}`);
-    return toRecord2(data?.companies?.[0]);
-  },
-  async canary() {
-    const data = await get2("/companies?businessId=0112038-9");
-    const company = data?.companies?.[0];
-    const rec = toRecord2(company);
-    return [
-      { name: "PRH still answers a businessId lookup with companies[]", ok: Boolean(company?.businessId?.value) },
-      {
-        name: "PRH status is still NOT a liveness flag (a live company still reports status 2)",
-        ok: company?.status === "2" && !company?.endDate,
-        detail: "if status ever became a liveness flag, tradeRegisterStatus is no longer needed"
-      },
-      {
-        name: "PRH still returns addresses[].postOffices[].city with a numeric type",
-        ok: typeof company?.addresses?.[0]?.type === "number" && Boolean(company?.addresses?.[0]?.postOffices?.[0]?.city)
-      },
-      {
-        name: "PRH still returns names[] as a history with type and endDate",
-        ok: Array.isArray(company?.names) && company.names.some((n) => n?.type) && company.names.some((n) => n?.endDate),
-        detail: "reading this array without honouring endDate attaches a name the company dropped decades ago"
-      },
-      { name: "PRH still resolves a current legal name (type 1, no endDate)", ok: Boolean(rec?.legalName) }
-    ];
-  },
-  async probe() {
-    const data = await get2("/companies?businessId=0112038-9");
-    const rec = toRecord2(data?.companies?.[0]);
-    return { ok: Boolean(rec), detail: rec ? `resolved ${rec.legalName}` : "no answer" };
   }
 };
 
@@ -5713,6 +5170,11 @@ var usEdgar = {
   }
 };
 
+// src/registry/types.ts
+function recordKey(rec) {
+  return `${rec.connectorId}:${rec.establishmentId ?? rec.id}`;
+}
+
 // src/registry/index.ts
 var CONNECTORS = [
   // National registers, authoritative for their own country.
@@ -5781,6 +5243,563 @@ function employeeFloor(record) {
   const code = record.parent?.sizeBand ?? record.sizeBand;
   const floor = bands.find((b) => b.code === code)?.floor;
   return typeof floor === "number" && floor >= 0 ? floor : void 0;
+}
+
+// src/overpass.ts
+var OVERPASS_MIRRORS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+];
+var OSM_TAG_GROUPS = {
+  shop: '["shop"]',
+  office: '["office"]',
+  craft: '["craft"]',
+  healthcare: '["healthcare"]',
+  club: '["club"]',
+  amenity: '["amenity"~"^(restaurant|cafe|bar|pub|fast_food|food_court|ice_cream|biergarten|bank|bureau_de_change|atm|pharmacy|clinic|doctors|dentist|veterinary|driving_school|language_school|prep_school|music_school|training|childcare|kindergarten|school|college|university|hospital|nursing_home|social_facility|funeral_directors|fuel|car_wash|car_rental|car_sharing|charging_station|cinema|theatre|nightclub|casino|marketplace|post_office|coworking_space|studio|internet_cafe|animal_boarding|animal_shelter|vehicle_inspection)$"]',
+  tourism: '["tourism"~"^(hotel|motel|hostel|guest_house|apartment|chalet|camp_site|caravan_site|museum|gallery)$"]',
+  leisure: '["leisure"~"^(fitness_centre|sports_centre|sports_hall|dance|escape_game|bowling_alley|amusement_arcade|adult_gaming_centre|horse_riding|golf_course|marina|hackerspace|trampoline_park)$"]'
+};
+function areaIdFor(target) {
+  if (target.osmType !== "relation" || typeof target.osmId !== "number") return void 0;
+  return 36e8 + target.osmId;
+}
+function scopeClause(area, bbox) {
+  if (area !== void 0) return { header: `area(${area})->.searchArea;
+`, suffix: "(area.searchArea)" };
+  const [s, n, w, e] = bbox;
+  return { header: "", suffix: `(${s},${w},${n},${e})` };
+}
+function buildQuery(area, bbox, opts = {}) {
+  const groups = opts.groups?.length ? opts.groups : Object.keys(OSM_TAG_GROUPS);
+  const filters = [...groups.map((g) => OSM_TAG_GROUPS[g]).filter((f) => Boolean(f)), ...opts.extraFilters ?? []];
+  const { header: header2, suffix } = scopeClause(area, bbox);
+  const body = filters.map((f) => `  nwr${f}${suffix};`).join("\n");
+  return `[out:json][timeout:${opts.timeoutS ?? 90}];
+${header2}(
+${body}
+);
+out center tags;`;
+}
+function overpassError(body) {
+  if (body.trimStart().startsWith("{")) return void 0;
+  const m = /<strong[^>]*>Error<\/strong>:\s*([^<]+)/i.exec(body);
+  return (m?.[1] ?? body.slice(0, 160)).replace(/\s+/g, " ").trim();
+}
+function isInstanceBusy(message) {
+  return /dispatcher|open64|too busy|rate.?limit|HTTP 50[234]|HTTP 429|HTTP 0\b|not JSON|fetch failed|aborted|socket|ETIMEDOUT|ECONNRESET/i.test(message);
+}
+function isQueryTooBig(message) {
+  return /query timed out|out of memory|too many results|memory limit/i.test(message);
+}
+async function runOnce(query, opts) {
+  const mirrors = opts.mirrors ?? OVERPASS_MIRRORS;
+  const failures = [];
+  for (const mirror of mirrors) {
+    await awaitHostSlot(mirror, 1e3);
+    let body;
+    try {
+      const res = await httpGet(`${mirror}?data=${encodeURIComponent(query)}`, {
+        timeoutMs: (opts.timeoutS ?? 90) * 1e3 + 15e3,
+        // An identifying User-Agent is not optional here: the reference instance
+        // answers 406 to a browser string. See src/net.ts.
+        userAgent: politeUa(),
+        // Well above the engine's HTML default: a dense arrondissement answers
+        // with several megabytes of JSON, and a truncated body would parse as a
+        // syntax error and be retried on every mirror in turn for nothing.
+        maxBytes: 64 * 1024 * 1024,
+        // Overpass is slow by nature and its failures are capacity failures;
+        // retrying the same heavy query at the same instance just doubles the
+        // load that caused it. Rotation and splitting are the recovery here.
+        retries: 0
+      });
+      body = res.body ?? "";
+      if (!res.ok && !body) {
+        failures.push(`${mirror}: HTTP ${res.status}`);
+        continue;
+      }
+    } catch (e) {
+      failures.push(`${mirror}: ${e.message}`);
+      continue;
+    }
+    const err = overpassError(body);
+    if (err) {
+      failures.push(`${mirror}: ${err}`);
+      if (isQueryTooBig(err)) return { error: err, mirror, tooBig: true };
+      continue;
+    }
+    try {
+      return { json: JSON.parse(body), mirror };
+    } catch {
+      failures.push(`${mirror}: response was not JSON`);
+    }
+  }
+  const joined = failures.join(" | ");
+  return { error: joined, tooBig: failures.every((f) => isQueryTooBig(f) || isInstanceBusy(f)) };
+}
+function toPoi(el) {
+  const tags = el?.tags ?? {};
+  const lat = el?.lat ?? el?.center?.lat;
+  const lon = el?.lon ?? el?.center?.lon;
+  if (typeof lat !== "number" || typeof lon !== "number") return void 0;
+  const osmType = el?.type === "way" || el?.type === "relation" ? el.type : "node";
+  return {
+    id: `${osmType[0]}${el.id}`,
+    osmType,
+    osmId: el.id,
+    name: tags.name ?? tags["name:fr"] ?? tags.brand ?? tags.operator,
+    lat,
+    lon,
+    tags
+  };
+}
+async function fetchOsmPois(target, opts = {}) {
+  const maxDepth = opts.maxSplitDepth ?? 3;
+  const notes = [];
+  const mirrorsUsed = /* @__PURE__ */ new Set();
+  const byId = /* @__PURE__ */ new Map();
+  let partitions = 0;
+  let incomplete = false;
+  const area = target.radiusM ? void 0 : areaIdFor(target);
+  const rootBbox = target.radiusM ? bboxAround(target.lat, target.lon, target.radiusM) : target.bbox;
+  async function walk(bbox, useArea, depth) {
+    const query = buildQuery(useArea, bbox, opts);
+    const { json, error, mirror, tooBig } = await runOnce(query, opts);
+    if (mirror) mirrorsUsed.add(mirror);
+    if (error) {
+      if (useArea !== void 0) {
+        notes.push(`overpass: the administrative-area query failed (${error}); fell back to the bounding box, which extends past the commune boundary`);
+        opts.onNote?.("overpass: area query failed, falling back to bbox (edges will overshoot the boundary)");
+        return walk(bbox, void 0, depth);
+      }
+      if (tooBig && depth < maxDepth) {
+        notes.push(`overpass: splitting a too-large area at depth ${depth} (${error})`);
+        opts.onNote?.(`overpass: area too large, splitting into 4 (depth ${depth + 1})`);
+        for (const q of bboxQuadrants(bbox)) await walk(q, void 0, depth + 1);
+        return;
+      }
+      incomplete = true;
+      notes.push(`overpass: gave up on a tile after depth ${depth} \u2014 ${error}`);
+      opts.onNote?.("overpass: a tile could not be fetched; the OSM lane is INCOMPLETE");
+      return;
+    }
+    partitions++;
+    for (const el of json?.elements ?? []) {
+      const poi = toPoi(el);
+      if (poi && !byId.has(poi.id)) byId.set(poi.id, poi);
+    }
+  }
+  await walk(rootBbox, area, 0);
+  return {
+    pois: [...byId.values()],
+    mirrorsUsed: [...mirrorsUsed],
+    partitions: Math.max(1, partitions),
+    notes,
+    incomplete
+  };
+}
+function poiCategory(poi) {
+  for (const key of ["shop", "office", "craft", "healthcare", "amenity", "tourism", "leisure", "club"]) {
+    const v = poi.tags[key];
+    if (v && v !== "yes") return `${key}=${v}`;
+    if (v === "yes") return key;
+  }
+  return void 0;
+}
+function poiWebsite(poi) {
+  const raw = poi.tags.website ?? poi.tags["contact:website"] ?? poi.tags.url;
+  if (!raw) return void 0;
+  const first = raw.split(/[;\s]+/)[0];
+  if (!first) return void 0;
+  return /^https?:\/\//i.test(first) ? first : `https://${first}`;
+}
+
+// src/doctor.ts
+async function timed(fn) {
+  const t0 = Date.now();
+  try {
+    const r = await fn();
+    return { ...r, ms: Date.now() - t0 };
+  } catch (e) {
+    return { ok: false, detail: e.message, ms: Date.now() - t0 };
+  }
+}
+var OVERPASS_PING = "[out:json][timeout:25];node[amenity=cafe](48.8550,2.3300,48.8680,2.3550);out count;";
+var PLANET_FLOOR = 50;
+var OVERPASS_PROBE_TIMEOUT_MS = 45e3;
+async function probeOverpass(url) {
+  const r = await timed(async () => {
+    const res = await httpGet(`${url}?data=${encodeURIComponent(OVERPASS_PING)}`, { timeoutMs: OVERPASS_PROBE_TIMEOUT_MS, userAgent: politeUa(), retries: 0 });
+    const body = res.body ?? "";
+    if (!body.trimStart().startsWith("{")) {
+      const m = /<strong[^>]*>Error<\/strong>:\s*([^<]+)/i.exec(body);
+      return { ok: false, detail: (m?.[1] ?? `HTTP ${res.status}`).replace(/\s+/g, " ").trim().slice(0, 90) };
+    }
+    const count = Number.parseInt(JSON.parse(body)?.elements?.[0]?.tags?.nodes ?? "0", 10);
+    if (!Number.isFinite(count) || count < PLANET_FLOOR) {
+      return { ok: false, detail: `regional extract, not planet-wide (${count} caf\xE9s in central Paris) \u2014 excluded` };
+    }
+    return { ok: true, detail: `planet data (${count} caf\xE9s in central Paris)` };
+  });
+  return { name: "overpass", target: new URL(url).host, required: false, ...r };
+}
+async function probeAll(countryCode) {
+  const probes = [];
+  probes.push({
+    name: "node",
+    target: process.version,
+    ok: Number.parseInt(process.versions.node.split(".")[0], 10) >= 18,
+    ms: 0,
+    detail: Number.parseInt(process.versions.node.split(".")[0], 10) >= 18 ? "supported" : "ultraprospect needs Node 18 or newer",
+    required: true
+  });
+  const nominatim = await timed(async () => {
+    const res = await httpJson("GET", "https://nominatim.openstreetmap.org/search?q=paris&format=jsonv2&limit=1", void 0, {
+      timeoutMs: 2e4,
+      userAgent: politeUa()
+    });
+    return { ok: res.ok && Array.isArray(res.data) && res.data.length > 0, detail: res.ok ? "geocodes" : `HTTP ${res.status}` };
+  });
+  probes.push({ name: "nominatim", target: "nominatim.openstreetmap.org", required: true, ...nominatim });
+  const ban = await timed(async () => {
+    const res = await httpJson("GET", "https://api-adresse.data.gouv.fr/search/?q=paris&limit=1", void 0, { timeoutMs: 15e3, userAgent: politeUa() });
+    return { ok: res.ok && Array.isArray(res.data?.features), detail: res.ok ? "geocodes French addresses" : `HTTP ${res.status}` };
+  });
+  probes.push({ name: "ban", target: "api-adresse.data.gouv.fr", required: false, ...ban });
+  const applicable = countryCode ? CONNECTORS.filter((c) => c.countries.includes("*") || c.countries.includes(countryCode.toLowerCase())) : CONNECTORS;
+  for (const connector of applicable) {
+    const availability = connector.availability({});
+    if (!availability.available) {
+      probes.push({
+        name: connector.id,
+        target: new URL(connector.docsUrl).host,
+        required: false,
+        ok: true,
+        skipped: true,
+        detail: `${availability.reason}. ${availability.how ?? ""}`.trim(),
+        ms: 0
+      });
+      continue;
+    }
+    const probe = await timed(async () => {
+      const result = await connector.probe({});
+      return { ok: result.ok, detail: result.detail };
+    });
+    probes.push({ name: connector.id, target: new URL(connector.docsUrl).host, required: false, ...probe });
+  }
+  probes.push(...await Promise.all(OVERPASS_MIRRORS.map(probeOverpass)));
+  return probes;
+}
+async function runDoctor(io, countryCode) {
+  const probes = await probeAll(countryCode);
+  const overpass = probes.filter((p) => p.name === "overpass");
+  const liveMirrors = overpass.filter((p) => p.ok).length;
+  const healthy = probes.filter((p) => p.required).every((p) => p.ok) && liveMirrors > 0;
+  if (io.json) {
+    io.out(JSON.stringify({ version: VERSION, cacheDir: cacheDir(), healthy, liveOverpassMirrors: liveMirrors, probes }, null, 2));
+    return healthy ? EXIT_OK : EXIT_FAILURE;
+  }
+  io.out(`ultraprospect ${VERSION}`);
+  io.out(`cache: ${cacheDir()}`);
+  io.out("");
+  for (const p of probes) {
+    const mark = p.skipped ? "--  " : p.ok ? "ok  " : p.required ? "FAIL" : "down";
+    const ms = p.ms ? `${String(p.ms).padStart(5)} ms` : "        ";
+    io.out(`  ${mark}  ${p.name.padEnd(20)} ${ms}  ${p.target.padEnd(38)} ${p.detail}`);
+  }
+  io.out("");
+  io.out(`  ${liveMirrors}/${overpass.length} Overpass mirrors answering`);
+  if (countryCode) io.out(`  register connectors shown are the ones serving ${countryCode}; omit --country to probe them all`);
+  if (!healthy) {
+    io.say("");
+    io.say("ultraprospect: an upstream this skill cannot work without is unreachable.");
+    io.say("next: re-run `ultraprospect doctor` in a few minutes, or check your network");
+    return EXIT_FAILURE;
+  }
+  if (liveMirrors < overpass.length) {
+    io.say("");
+    io.say(`note: ${overpass.length - liveMirrors} Overpass mirror(s) are down; runs will rotate onto the ones that answer.`);
+  }
+  return EXIT_OK;
+}
+
+// src/geocode.ts
+var NOMINATIM = "https://nominatim.openstreetmap.org/search";
+var BAN = "https://api-adresse.data.gouv.fr/search/";
+var NOMINATIM_DELAY_MS = 1100;
+var DISTINCT_PLACE_M = 1e4;
+var AMBIGUITY_RATIO = 0.85;
+async function resolveWhere(query, opts = {}) {
+  const q = query.trim();
+  if (!q) return { ok: false, candidates: [], reason: "empty query" };
+  const hits = await nominatimSearch(q, opts);
+  if (hits.length === 0) {
+    return { ok: false, candidates: [], reason: `no geocoder result for "${q}"` };
+  }
+  const picked = opts.pick ? hits[opts.pick - 1] : hits[0];
+  if (!picked) {
+    return { ok: false, candidates: hits.map(toCandidate), reason: `--pick ${opts.pick} is out of range (${hits.length} candidates)` };
+  }
+  if (!opts.pick) {
+    const rival = hits.slice(1).find((h) => isRival(hits[0], h));
+    if (rival) {
+      return {
+        ok: false,
+        candidates: hits.map(toCandidate),
+        reason: `"${q}" is ambiguous \u2014 several distinct places match with comparable confidence`
+      };
+    }
+  }
+  const target = await toTarget(q, picked, opts);
+  return { ok: true, target };
+}
+function isRival(top, other) {
+  const ti = top.importance ?? 0;
+  const oi = other.importance ?? 0;
+  if (ti > 0 && oi / ti < AMBIGUITY_RATIO) return false;
+  const [tLat, tLon] = [Number(top.lat), Number(top.lon)];
+  const [oLat, oLon] = [Number(other.lat), Number(other.lon)];
+  if (![tLat, tLon, oLat, oLon].every(Number.isFinite)) return false;
+  return haversineM(tLat, tLon, oLat, oLon) > DISTINCT_PLACE_M;
+}
+function toCandidate(h) {
+  return {
+    label: h.display_name ?? "(unnamed)",
+    lat: Number(h.lat),
+    lon: Number(h.lon),
+    kind: firstText(h.addresstype, h.type) ?? "place",
+    source: "nominatim"
+  };
+}
+async function nominatimSearch(q, opts) {
+  const url = new URL(NOMINATIM);
+  url.searchParams.set("q", q);
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("limit", "5");
+  url.searchParams.set("addressdetails", "1");
+  if (opts.country) url.searchParams.set("countrycodes", opts.country.toLowerCase());
+  if (opts.lang) url.searchParams.set("accept-language", opts.lang);
+  await awaitHostSlot(url.href, NOMINATIM_DELAY_MS);
+  const res = await httpJson("GET", url.href, void 0, { timeoutMs: 2e4, acceptLanguage: opts.lang, userAgent: politeUa() });
+  if (!res.ok || !Array.isArray(res.data)) return [];
+  return res.data;
+}
+async function toTarget(query, hit, opts) {
+  const lat = Number(hit.lat);
+  const lon = Number(hit.lon);
+  const bb = hit.boundingbox?.map(Number) ?? [];
+  const bbox = bb.length === 4 && bb.every(Number.isFinite) ? [bb[0], bb[1], bb[2], bb[3]] : [lat - 0.01, lat + 0.01, lon - 0.015, lon + 0.015];
+  const countryCode = hit.address?.country_code?.toLowerCase();
+  const target = {
+    query,
+    label: hit.display_name ?? query,
+    lat,
+    lon,
+    bbox,
+    countryCode,
+    osmType: hit.osm_type === "relation" || hit.osm_type === "way" || hit.osm_type === "node" ? hit.osm_type : void 0,
+    osmId: typeof hit.osm_id === "number" ? hit.osm_id : void 0,
+    postcode: hit.address?.postcode,
+    source: "nominatim",
+    radiusM: opts.radiusM
+  };
+  if (countryCode === "fr") {
+    const insee = await banCityCode(query);
+    if (insee) {
+      target.codeCommune = insee.citycode;
+      target.postcode ??= insee.postcode;
+    }
+  }
+  return target;
+}
+async function banCityCode(query) {
+  const url = new URL(BAN);
+  url.searchParams.set("q", query);
+  url.searchParams.set("limit", "1");
+  await awaitHostSlot(url.href);
+  const res = await httpJson("GET", url.href, void 0, { timeoutMs: 15e3, userAgent: politeUa() });
+  const props = res.ok ? res.data?.features?.[0]?.properties : void 0;
+  if (!props) return void 0;
+  return { citycode: props.citycode, postcode: props.postcode };
+}
+
+// src/match.ts
+var MAX_DISTANCE_M = 150;
+var MERGE_HIGH = 0.72;
+var MERGE_LOW = 0.4;
+var MIN_IDENTITY = 0.25;
+var CELL = 2e-3;
+function cellKey(lat, lon) {
+  return `${Math.floor(lat / CELL)}:${Math.floor(lon / CELL)}`;
+}
+function buildIndex(records) {
+  const index = /* @__PURE__ */ new Map();
+  for (const r of records) {
+    if (typeof r.lat !== "number" || typeof r.lon !== "number") continue;
+    const key = cellKey(r.lat, r.lon);
+    const bucket = index.get(key);
+    if (bucket) bucket.push(r);
+    else index.set(key, [r]);
+  }
+  return index;
+}
+function nearby(index, lat, lon) {
+  const out2 = [];
+  const baseLat = Math.floor(lat / CELL);
+  const baseLon = Math.floor(lon / CELL);
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const bucket = index.get(`${baseLat + dy}:${baseLon + dx}`);
+      if (bucket) out2.push(...bucket);
+    }
+  }
+  return out2;
+}
+function registerNames(r) {
+  return r.names.filter((n) => Boolean(n?.trim()));
+}
+function poiAddress(poi) {
+  return {
+    numero: poi.tags["addr:housenumber"],
+    libelleVoie: poi.tags["addr:street"],
+    codePostal: poi.tags["addr:postcode"],
+    commune: poi.tags["addr:city"]
+  };
+}
+function sameStreet(a, b, bType) {
+  if (!a || !b) return false;
+  const norm = (s) => foldAccents(s).toLowerCase().replace(/^(rue|avenue|av|boulevard|bd|quai|place|pl|impasse|allee|chemin|route|rte|cours|square|passage)\s+/i, "").replace(/\bde\s+la\b|\bdes\b|\bdu\b|\bde\b|\ble\b|\bla\b|\bl\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
+  const na = norm(a);
+  const nb = norm(bType ? `${bType} ${b}` : b);
+  return na.length > 2 && na === nb;
+}
+function scorePair(poi, rec) {
+  const distanceM = typeof rec.lat === "number" && typeof rec.lon === "number" ? haversineM(poi.lat, poi.lon, rec.lat, rec.lon) : Number.POSITIVE_INFINITY;
+  const zero = { score: 0, parts: { distance: 0, name: 0, enseigne: 0, address: 0 }, distanceM };
+  if (!Number.isFinite(distanceM) || distanceM > MAX_DISTANCE_M) return zero;
+  const poiName = poi.name ?? "";
+  const best = poiName ? bestNameMatch(poiName, registerNames(rec)) : { name: void 0, score: 0 };
+  const nameScore = best.score;
+  const brand2 = poi.tags.brand ?? poi.tags.operator ?? "";
+  const trading = rec.tradingNames ?? [];
+  const enseigneScore = brand2 && trading.length ? Math.max(0, ...trading.map((e) => nameSimilarity(brand2, e))) : 0;
+  const pa = poiAddress(poi);
+  const numberAgrees = Boolean(
+    pa.numero && rec.address.numero && pa.numero.replace(/\s/g, "").toLowerCase() === rec.address.numero.replace(/\s/g, "").toLowerCase()
+  );
+  const streetAgrees = sameStreet(pa.libelleVoie, rec.address.libelleVoie, rec.address.typeVoie);
+  const addressScore = numberAgrees && streetAgrees ? 1 : streetAgrees ? 0.6 : 0;
+  const nameSupported = nameScore >= 0.4 || enseigneScore >= 0.4;
+  const addressIdentity = addressScore === 1 ? nameSupported ? 0.9 : 0.6 : addressScore * 0.5;
+  const identity = Math.max(nameScore, enseigneScore, addressIdentity);
+  if (identity < MIN_IDENTITY) return zero;
+  const proximity = 1 - Math.min(1, distanceM / MAX_DISTANCE_M);
+  const score = 0.8 * identity + 0.2 * proximity;
+  return { score, parts: { distance: proximity, name: nameScore, enseigne: enseigneScore, address: addressScore }, distanceM, matchedName: best.name };
+}
+function toCandidate2(poi, rec, scored) {
+  return {
+    osmId: poi.id,
+    connectorId: rec.connectorId,
+    registryId: rec.establishmentId ?? rec.id,
+    legalId: rec.establishmentId ? rec.id : void 0,
+    registryName: rec.legalName ?? rec.names[0],
+    // The name the score came from, which is often NOT nomComplet.
+    matchedName: scored.matchedName,
+    osmName: poi.name,
+    score: Number(scored.score.toFixed(4)),
+    parts: {
+      distance: Number(scored.parts.distance.toFixed(4)),
+      name: Number(scored.parts.name.toFixed(4)),
+      enseigne: Number(scored.parts.enseigne.toFixed(4)),
+      address: Number(scored.parts.address.toFixed(4))
+    },
+    distanceM: Math.round(scored.distanceM)
+  };
+}
+function matchLanes(pois, records) {
+  const index = buildIndex(records);
+  const scored = [];
+  for (const poi of pois) {
+    for (const rec of nearby(index, poi.lat, poi.lon)) {
+      const s = scorePair(poi, rec);
+      if (s.score >= MERGE_LOW) scored.push({ poi, rec, s });
+    }
+  }
+  scored.sort((a, b) => b.s.score - a.s.score);
+  const merged = /* @__PURE__ */ new Map();
+  const usedPoi = /* @__PURE__ */ new Set();
+  const usedRec = /* @__PURE__ */ new Set();
+  const undecided = [];
+  for (const { poi, rec, s } of scored) {
+    const key = recordKey(rec);
+    if (usedPoi.has(poi.id) || usedRec.has(key)) continue;
+    if (s.score >= MERGE_HIGH) {
+      const by = s.parts.address >= 1 && s.parts.name < 0.5 && s.parts.enseigne < 0.5 ? "address" : s.parts.enseigne > s.parts.name ? "enseigne" : "name";
+      merged.set(key, { osmId: poi.id, score: Number(s.score.toFixed(3)), by });
+      usedPoi.add(poi.id);
+      usedRec.add(key);
+    } else {
+      undecided.push(toCandidate2(poi, rec, s));
+    }
+  }
+  return { merged, undecided };
+}
+function buildMatchTodo(undecided) {
+  return {
+    version: 1,
+    generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    // Strongest first: the agent works down a list that gets easier to reject,
+    // and can stop when the evidence thins out.
+    pairs: [...undecided].sort((a, b) => b.score - a.score)
+  };
+}
+function verdictKey(v, known) {
+  const raw = v.registryId?.trim();
+  if (!raw) return void 0;
+  if (known.has(raw)) return raw;
+  if (v.connectorId) {
+    const qualified = `${v.connectorId}:${raw}`;
+    if (known.has(qualified)) return qualified;
+  }
+  const suffixed = [...known].filter((k) => k.endsWith(`:${raw}`));
+  return suffixed.length === 1 ? suffixed[0] : void 0;
+}
+function applyVerdicts(places, verdicts) {
+  const byOsm = /* @__PURE__ */ new Map();
+  const byRecord = /* @__PURE__ */ new Map();
+  for (const p of places) {
+    if (p.osm) byOsm.set(p.osm.id, p);
+    if (p.registry) byRecord.set(recordKey(p.registry), p);
+  }
+  const known = new Set(byRecord.keys());
+  let mergedCount = 0;
+  let skipped = 0;
+  const unknown = [];
+  for (const v of verdicts) {
+    if (!v.merge) {
+      skipped++;
+      continue;
+    }
+    const key = verdictKey(v, known);
+    const osmPlace = byOsm.get(v.osmId);
+    const recPlace = key ? byRecord.get(key) : void 0;
+    if (!osmPlace || !recPlace || osmPlace === recPlace) {
+      unknown.push(`${v.osmId} <-> ${key ?? v.registryId ?? "?"}`);
+      continue;
+    }
+    osmPlace.registry = recPlace.registry;
+    osmPlace.registryEvidence = recPlace.registryEvidence ?? { mode: "sweep", how: "agent-adjudicated" };
+    osmPlace.sources = [.../* @__PURE__ */ new Set([...osmPlace.sources, "registry"])];
+    osmPlace.matchConfidence = 1;
+    osmPlace.address = { ...recPlace.address, ...osmPlace.address };
+    recPlace.id = "";
+    mergedCount++;
+  }
+  for (let i = places.length - 1; i >= 0; i--) if (places[i].id === "") places.splice(i, 1);
+  return { merged: mergedCount, skipped, unknown };
 }
 
 // src/run.ts
@@ -8995,7 +9014,7 @@ COMMANDS
   watch --since <run>    Diff this run against an earlier one: who opened, closed, started hiring.
   orchestrate            Emit the fan-out: one search phase and two judgement phases.
   mcp                    Serve the run over MCP: where, scan, places, dossier, check.
-  doctor                 Check node, network and the health of every upstream this run needs.
+  doctor                 Check node, network and every upstream. --country narrows the registers.
   version                Print the version.
 
 TARGETING (scan, where)
@@ -9669,7 +9688,7 @@ async function main(argv) {
     case "mcp":
       return cmdMcp(values);
     case "doctor":
-      return runDoctor({ json: bools.has("json"), out, say });
+      return runDoctor({ json: bools.has("json"), out, say }, values.country);
     case "version":
       out(VERSION);
       return EXIT_OK;
@@ -9689,7 +9708,9 @@ if (isInvokedDirectly(process.argv[1], "ultraprospect")) {
 export {
   BOOL_FLAGS,
   COMMANDS,
+  CONNECTORS,
   HELP,
   VALUE_FLAGS,
-  main
+  main,
+  politeUa
 };

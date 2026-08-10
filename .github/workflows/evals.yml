@@ -1,16 +1,28 @@
 name: Evals (network)
 
-# Canaries against five public APIs that nobody here controls, three of them
-# volunteer-run. They answer a question the unit suite cannot: do the upstreams
-# still speak the shape this code parses?
+# Canaries against every public API this skill parses and none of it controls.
+# They answer a question the unit suite cannot: do the upstreams still speak the
+# shape this code reads?
+#
+# THE LIST IS NOT WRITTEN DOWN HERE, and that is the point. Each register
+# connector carries its own `canary()`, and `evals/run.mjs` walks
+# `CONNECTORS` — the same table the sweep lane, `confirm`, `doctor` and
+# `manifest.licences` read. Adding a country adds its canary with nothing to
+# remember, which is the rule engine-repin.yml already states: "the automation
+# cannot drift from the list it is supposed to be watching." A hardcoded count
+# in this comment would be stale on the next connector, so there isn't one.
 #
 # Report-only, on a schedule, and never gating a PR — deliberately. An Overpass
 # outage is not a defect in this repository, and a gate that goes red for
-# somebody else's bad afternoon is a gate people learn to ignore. A red run here
-# means "go look at the API", and the interesting failures are the two
-# undocumented register behaviours the SIRENE lane is built around: if the
-# 10 000-result clamp ever lifts, or /near_point starts honouring the filters it
-# currently drops, this is the only thing that would say so.
+# somebody else's bad afternoon is a gate people learn to ignore. That is why a
+# canary can report INCONCLUSIVE: a member state whose own VIES node is down, a
+# connector whose key was not supplied, an Overpass round where every mirror was
+# busy. None of those is drift.
+#
+# A red run means "go look at the API". The interesting failures are the two
+# undocumented French behaviours the whole anti-cap split ladder rests on: if
+# the 10 000-result clamp ever lifts, or /near_point starts honouring the
+# filters it currently drops, this is the only thing that would say so.
 on:
   schedule:
     - cron: "0 6 * * 1" # Mondays 06:00 UTC

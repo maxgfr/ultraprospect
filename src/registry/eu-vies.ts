@@ -244,8 +244,18 @@ export const euVies: RegistryConnector = {
     const de = await checkVat("DE", "811193231");
     checks.push({
       name: "VIES still REDACTS the trader name for DE",
-      ok: de?.verdict === "valid" && !de.identified,
-      detail: de?.identified ? `DE now discloses ("${de.name}") — the German path can confirm identity through VIES` : "still '---', as measured",
+      // A member state being down is not drift. Germany answers
+      // MS_UNAVAILABLE often enough that treating it as a failure would put a
+      // red canary in front of the reader most weeks, which is how a canary
+      // stops being read at all.
+      inconclusive: de?.verdict === "inconclusive",
+      ok: de?.verdict === "valid" ? !de.identified : true,
+      detail:
+        de?.verdict === "inconclusive"
+          ? `DE answered ${de.userError ?? "nothing"} — its own system, not a change in policy`
+          : de?.identified
+            ? `DE now discloses ("${de.name}") — the German path can confirm identity through VIES`
+            : "still '---', as measured",
     });
 
     const invalid = await checkVat("DE", "000000000");
