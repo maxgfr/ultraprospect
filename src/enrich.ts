@@ -25,6 +25,7 @@ import { detectBoards, fetchAllBoards, type AtsBoard } from "./ats.js";
 import { fetchPage, type FetchedPage, type PageStore } from "./pages.js";
 import { buildSignals, extractEmails, extractPhones, extractSocials, roleOf, sameOriginLinks } from "./signals.js";
 import type { JobPosting, PageRecord, PageRole, Place } from "./types.js";
+import { requireManifest, writePlaces, writeRunManifest } from "./run.js";
 import { uniqueBy } from "./util.js";
 
 /** Tier 1: the pages every site is asked for. */
@@ -302,4 +303,20 @@ export async function runEnrich(runDir: string, places: Place[], store: PageStor
       (outcome.jsOnly ? ` (of which ${outcome.jsOnly} answer but serve no text without a browser)` : ""),
   );
   return outcome;
+}
+
+/**
+ * Fold an enrich outcome into the run on disk.
+ *
+ * Extracted so the CLI and the MCP adapter share it. Which tier ran decides which
+ * count moves, and getting that wrong makes a tier-2 pass look like a tier-1 one
+ * in the manifest — a difference of several thousand requests.
+ */
+export function persistEnrich(runDir: string, places: Place[], tier: 1 | 2, outcome: EnrichOutcome): void {
+  writePlaces(runDir, places);
+  const manifest = requireManifest(runDir);
+  if (tier === 1) manifest.counts.enrichedTier1 = outcome.enriched;
+  else manifest.counts.enrichedTier2 = outcome.enriched;
+  manifest.notes.push(...outcome.notes);
+  writeRunManifest(runDir, manifest);
 }

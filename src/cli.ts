@@ -24,11 +24,11 @@ import {
   EXIT_OK,
   EXIT_USAGE,
   UsageError,
+  cacheDir,
   isInvokedDirectly,
   jsonLine,
   parseArgs,
   positionalText,
-  readJsonSafe,
   setNoWrite,
   writeArtifact,
 } from "./engine.js";
@@ -37,12 +37,13 @@ import { runDoctor } from "./doctor.js";
 import { resolveWhere } from "./geocode.js";
 import { runScan, writeScan } from "./scan.js";
 import { loadFixture, recordFixture } from "./fixture.js";
-import { applyVerdicts, buildMatchTodo, type MatchVerdict } from "./match.js";
-import { needsConfirming, runConfirm } from "./confirm.js";
-import { CONNECTORS } from "./registry/index.js";
+import { applyVerdicts, type MatchVerdict } from "./match.js";
+import { needsConfirming, persistConfirm, runConfirm } from "./confirm.js";
+import { CONNECTORS, servesCountry } from "./registry/index.js";
+import { forgetSnapshot, ingestSnapshot, listSnapshots, type SnapshotSource } from "./snapshot.js";
 import { buildResolveTodo, needsResolving, runResolve, type WebHit } from "./resolve.js";
 import { newPageStore } from "./pages.js";
-import { enrichable, runEnrich } from "./enrich.js";
+import { enrichable, persistEnrich, runEnrich } from "./enrich.js";
 import { applyFit, ranked, scoreAll } from "./score.js";
 import { buildDossierPacket, dossierPathFor } from "./dossier.js";
 import { formatReport, runCheck } from "./check.js";
@@ -51,9 +52,8 @@ import { buildDelta, diffRuns } from "./watch.js";
 import { createAdapter } from "./mcp/adapter.js";
 import { emitOrchestration } from "./orchestrate.js";
 import { runStdioServer, startHttpServer } from "./engine.js";
-import type { FitVerdict, MatchTodo } from "./types.js";
-import type { RegistryRecord } from "./registry/types.js";
-import { DEFAULT_OUT, licencesFor, newRun, readPlaces, requireManifest, resolveRun, shortLabel, writeJson, writePlaces, writeRunManifest } from "./run.js";
+import type { FitVerdict } from "./types.js";
+import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, shortLabel, writeJson, writePlaces, writeRunManifest } from "./run.js";
 import { clampInt, parseBbox, parseDistanceM } from "./util.js";
 import { VERSION } from "./version.js";
 
@@ -76,6 +76,7 @@ export { politeUa } from "./net.js";
 
 export const COMMANDS = [
   "where",
+  "ingest",
   "scan",
   "match",
   "confirm",
@@ -110,6 +111,7 @@ export const VALUE_FLAGS = [
   "min-employees",
   "registry",
   "companies-house-key",
+  "from-file",
   "max-results",
   "overpass",
   "apply",
@@ -142,6 +144,7 @@ export const BOOL_FLAGS = [
   "engine-search",
   "eco",
   "list",
+  "forget",
   "stdout",
   "help",
   "version",
@@ -154,6 +157,7 @@ USAGE
 
 COMMANDS
   where <query>          Resolve a place name to a search area. Refuses to guess when ambiguous.
+  ingest --country <cc>  Fetch and index a register's bulk open-data export. Once, then local.
   scan                   Discover every company in the area, from OSM and the country's register.
   match --apply <file>   Fold the agent's adjudication of MATCH.todo.json back into places.json.
   confirm                Check each company against its country's register, outside France's sweep.
@@ -165,7 +169,7 @@ COMMANDS
   render                 CSV, JSON, report and a self-contained HTML page.
   watch --since <run>    Diff this run against an earlier one: who opened, closed, started hiring.
   orchestrate            Emit the fan-out: one search phase and two judgement phases.
-  mcp                    Serve the run over MCP: where, scan, places, dossier, check.
+  mcp                    Serve the run over MCP: where, ingest, scan, places, confirm, enrich, score, dossier, check, render, watch, doctor.
   doctor                 Check node, network and every upstream. --country narrows the registers.
   version                Print the version.
 
@@ -215,6 +219,14 @@ DOSSIER
 ADJUDICATION (match)
   --apply <file>         A JSON array of {osmId, registryId, connectorId?, merge, why}. "-" reads stdin.
 
+BULK OPEN DATA (ingest)
+  --country <cc>         Which country's export to ingest: gb (Companies House, 470 MB),
+                         de (Handelsregister via OffeneRegister, 260 MB). Both keyless.
+  --list                 What is already in the cache: rows, vintage, size on disk.
+  --forget               Delete a country's ingested snapshot.
+  --from-file <path>     Index a file already on disk instead of downloading one.
+  --limit <n>            Stop after this many rows. For a first look at a new source.
+
 REGISTER CONFIRMATION (confirm)
   --limit <n>            Only confirm this many places.
   --companies-house-key <key>   UK Companies House key. Free, email only. Or set the env var.
@@ -245,7 +257,8 @@ OUTPUT
   --version              Print the version.
 
 ENVIRONMENT
-  ULTRAPROSPECT_CACHE_DIR      Where fetched pages are cached. Default <tmpdir>/ultraprospect.
+  ULTRAPROSPECT_CACHE_DIR      Where fetched pages and ingested snapshots are cached.
+                               Default <tmpdir>/ultraprospect. "ingest --list" reports the size.
   ULTRAPROSPECT_NO_WRITE=1     Same as --stdout.
   ULTRAPROSPECT_POLITE_DELAY_MS  Per-host delay between requests. Default 400.
   ULTRAPROSPECT_COMPANIES_HOUSE_KEY  UK register key. Free, email only. Same as --companies-house-key.
@@ -283,6 +296,74 @@ function list(raw: string | undefined): string[] | undefined {
  * route left is a name lookup, and a run that quietly fell back to it would
  * report weaker evidence under the same field.
  */
+/**
+ * `ingest` — fetch and index a register's bulk open-data export.
+ *
+ * Driven by the connector table's own `snapshot` declaration, never by a list
+ * written here: `CONNECTORS` already decides which register serves which country
+ * for the sweep lane, `confirm`, `doctor`, `manifest.licences` and the weekly
+ * canary, and this is the sixth reader. Adding a bulk source is a connector edit.
+ *
+ * Says what it is about to download BEFORE downloading it. Half a gigabyte
+ * arriving unannounced has misled somebody about what running a command costs,
+ * and the fact that it happens once does not make it invisible.
+ */
+async function cmdIngest(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
+  const withSnapshots = CONNECTORS.filter((c) => c.snapshot);
+
+  if (bools.has("list")) {
+    const cached = listSnapshots();
+    if (bools.has("json")) {
+      out(jsonLine({ cacheDir: cacheDir(), snapshots: cached }));
+      return EXIT_OK;
+    }
+    if (cached.length === 0) {
+      say("ingest: nothing ingested yet.");
+      for (const c of withSnapshots) say(`  available: ${c.id} — ${c.label} (ultraprospect ingest --country ${c.countries[0]})`);
+      return EXIT_OK;
+    }
+    for (const m of cached) {
+      out(
+        `${m.connectorId.padEnd(22)} ${String(m.rows).padStart(9)} records  ${(m.bytesOnDisk / 1e6).toFixed(0).padStart(5)} MB  vintage ${m.lastModified ?? m.vintage ?? "unknown"}`,
+      );
+    }
+    say("");
+    say(`  cache: ${cacheDir()}`);
+    return EXIT_OK;
+  }
+
+  const country = values.country?.trim().toLowerCase();
+  if (!country) {
+    throw new UsageError(`ingest needs --country <cc>, or --list. Countries with a bulk export: ${withSnapshots.map((c) => c.countries.join("/")).join(", ")}`);
+  }
+  const applicable = withSnapshots.filter((c) => servesCountry(c, country));
+  if (applicable.length === 0) {
+    // Not a failure of this tool. Most registers publish no bulk export at all,
+    // and saying which countries do is more use than an error code.
+    say(`ingest: no register serving ${country} publishes a bulk open-data export.`);
+    for (const c of withSnapshots) say(`  available: ${c.countries.join("/")} — ${c.id}`);
+    return EXIT_USAGE;
+  }
+
+  if (bools.has("forget")) {
+    for (const c of applicable) say(`ingest: ${forgetSnapshot(c.id) ? "forgot" : "nothing cached for"} ${c.id}`);
+    return EXIT_OK;
+  }
+
+  for (const connector of applicable) {
+    const meta = await ingestSnapshot(connector.id, connector.snapshot as SnapshotSource, {
+      limit: values.limit ? clampInt(values.limit, 1, 100_000_000, 1000) : undefined,
+      fromFile: values["from-file"],
+      onNote: (n) => say(`  ${n}`),
+      onProgress: (rows) => say(`  ingest: ${rows} records indexed…`),
+    });
+    if (bools.has("json")) out(jsonLine(meta));
+  }
+  say("");
+  say(`next: ultraprospect scan --where "<place>" --country ${country}`);
+  return EXIT_OK;
+}
+
 async function cmdConfirm(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
   if (!values.run) throw new UsageError("confirm needs --run <dir>");
   const runDir = resolveRun(values.run);
@@ -321,23 +402,9 @@ async function cmdConfirm(values: Record<string, string>, bools: ReadonlySet<str
     },
   });
 
-  writePlaces(runDir, places);
-  writeJson(runDir, "registry.json", mergeRegistryRecords(runDir, outcome.records));
-  if (outcome.undecided.length) {
-    // The middle band joins the file the agent already adjudicates, rather than
-    // getting a second worklist with the same job and different filename.
-    const existing = (readJsonSafe(join(runDir, "MATCH.todo.json")) as MatchTodo | undefined)?.pairs ?? [];
-    writeJson(runDir, "MATCH.todo.json", buildMatchTodo([...existing, ...outcome.undecided]));
-  }
-
-  manifest.lanes = [...manifest.lanes.filter((l) => l.lane !== "registry" || l.mode === "sweep"), outcome.coverage];
-  manifest.counts.registry += outcome.records.length;
-  manifest.counts.confirmed = outcome.verified + outcome.matched;
-  manifest.counts.undecided += outcome.undecided.length;
-  for (const rec of outcome.records) manifest.counts.byConnector[rec.connectorId] = (manifest.counts.byConnector[rec.connectorId] ?? 0) + 1;
-  manifest.licences = licencesFor(manifest.lanes);
-  manifest.notes.push(...outcome.notes);
-  writeRunManifest(runDir, manifest);
+  // The fold lives in src/confirm.ts, so the MCP adapter performs the identical
+  // sequence rather than carrying a second copy of it.
+  persistConfirm(runDir, places, manifest, outcome);
 
   if (bools.has("json")) {
     out(
@@ -384,20 +451,6 @@ function connectorKeys(values: Record<string, string>): Record<string, string | 
     keys[connector.id] = values[flag] ?? process.env[connector.needsKey.env];
   }
   return keys;
-}
-
-/**
- * Fold newly confirmed records into whatever `registry.json` already holds.
- *
- * `confirm` can be re-run — after a wider `--limit`, or once a key is supplied —
- * and it must add rather than replace. Keyed by connector + identifier so the
- * same company confirmed twice stays one row.
- */
-function mergeRegistryRecords(runDir: string, fresh: readonly RegistryRecord[]): RegistryRecord[] {
-  const existing = (readJsonSafe(join(runDir, "registry.json")) as RegistryRecord[] | undefined) ?? [];
-  const byKey = new Map<string, RegistryRecord>();
-  for (const rec of [...existing, ...fresh]) byKey.set(`${rec.connectorId}:${rec.establishmentId ?? rec.id}`, rec);
-  return [...byKey.values()];
 }
 
 /** Build the geographic target from whatever targeting flags were given. */
@@ -697,12 +750,7 @@ async function cmdEnrich(values: Record<string, string>, bools: ReadonlySet<stri
     },
   });
 
-  writePlaces(runDir, places);
-  const manifest = requireManifest(runDir);
-  if (tier === 1) manifest.counts.enrichedTier1 = outcome.enriched;
-  else manifest.counts.enrichedTier2 = outcome.enriched;
-  manifest.notes.push(...outcome.notes);
-  writeRunManifest(runDir, manifest);
+  persistEnrich(runDir, places, tier as 1 | 2, outcome);
 
   if (bools.has("json")) out(jsonLine({ run: runDir, tier, ...outcome, notes: undefined }));
   say("");
@@ -942,6 +990,8 @@ export async function main(argv: readonly string[]): Promise<number> {
   const text = positionalText(parsed);
 
   switch (command) {
+    case "ingest":
+      return cmdIngest(values, bools);
     case "where":
       return cmdWhere(values, bools, text);
     case "scan":

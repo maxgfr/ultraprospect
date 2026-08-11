@@ -34,15 +34,18 @@ export default defineConfig({
       // of each request, and `confirm`'s decision to attach a register identity
       // or refuse one.
       //
-      // Raised from 48/46/56/47 when the multi-country work landed with its
-      // tests. Raise them again when real coverage climbs; never lower them to
-      // make a red run pass — and note that adding untested code is exactly the
+      // Raised from 48/46/56/47 when the multi-country work landed, then from
+      // 51/48/57/51 when the open-data work did: a bzip2 decoder, a zip reader and
+      // a snapshot index are all pure logic with no live service in the way, so
+      // they are testable to a standard the network lanes are not, and the ratchet
+      // should hold them to it. Raise these again when real coverage climbs; never
+      // lower them to make a red run pass — adding untested code is exactly the
       // thing this ratchet exists to make visible.
       thresholds: {
-        statements: 51,
-        branches: 48,
-        functions: 57,
-        lines: 51,
+        statements: 57,
+        branches: 50,
+        functions: 62,
+        lines: 58,
       },
     },
   },

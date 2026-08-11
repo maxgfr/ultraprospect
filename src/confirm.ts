@@ -29,8 +29,11 @@ import type { ConnectorContext, LegalId, RegistryConnector, RegistryRecord } fro
 import { MERGE_HIGH, MERGE_LOW } from "./match.js";
 import { extractLegalIds, legalIdCoverage } from "./legal-notice.js";
 import { join } from "node:path";
+import { readJsonSafe } from "./engine.js";
+import { buildMatchTodo } from "./match.js";
+import { licencesFor, writeJson, writePlaces, writeRunManifest } from "./run.js";
 import { readPageText } from "./run.js";
-import type { LaneCoverage, MatchCandidate, Place } from "./types.js";
+import type { LaneCoverage, MatchCandidate, MatchTodo, Place, RunManifest } from "./types.js";
 import { nameSimilarity, normalizeName, tokenSet } from "./util.js";
 
 export interface ConfirmOptions {
@@ -424,4 +427,46 @@ function sharesToken(place: Place, rec: RegistryRecord): boolean {
     for (const t of tokenSet(normalizeName(theirs))) if (t.length >= 4 && mine.has(t)) return true;
   }
   return false;
+}
+
+/**
+ * Fold a confirm outcome into the run on disk.
+ *
+ * Extracted from `cmdConfirm` so the CLI and the MCP adapter share it rather than
+ * each carrying its own copy. The sequence is not incidental — six manifest fields,
+ * a merge into `registry.json` that must not replace what a previous pass attached,
+ * and an APPEND to `MATCH.todo.json` rather than a second worklist with the same
+ * job and a different filename. A second implementation of that would drift on the
+ * first change, and the drift would be silent.
+ */
+export function persistConfirm(runDir: string, places: Place[], manifest: RunManifest, outcome: ConfirmOutcome): void {
+  writePlaces(runDir, places);
+  writeJson(runDir, "registry.json", mergeRegistryRecords(runDir, outcome.records));
+  if (outcome.undecided.length) {
+    const existing = (readJsonSafe(join(runDir, "MATCH.todo.json")) as MatchTodo | undefined)?.pairs ?? [];
+    writeJson(runDir, "MATCH.todo.json", buildMatchTodo([...existing, ...outcome.undecided]));
+  }
+
+  // Keep a sweep lane (France ran one before this) and replace the non-sweep one.
+  manifest.lanes = [...manifest.lanes.filter((l) => l.lane !== "registry" || l.mode === "sweep"), outcome.coverage];
+  manifest.counts.registry += outcome.records.length;
+  manifest.counts.confirmed = outcome.verified + outcome.matched;
+  manifest.counts.undecided += outcome.undecided.length;
+  for (const rec of outcome.records) manifest.counts.byConnector[rec.connectorId] = (manifest.counts.byConnector[rec.connectorId] ?? 0) + 1;
+  manifest.licences = licencesFor(manifest.lanes);
+  manifest.notes.push(...outcome.notes);
+  writeRunManifest(runDir, manifest);
+}
+
+/**
+ * Every register record the run holds, this pass's added to the previous ones.
+ *
+ * A re-run adds rather than replaces: `confirm --limit 50` twice must leave 100
+ * records behind, not the last 50.
+ */
+function mergeRegistryRecords(runDir: string, fresh: readonly RegistryRecord[]): RegistryRecord[] {
+  const existing = (readJsonSafe(join(runDir, "registry.json")) as RegistryRecord[] | undefined) ?? [];
+  const byKey = new Map<string, RegistryRecord>();
+  for (const rec of [...existing, ...fresh]) byKey.set(`${rec.connectorId}:${rec.establishmentId ?? rec.id}`, rec);
+  return [...byKey.values()];
 }

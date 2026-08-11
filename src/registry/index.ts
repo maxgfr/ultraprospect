@@ -17,6 +17,7 @@ import { czAres } from "./cz-ares.js";
 import { euVies } from "./eu-vies.js";
 import { fiPrh } from "./fi-prh.js";
 import { frSirene } from "./fr-sirene.js";
+import { deOffeneRegister } from "./de-offeneregister.js";
 import { gbCompaniesHouse } from "./gb-companies-house.js";
 import { gleif } from "./gleif.js";
 import { noBrreg } from "./no-brreg.js";
@@ -43,6 +44,11 @@ export const CONNECTORS: readonly RegistryConnector[] = [
   // National registers, authoritative for their own country.
   frSirene,
   gbCompaniesHouse,
+  // Before VIES on purpose. For Germany the two answer different questions and
+  // this one answers the harder half: VIES confirms a VAT number is live TODAY and
+  // refuses to name its holder, while this names who filed under an HRB number in
+  // 2017-2019. An identity, even a dated one, beats an anonymous confirmation.
+  deOffeneRegister,
   noBrreg,
   fiPrh,
   czAres,
@@ -172,6 +178,7 @@ export { czAres } from "./cz-ares.js";
 export { euVies } from "./eu-vies.js";
 export { fiPrh } from "./fi-prh.js";
 export { frSirene } from "./fr-sirene.js";
+export { deOffeneRegister } from "./de-offeneregister.js";
 export { gbCompaniesHouse } from "./gb-companies-house.js";
 export { gleif } from "./gleif.js";
 export { noBrreg } from "./no-brreg.js";

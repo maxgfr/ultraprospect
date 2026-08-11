@@ -130,12 +130,23 @@ if (existsSync(pkgEngine) && existsSync(skillMd)) {
     const missing = [...cliFlags].filter((f) => !new RegExp(`--${f}\\b`).test(cli.HELP));
     missing.length === 0 ? ok("--help covers the whole flag surface") : bad(`--help omits: ${missing.map((f) => `--${f}`).join(", ")}`);
 
-    // C. Every command is both in --help and named in SKILL.md. A command the
-    // skill never mentions is a command no agent will ever run.
+    // C. Every command is both in --help and named in SKILL.md AS A COMMAND.
+    //
+    // "Mentioned anywhere" is not enough, and this check learnt that the hard way:
+    // adding `ingest` passed instantly because the word already sat in a cheat-sheet
+    // comment ("ingest your hits"). A command named after an ordinary English verb
+    // could satisfy the gate while being entirely undocumented, which is the exact
+    // outcome the gate exists to prevent. So the command must appear the way an
+    // agent would actually run it — after `ultraprospect `, or as a backticked
+    // token, which is how every command in the route table and cheat sheet is
+    // written.
+    const asCommand = (c) => new RegExp("(?:ultraprospect\\s+|`)" + c + "\\b");
     const undocumented = [...cli.COMMANDS].filter((c) => !new RegExp(`\\b${c}\\b`).test(cli.HELP));
     undocumented.length === 0 ? ok("--help lists every command") : bad(`--help omits commands: ${undocumented.join(", ")}`);
-    const unmentioned = [...cli.COMMANDS].filter((c) => c !== "version" && !new RegExp(`\\b${c}\\b`).test(skillText));
-    unmentioned.length === 0 ? ok("SKILL.md mentions every command") : bad(`SKILL.md never mentions: ${unmentioned.join(", ")}`);
+    const unmentioned = [...cli.COMMANDS].filter((c) => c !== "version" && !asCommand(c).test(skillText));
+    unmentioned.length === 0
+      ? ok("SKILL.md documents every command as a command, not merely as a word")
+      : bad(`SKILL.md never documents as a command: ${unmentioned.join(", ")}`);
 
     // D. The refusals are the product. A SKILL.md that documents the commands
     // but not the gates produces an agent that runs the tool and ignores what

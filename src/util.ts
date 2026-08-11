@@ -284,3 +284,20 @@ export function parseBbox(raw: string): [number, number, number, number] | undef
   if (s >= n || w >= e) return undefined;
   return [s, n, w, e];
 }
+
+/**
+ * A short, human-usable slug from a geocoder label.
+ *
+ * Nominatim's `display_name` is the full administrative chain — "Vincennes,
+ * Nogent-sur-Marne, Val-de-Marne, Île-de-France, France métropolitaine, 94300,
+ * France" — and slugifying it whole produces a 90-character directory name that
+ * every later command has to be pasted with. The first component is the place;
+ * the rest is where the place is.
+ *
+ * Here rather than in run.ts because the register connectors need it too, and
+ * reaching into run.ts for it made the connector table a circular import.
+ */
+export function shortLabel(label: string): string {
+  const first = label.split(",")[0]?.trim();
+  return first && first.length > 1 ? first : label;
+}

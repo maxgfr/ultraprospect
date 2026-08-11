@@ -1,29 +1,51 @@
 // The United Kingdom — Companies House.
 //
-// The only register in this tool that comes close to France's for a territory,
-// and the only one here behind a credential. The key is free — an email address
-// at developer.company-information.service.gov.uk, no payment, no approval — but
-// it is still a key, and this tool's promise is that it works without one. So:
+// The SECOND register in this tool that can be enumerated over a territory, and
+// the first one that took an open-data file rather than an API to get there.
 //
-//   * Without a key the connector reports itself UNAVAILABLE, with the steps to
-//     get one, and the run continues. It never throws, and it never lets an
-//     absent key read as an empty register.
-//   * With a key it does what no other non-French connector can: search by
-//     company name AND filter by locality and SIC through `/advanced-search`,
-//     which is a partial territory sweep. Partial because it takes a locality
-//     string rather than a radius or a bounding box, so it cannot be aligned
-//     with the OSM lane's geometry — hence `sweep` is deliberately NOT declared.
-//     Claiming a sweep whose shape does not match the requested area would put a
-//     "whole territory" label on a different territory.
+// TWO ROUTES, AND THE KEYLESS ONE IS THE PRIMARY.
 //
-// Authentication is HTTP Basic with the key as the username and an empty
-// password, which is unusual enough to be worth stating: `Authorization: Basic
-// base64(key + ":")`.
+//   * THE FREE COMPANY DATA PRODUCT. A monthly snapshot of every live company on
+//     the register — 470 MB of zipped CSV at download.companieshouse.gov.uk, no
+//     key, no registration, Open Government Licence v3.0. `ingest --country gb`
+//     fetches and indexes it once; after that `sweep`, `lookup` and `verifyId`
+//     are local reads. This is what lets a British run keep the tool's promise
+//     that it works without credentials.
+//
+//   * THE REST API, when somebody has a key. Free (an email address, no payment)
+//     and a day fresher than the snapshot, which is its only advantage and a real
+//     one for `verifyId`. Never required. Authentication is HTTP Basic with the
+//     key as the USERNAME and an empty password — unusual enough to state:
+//     `Authorization: Basic base64(key + ":")`.
+//
+// WHAT THE SWEEP IS, EXACTLY. The snapshot files each company under its
+// registered office's POST TOWN and postcode. That is a locality, not a bounding
+// box, so it cannot be aligned with the OSM lane's geometry, and the coverage
+// reason says so in words instead of letting "sweep" imply otherwise. It is still
+// an enumeration — every company the register holds for that post town — which is
+// categorically more than the per-company confirmation available elsewhere.
+//
+// And the shape of a UK registered office is worth knowing before trusting an
+// address from here: it is very often the company's accountant rather than its
+// premises. That is why the postcode is never used to NARROW a lookup, and why a
+// swept record's address never overwrites what a mapper saw at the door.
 import { awaitHostSlot, backOffHost, httpJson } from "../engine.js";
 import { naceSection } from "../classification/nace.js";
 import { politeUa } from "../net.js";
-import type { PostalAddress } from "../types.js";
-import type { Availability, CanaryCheck, ConnectorContext, LegalId, LookupQuery, RegistryConnector, RegistryRecord } from "./types.js";
+import { hasSnapshot, snapshotByLocality, snapshotById, snapshotMeta, type SnapshotSource } from "../snapshot.js";
+import { nameSimilarity, normalizeName, shortLabel } from "../util.js";
+import type { GeoTarget, PostalAddress } from "../types.js";
+import type {
+  Availability,
+  CanaryCheck,
+  ConnectorContext,
+  LegalId,
+  LookupQuery,
+  RegistryConnector,
+  RegistryFilters,
+  RegistryRecord,
+  SweepResult,
+} from "./types.js";
 
 const BASE = "https://api.company-information.service.gov.uk";
 const CONNECTOR_ID = "gb-companies-house";
@@ -128,10 +150,112 @@ export function toRecord(company: any): RegistryRecord | undefined {
   };
 }
 
+// ---------------------------------------------------------------------------
+// The keyless route: the Free Company Data Product.
+// ---------------------------------------------------------------------------
+
+const SNAPSHOT_BASE = "https://download.companieshouse.gov.uk";
+
+/**
+ * The URL of a month's snapshot, `back` months before `now`.
+ *
+ * The file is always dated the 1st, and Companies House publishes it "within 5
+ * working days of the previous month end" — so on the 3rd of a month the current
+ * file does not exist yet and the previous one is the correct answer. Hence a
+ * candidate list rather than a single URL: `ingest` walks it and takes the first
+ * that answers, which makes a run on the 2nd behave the same as one on the 20th.
+ */
+function snapshotUrl(now: Date, back: number): string {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 1));
+  const month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  return `${SNAPSHOT_BASE}/BasicCompanyDataAsOneFile-${month}.zip`;
+}
+
+/**
+ * The SIC field carries the code AND its label in one string.
+ *
+ * "62012 - Business and domestic software development". Splitting matters because
+ * `naceSection` needs the digits: handed the whole string it resolves nothing, and
+ * every British row would arrive with no section while looking populated.
+ */
+function sicOf(text: string | undefined): { code?: string; section?: string } {
+  const code = text?.trim().match(/^(\d{4,5})/)?.[1];
+  return code ? { code, section: naceSection(code) } : {};
+}
+
+/** Companies House writes "Active", "Dissolved", "Liquidation"… in the CSV. */
+function statusOf(raw: string | undefined): "active" | "ceased" | "unknown" {
+  const s = raw?.trim().toLowerCase();
+  if (!s) return "unknown";
+  return s === "active" ? "active" : "ceased";
+}
+
+export const companiesHouseSnapshot: SnapshotSource = {
+  format: "csv.zip",
+  // Three candidates: this month, and the two before it. Two is enough for the
+  // publication lag; the third covers a month the product was late.
+  urls: (now) => [0, 1, 2].map((back) => snapshotUrl(now, back)),
+  licence: "UK company data: Companies House, Open Government Licence v3.0",
+  approxBytes: 493_000_000,
+  // One identifier per record and no officers, so the index is lighter than the
+  // German one despite a similar row count.
+  approxDiskBytes: 1_800_000_000,
+
+  parse(row: Record<string, string>) {
+    const number = row.CompanyNumber?.trim();
+    const name = row.CompanyName?.trim();
+    if (!number || !name) return undefined;
+
+    const { code, section } = sicOf(row["SICCode.SicText_1"]);
+    const previous = [1, 2, 3, 4, 5].map((n) => row[`PreviousName_${n}.CompanyName`]?.trim()).filter((x): x is string => Boolean(x));
+    const postTown = row["RegAddress.PostTown"]?.trim();
+    const street = [row["RegAddress.AddressLine1"], row["RegAddress.AddressLine2"]]
+      .map((s) => s?.trim())
+      .filter(Boolean)
+      .join(", ");
+
+    const address: PostalAddress = {
+      raw: [street, postTown, row["RegAddress.PostCode"]?.trim()].filter(Boolean).join(", ") || undefined,
+      libelleVoie: row["RegAddress.AddressLine1"]?.trim() || undefined,
+      codePostal: row["RegAddress.PostCode"]?.trim() || undefined,
+      commune: postTown || undefined,
+      pays: row["RegAddress.Country"]?.trim() || "United Kingdom",
+    };
+
+    const record: RegistryRecord = {
+      connectorId: CONNECTOR_ID,
+      id: number.toUpperCase(),
+      names: [name, ...previous],
+      legalName: name,
+      officers: [],
+      address,
+      countryCode: "gb",
+      activityCode: code,
+      section,
+      activityScheme: "nace",
+      legalForm: row.CompanyCategory?.trim() || undefined,
+      status: statusOf(row.CompanyStatus),
+      dateCreated: row.IncorporationDate?.trim() || undefined,
+      dateClosed: row.DissolutionDate?.trim() || undefined,
+      sourceUrl: `https://find-and-update.company-information.service.gov.uk/company/${number}`,
+      national: { companyNumber: number.toUpperCase(), companyStatus: row.CompanyStatus?.trim() || undefined, sicCodes: code ? [code] : undefined },
+    };
+    return { record, locality: postTown || undefined, ids: [number] };
+  },
+};
+
+/** Does a record pass the run's register filters? Shared by sweep and lookup. */
+function passesFilters(rec: RegistryRecord, filters: RegistryFilters): boolean {
+  if (!filters.includeCeased && rec.status === "ceased") return false;
+  if (filters.sections?.length && (!rec.section || !filters.sections.includes(rec.section))) return false;
+  if (filters.activityCodes?.length && (!rec.activityCode || !filters.activityCodes.some((c) => rec.activityCode?.startsWith(c)))) return false;
+  return true;
+}
+
 export const gbCompaniesHouse: RegistryConnector = {
   id: CONNECTOR_ID,
   countries: ["gb"],
-  label: "United Kingdom — Companies House (free key required)",
+  label: "United Kingdom — Companies House (keyless monthly snapshot; a free key adds a live API)",
   licence: "UK company data: Companies House, Open Government Licence v3.0",
   activityScheme: "nace",
   activityPrefix: "sic-uk",
@@ -148,16 +272,94 @@ export const gbCompaniesHouse: RegistryConnector = {
     how: "supply a key and run `pnpm run eval:network`; three assertions are already written and waiting. The keyless snapshot route needs no key and is the one exercised by default.",
   },
 
+  snapshot: companiesHouseSnapshot,
+
   availability(ctx: ConnectorContext): Availability {
+    // Either route is enough, and the keyless one is listed first because it is
+    // the one that keeps this tool's promise. An absent key stopped being a reason
+    // to skip the United Kingdom the day the snapshot landed.
+    if (hasSnapshot(CONNECTOR_ID)) return { available: true };
     if (keyFrom(ctx)) return { available: true };
-    return { available: false, reason: "no Companies House key was supplied", how: HOW_TO_GET_A_KEY };
+    return {
+      available: false,
+      reason: "no Companies House snapshot has been ingested and no key was supplied",
+      how: "run `ultraprospect ingest --country gb` for the keyless monthly snapshot (470 MB, no registration), or supply a key for the live API",
+    };
+  },
+
+  /**
+   * Enumerate the companies the register holds for a territory's post town.
+   *
+   * A sweep, and the coverage says exactly what kind. Only France's register can
+   * be enumerated by a bounding box; here the unit is the registered office's post
+   * town, which does not coincide with the OSM lane's geometry. Both facts belong
+   * in the manifest, so both are in `reason` — the alternative is a "whole
+   * territory" label sitting on a slightly different territory, which is the one
+   * failure this tool exists to refuse.
+   */
+  async sweep(target: GeoTarget, filters: RegistryFilters, ctx: ConnectorContext): Promise<SweepResult> {
+    const notes: string[] = [];
+    const town = shortLabel(target.label || target.query);
+    const meta = snapshotMeta(CONNECTOR_ID);
+    if (!meta) {
+      return {
+        records: [],
+        notes: ["companies-house: no snapshot ingested, so the register lane could not be swept. Run `ultraprospect ingest --country gb`."],
+        coverage: {
+          lane: "registry",
+          connectorId: CONNECTOR_ID,
+          requested: 0,
+          returned: 0,
+          truncated: true,
+          reason: "no Companies House snapshot in the cache; run `ingest --country gb` (470 MB, keyless) to enumerate the United Kingdom",
+        },
+      };
+    }
+
+    const max = filters.maxResults ?? 3000;
+    const all = await snapshotByLocality(CONNECTOR_ID, town, (r) => passesFilters(r, filters), max + 1);
+    const truncated = all.length > max;
+    const records = truncated ? all.slice(0, max) : all;
+    ctx.onProgress?.(records.length, town);
+
+    return {
+      records,
+      notes,
+      coverage: {
+        lane: "registry",
+        mode: "sweep",
+        connectorId: CONNECTOR_ID,
+        requested: max,
+        returned: records.length,
+        truncated,
+        // Both halves of the truth, in the order a reader needs them.
+        reason: truncated
+          ? `enumerated from the ${meta.lastModified ? `${meta.lastModified.slice(0, 16)} ` : ""}Companies House snapshot by POST TOWN "${town}", and stopped at --max-results ${max}. A post town is not a bounding box, so this lane's shape does not coincide with the OSM lane's.`
+          : `enumerated from the Companies House monthly snapshot by POST TOWN "${town}" — every company the register files there. A post town is not a bounding box, so this lane's shape does not coincide with the OSM lane's, and a company registered at an accountant's address in another town is absent from it.`,
+      },
+    };
   },
 
   async lookup(query: LookupQuery, ctx: ConnectorContext): Promise<RegistryRecord[]> {
-    const key = keyFrom(ctx);
     const name = query.names.find((n) => n?.trim());
-    if (!key || !name) return [];
+    if (!name) return [];
     const limit = Math.min(20, query.limit ?? 5);
+
+    // The snapshot first: keyless, and already local. Only the register's own
+    // post town is searched, for the same reason the API is given a `location`.
+    if (hasSnapshot(CONNECTOR_ID) && query.locality) {
+      const needle = normalizeName(name);
+      const hits = await snapshotByLocality(
+        CONNECTOR_ID,
+        query.locality,
+        (r) => r.status !== "ceased" && r.names.some((n) => nameSimilarity(n, name) >= 0.6 || normalizeName(n).includes(needle)),
+        limit,
+      );
+      if (hits.length) return hits;
+    }
+
+    const key = keyFrom(ctx);
+    if (!key) return [];
 
     // Advanced search first: it takes a locality, which is what turns a common
     // name into one company. It answers `items` with the company already
@@ -212,8 +414,6 @@ export const gbCompaniesHouse: RegistryConnector = {
   },
 
   async verifyId(id: LegalId, ctx: ConnectorContext): Promise<RegistryRecord | undefined> {
-    const key = keyFrom(ctx);
-    if (!key) return undefined;
     // Company numbers only. A UK VAT number is NOT the company number and cannot
     // be derived from it, so there is nothing to attempt — the two clauses this
     // replaces admitted `vat` and then rejected it one line later, which read as
@@ -225,6 +425,16 @@ export const gbCompaniesHouse: RegistryConnector = {
     const number = id.value.replace(/\s+/g, "").toUpperCase();
     if (!/^(\d{6,8}|[A-Z]{2}\d{6})$/.test(number)) return undefined;
     const padded = /^\d+$/.test(number) ? number.padStart(8, "0") : number;
+
+    // The snapshot answers this keylessly and exactly — a company number is a
+    // primary key, so there is no scoring to do and nothing to be uncertain about.
+    if (hasSnapshot(CONNECTOR_ID)) {
+      const hit = (await snapshotById(CONNECTOR_ID, padded))[0];
+      if (hit) return hit;
+    }
+
+    const key = keyFrom(ctx);
+    if (!key) return undefined;
     const res = await get(`/company/${encodeURIComponent(padded)}`, key);
     if (res.status === 401 || res.status === 403) {
       ctx.onNote?.(`companies-house: the key was rejected (HTTP ${res.status}). ${HOW_TO_GET_A_KEY}`);

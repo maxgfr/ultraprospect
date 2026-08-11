@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { readJsonSafe, readManifest, runId, slugify, writeArtifact, writeManifest } from "./engine.js";
 import { connectorById } from "./registry/index.js";
+import { shortLabel } from "./util.js";
 import type { LaneCoverage, Place, RunManifest } from "./types.js";
 import { VERSION } from "./version.js";
 
@@ -31,19 +32,12 @@ export interface RunPaths {
   id: string;
 }
 
-/**
- * A short, human-usable slug from a geocoder label.
- *
- * Nominatim's `display_name` is the full administrative chain — "Vincennes,
- * Nogent-sur-Marne, Val-de-Marne, Île-de-France, France métropolitaine, 94300,
- * France" — and slugifying it whole produces a 90-character directory name that
- * every later command has to be pasted with. The first component is the place;
- * the rest is where the place is.
- */
-export function shortLabel(label: string): string {
-  const first = label.split(",")[0]?.trim();
-  return first && first.length > 1 ? first : label;
-}
+// `shortLabel` lives in util.ts — a pure string function, and one the register
+// connectors need. Importing it from here made registry/index -> gb-companies-house
+// -> run -> registry/index a cycle, which left CONNECTORS half-undefined at module
+// init: every connector read as `undefined` and the table's own tests crashed
+// before asserting anything. Re-exported so the existing call sites are unchanged.
+export { shortLabel } from "./util.js";
 
 export function newRun(outRoot: string, label: string): RunPaths {
   const slug = slugify(shortLabel(label)) || "run";

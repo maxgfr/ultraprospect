@@ -1,6 +1,6 @@
 ---
 name: ultraprospect
-description: "Use when the user wants every company in a PLACE — a town, a street, a radius — turned into a qualified, sourced prospect list rather than a page of search results. A deterministic zero-dep engine (node scripts/ultraprospect.mjs, no keys, no install) sweeps OpenStreetMap worldwide and attaches whichever company register a country has. France's is the only one sweepable without a key; elsewhere it CONFIRMS each company from the registration its own site must publish by law (Impressum, aviso legal) against VIES, GLEIF, Companies House, Brreg, PRH, ARES or SEC EDGAR. It hands YOU the judgment it refuses to make: which near-miss pairs are one business, what a company does, whether it fits the brief. It REFUSES an ambiguous place, REFUSES an uncertain merge, and DECLARES whether a territory was swept or confirmed company by company. Triggers: 'every company in X', 'who is based in <town>', 'prospect list for <area>', 'quelles entreprises à <ville>', 'Firmen in <Stadt>'."
+description: "Use when the user wants every company in a PLACE — a town, a street, a radius — turned into a qualified, sourced prospect list. A deterministic zero-dep engine (node scripts/ultraprospect.mjs, no keys, no install) sweeps OpenStreetMap worldwide and attaches whichever company register a country has. France and the UK can be ENUMERATED keylessly — the UK from Companies House's monthly open data, after `ingest`. Germany's export names the HRB holder VIES will not. Elsewhere it CONFIRMS each company from the registration its own site must publish by law (Impressum, aviso legal), against VIES, GLEIF, Brreg, PRH, ARES or EDGAR. It hands YOU the judgment it refuses to make: which pairs are one business, what a company does, whether it fits the brief. It REFUSES an ambiguous place, REFUSES an uncertain merge, DATES every snapshot record, and DECLARES whether a territory was swept or confirmed company by company. Triggers: 'every company in X', 'prospect list for <area>', 'quelles entreprises à <ville>', 'Firmen in <Stadt>'."
 license: MIT
 metadata:
   version: 2.0.0
@@ -24,12 +24,23 @@ is a guess dressed as a fact, and every count it reports is one it measured.
 >    say you did not.
 > 2. **A truncated run is a truncated run, and a confirmed one is not a sweep.**
 >    When `manifest.truncated` is true, say so in the first sentence of whatever
->    you write, and name the lane. When the register lane's `mode` is
->    `"confirm"` — which is EVERY country but France — say that too: the list is
->    what OpenStreetMap holds for that territory, checked against the register,
->    not what the register holds. A company nobody has mapped is not in it.
->    Presenting either as a whole territory is the one failure nobody downstream
->    can detect.
+>    you write, and name the lane. Read the register lane's `mode`, which the
+>    Coverage table prints as its own column, and which only France and the
+>    United Kingdom can answer `"sweep"` to. When it says `"confirm"` say so: the
+>    list is what OpenStreetMap holds for that territory, checked against the
+>    register, not what the register holds. A company nobody has mapped is not in
+>    it. And the UK's sweep is by POST TOWN, not by the bounding box the OSM lane
+>    used — the lane's `reason` says so, and repeating that is the difference
+>    between an enumeration and a claim about a slightly different territory.
+>    Presenting any of these as a whole territory is the one failure nobody
+>    downstream can detect.
+>
+> 2b. **A dated record is a fact about its date.** A record carrying `asOf` came
+>    out of a bulk snapshot, not from asking the register just now. Germany's
+>    export stopped in 2019, so a German register identity is who filed under that
+>    number THEN. Write it that way — "registered at … as of 2018-07" — and never
+>    let it found a present-tense claim. `check` enforces this; do not make it
+>    have to.
 > 3. **Absence is a finding.** `isHiring: false` means we looked where hiring
 >    would be and found none; `isHiring` absent means a board exists that we
 >    could not read. Report the second as unknown, never as "not hiring".
@@ -60,6 +71,7 @@ gate. Read it rather than guessing a flag.
 | You want to… | Run |
 |---|---|
 | Check a place name resolves, before spending a sweep | `where "<place>"` |
+| Get a keyless register for the UK or Germany, once | `ingest --country gb` · `ingest --country de` |
 | List every company in a town, street or radius | `scan --where "<place>"` |
 | Same, narrowed to an industry or a company size | `scan --where "<place>" --section J,M --min-employees 10` |
 | Answer the pairs the matcher would not decide | `match --run <dir> --apply verdicts.json` |
@@ -72,7 +84,7 @@ gate. Read it rather than guessing a flag.
 | Hand it over: CSV, report, one self-contained page | `render --run <dir>` |
 | See what moved since last month's sweep | `watch --run <new> --since <old>` |
 | Spread the judgement across subagents | `orchestrate --run <dir>` |
-| Drive it all from another harness | `mcp` |
+| Drive it all from another harness | `mcp` — serves where, ingest, scan, places, confirm, enrich, score, dossier, check, render, watch, doctor |
 | Find out why a run came back thin | `doctor` |
 
 ## Cheat sheet
@@ -83,6 +95,10 @@ ultraprospect where "Vincennes" --country fr                  # resolve, or list
 ultraprospect scan --where "Vincennes" --country fr           # both lanes, fused
 ultraprospect scan --lat 48.8566 --long 2.3522 --radius 500m  # a point and a radius
 ultraprospect scan --where "Lyon" --section M --min-employees 20 --out ./runs
+ultraprospect ingest --country gb                             # Companies House monthly snapshot, 470 MB, keyless
+ultraprospect ingest --country de                             # the German register export, 260 MB, keyless
+ultraprospect ingest --list                                   # what is cached, which vintage, how much disk
+ultraprospect scan --where "Hebden Bridge" --country gb        # after ingest: the UK register IS enumerated
 ultraprospect scan --where "Berlin" --country de              # OSM sweeps the ground; the register comes later
 ultraprospect confirm --run <dir>                             # Impressum -> HRB/USt-IdNr -> the authority confirms
 ultraprospect scan --where "Berlin" --no-registry             # skip the register lane entirely
@@ -118,19 +134,41 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    register lane stops at `--max-results` and declares itself partial rather
    than spending twenty minutes.
 
+2b. **Ingest first where a register publishes a file instead of an API.** The
+   United Kingdom and Germany both do, and both exports are keyless.
+   `ingest --country gb` fetches Companies House's monthly snapshot (470 MB) and
+   turns the UK into a territory that can be ENUMERATED; `ingest --country de`
+   fetches the German register export (260 MB) and gives `confirm` a source that
+   names the holder of an HRB number. Each runs once and everything afterwards is
+   a local read — `ingest --list` says what is cached and how much disk it took.
+   Without the ingest, both connectors report themselves unavailable with that
+   command in the message, and the run continues.
+
 3. **Read the coverage before reading the data.** `manifest.lanes` says what
    each lane returned, whether it was capped, and — for the register lane —
-   whether the territory was `"sweep"`-ed or `"confirm"`-ed. `manifest.truncated`
-   is the headline. Only France has a register that can be swept keylessly;
-   everywhere else the lane says so in words, and that is a property of the
-   world's open data, not a failure of the run.
+   whether the territory was `"sweep"`-ed or `"confirm"`-ed. The report prints
+   `mode` as its own column. `manifest.truncated` is the headline. Two registers
+   can be enumerated keylessly and they are not enumerated the same way: France
+   by bounding box through its API, the United Kingdom by POST TOWN out of the
+   snapshot. Everywhere else the lane says in words that no register could be
+   swept, and that is a property of the world's open data, not a failure of the
+   run.
 
-3b. **Outside France, run `confirm` after `enrich --tier 1`.** That order is not
-   arbitrary: the strongest route reads the registration number off the legal
-   notice tier 1 fetches — an `Impressum` in Germany, an `aviso legal` in Spain,
-   both legally mandatory — and asks an authority whose it is. Without pages,
-   `confirm` can only look companies up by name, which is a candidate rather
-   than a fact. It refuses rather than doing the weak half silently.
+3b. **Where the register was not swept, run `confirm` after `enrich --tier 1`.**
+   That order is not arbitrary: the strongest route reads the registration number
+   off the legal notice tier 1 fetches — an `Impressum` in Germany, an `aviso
+   legal` in Spain, both legally mandatory — and asks an authority whose it is.
+   Without pages, `confirm` can only look companies up by name, which is a
+   candidate rather than a fact. It refuses rather than doing the weak half
+   silently.
+
+   In Germany this is where the two sources divide the work, and saying which
+   answered matters: VIES confirms a USt-IdNr is live TODAY and returns `"---"`
+   for the holder, while `de-offeneregister` names who filed under an HRB number
+   in 2017-2019 and stamps `asOf` on it. Neither alone is a current identity, and
+   the pair is worth more than either. A German register number without its
+   Amtsgericht is ambiguous by construction — the same number exists at several
+   courts — so the connector refuses a bare number that matches more than one.
 
 4. **Adjudicate `MATCH.todo.json`.** Each pair carries the OSM name, the register
    name that *actually scored* (`matchedName` — often an enseigne, not the legal
@@ -211,7 +249,11 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | `where` exits 2 with a list | Working as designed. Several distinct places match; choose one. |
 | Very few OSM places | Overpass mirrors were busy. `doctor` shows which answered; re-run. |
 | `truncated: true` on the register lane | A French territory exceeding the API's 10 000-result ceiling even after the NACE split, or `--max-results` was reached. Narrow the filters. |
-| Register lane `mode: "confirm"`, not `"sweep"` | Expected everywhere but France. OSM covered the ground; run `confirm` to attach register identities company by company. |
+| Register lane `mode: "confirm"`, not `"sweep"` | Expected everywhere but France and the United Kingdom. OSM covered the ground; run `confirm` to attach register identities company by company. |
+| The UK register lane returned nothing | No snapshot in the cache. Run `ingest --country gb` once, then re-scan. The lane's reason says so verbatim. |
+| A UK sweep missed a company you can see on the street | Its registered office is in another post town — very often its accountant's. The sweep enumerates by post town, and the lane's reason says a post town is not a bounding box. |
+| A German record carries `asOf: 2018-…` | Working as designed. The German export stopped in 2019 and each record says when it was retrieved. Write it as a fact about that date, never as today's. |
+| `de-offeneregister` refused a register number | The bare number exists at more than one Amtsgericht. Supply the court from the Impressum, or leave it unattached — a number is not an identity without its court. |
 | `confirm` found identifiers but named no holders | Expected in Germany and Spain: VIES confirms a VAT number is live and does not disclose who holds it. The identifiers are on the record, sourced and re-readable. |
 | `confirm` found nothing at all in the US | Expected. There is no US company register and no published company number; identity there rests on address and name. |
 | A merged place looks like two companies | Adjudication was skipped or answered too generously. Check `matchConfidence` and the raw lanes in `osm.json` / `registry.json`. |
@@ -231,6 +273,13 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
   open-data record, and never derive one from a naming pattern.
 - Never describe a `confirm`-mode run as if the register had been swept, and
   never describe the absence of a sweepable register as a failure.
+- Never present a UK sweep as covering a bounding box. It enumerates a POST TOWN,
+  which is a real enumeration and a different shape; the lane says so and so
+  should you.
+- Never write a record carrying `asOf` in the present tense. Germany's register
+  data stops in 2019, and "is registered at" where the evidence says "was
+  registered at, as of 2018-07" is the same class of claim as a confirmed
+  territory presented as a swept one.
 - Never present an identifier an authority declined to attribute as an identity.
 - Never strip the attributions in `manifest.licences` from a deliverable, and
   never add one for a connector that did not answer.
@@ -279,6 +328,7 @@ Subagents never write; the folds stay with you, the orchestrator. Re-run
 | Open it when | File |
 |---|---|
 | You need an upstream's exact parameters, limits or failure modes | [references/data-sources.md](references/data-sources.md) |
+| You are ingesting a bulk export, or wondering what `asOf` means | [references/data-sources.md](references/data-sources.md) |
 | You are adjudicating pairs and want the scoring model | [references/matching.md](references/matching.md) |
 | You are enriching, or wondering why hiring is unknown | [references/enrichment-playbook.md](references/enrichment-playbook.md) |
 | You are ranking, writing a dossier, or reading a gate failure | [references/scoring-and-citations.md](references/scoring-and-citations.md) |

@@ -77,7 +77,8 @@ A connector DECLARES what it can do, and the pipeline reads the declaration:
 
 | Capability | What it means | Who has it |
 |---|---|---|
-| `sweep` | Enumerate every company inside a bounded territory. | **France, and nobody else.** |
+| `sweep` | Enumerate every company in a territory. **The SHAPE of the territory differs and the lane's `reason` names it**: France answers a bounding box, the UK a post town. | France, United Kingdom |
+| `snapshot` | The register publishes everything as one bulk file and offers no queryable API. `ingest` reads this. | United Kingdom, Germany |
 | `lookup` | Find a company by name and locality. | most connectors |
 | `verifyId` | Confirm an identifier read off the company's own site, and return what the register filed under it. | most connectors |
 
@@ -86,6 +87,30 @@ supports. Every other public register was probed and either needs a key, needs
 credentials, or offers no geographic query at all. A connector with no `sweep`
 is not a degraded sweep connector — it answers a different question, and
 `LaneCoverage.mode` records which question was answered.
+
+### Bulk exports, and why `ingest` exists
+
+Two registers publish a file instead of an API. Both are keyless, both are too
+large for a per-run path, and `ingest` fetches and indexes each once:
+
+| | Companies House | OffeneRegister (Germany) |
+|---|---|---|
+| File | `BasicCompanyDataAsOneFile-YYYY-MM-01.zip`, ~470 MB | `de_companies_ocdata.jsonl.bz2`, 260 MB |
+| Freshness | monthly, "within 5 working days of the previous month end" — so `ingest` tries this month and falls back to the previous two | **frozen: the file dates from 2019-02, its records from 2017-2019** |
+| Licence | Open Government Licence v3.0 | CC-BY 4.0, attribution to OpenCorporates |
+| Rows | ~5.5 million live companies | 5 305 727 (measured) |
+| Disk after indexing | ~1.8 GB | ~2.8 GB (measured) |
+| Gives | a real `sweep` by post town, plus keyless `lookup`/`verifyId` | `lookup`/`verifyId`, and **the holder of an HRB number** |
+
+`ingest --list` reports what is cached, its vintage and its size on disk. `ingest
+--country <cc> --forget` deletes one.
+
+Every record from a snapshot carries **`asOf`** — the date it was true. Absent
+means live. It travels into the CSV, the dossier fact sheet and the report, and
+`check` will not let a dated record found a present-tense claim. That single field
+is what makes a seven-year-old German export usable rather than misleading: "was
+registered at, as of 2018-07" is a fact; "is registered at" is not one this run
+can support.
 
 Each connector also carries its own `canary()`, asserting the response shape ITS
 parser depends on. Adding a country therefore adds its drift detection, with
@@ -105,11 +130,24 @@ nothing to remember elsewhere.
   holding an LEI, roughly 2.7 million against tens of millions of companies: it
   will know a bank and not the bakery next door. German register numbers repeat
   across courts, so an exact number match is checked against the name too.
-- **gb-companies-house** — a free key (email only). Without one the connector
-  reports itself unavailable with the steps, and the run continues. It does not
-  declare `sweep` even though `/advanced-search` takes a locality: a locality
-  string cannot be aligned with the OSM lane's geometry, and labelling a
-  different territory "whole" is exactly what this tool refuses.
+- **gb-companies-house** — two routes, and the keyless one is primary. The
+  monthly Free Company Data Product needs no key at all and, once ingested,
+  enumerates a post town: that is a real sweep, and the lane's `reason` says in
+  words that a post town is not a bounding box, so it does not coincide with the
+  OSM lane's geometry. The REST API needs a free key (email only), is a day
+  fresher, and is never required — no successful response from it has ever reached
+  this code, which the connector declares in `unverified` and `doctor` prints.
+  A UK registered office is very often the company's accountant, so an address
+  from here is the register's address and not necessarily the premises, and the
+  postcode is deliberately never used to narrow a lookup.
+- **de-offeneregister** — keyless, from the ingested export, and the only source
+  here that will tell you WHO holds a German `HRB` number. Data stops in 2019, so
+  every record carries `asOf` and it declares no `sweep`: a 2018 enumeration
+  presented as a Berlin district's businesses would be the lie this tool exists to
+  refuse. 61% of the export is companies the register has since removed, which is
+  mapped as `ceased` rather than defaulted to active. A bare register number is
+  refused when more than one Amtsgericht has it — supply the court from the
+  Impressum and it is matched exactly.
 - **no-brreg** — keyless, and the richest after France's: an EXACT headcount
   (`antallAnsatte`) rather than a band, and the company's own website
   (`hjemmeside`), which is otherwise something `resolve` has to go and prove.

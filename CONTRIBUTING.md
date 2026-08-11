@@ -32,8 +32,14 @@ needs a test that would fail without the change:
 
 - A sweep that could not cover its territory sets `manifest.truncated`.
 - A register lane says whether it SWEPT the territory or CONFIRMED it company by
-  company. Only France can be swept, and a confirmed run presented as a swept
-  one is the most expensive lie this tool could tell.
+  company, and a confirmed run presented as a swept one is the most expensive lie
+  this tool could tell. Two registers can be swept, by different shapes: France
+  by bounding box, the United Kingdom by post town out of its monthly snapshot.
+  A lane that sweeps by a shape other than the requested area must say so in its
+  `reason` — "sweep" alone would imply a geometry it does not have.
+- A record that came from a bulk snapshot carries `asOf`, and nothing downstream
+  may state it in the present tense. Germany's export stopped in 2019; that is
+  what makes it usable rather than misleading.
 - A match the scorer is unsure about goes to `MATCH.todo.json`, unmerged.
 - A contact that does not appear verbatim in a fetched page is never written.
 - A legal identifier that produced an identity must still be readable in the

@@ -126,6 +126,21 @@ export interface RegistryRecord {
   sourceUrl?: string;
   /** Fields that exist in one country and nowhere else. Never invent a shared meaning. */
   national?: Record<string, unknown>;
+  /**
+   * The date this record was TRUE, when it comes from a snapshot rather than live.
+   *
+   * Absent means live: the register was asked just now and this is its answer.
+   * Present means a bulk export said so on that date and nobody has asked since.
+   *
+   * The distinction is the whole reason a stale open-data source is usable at all.
+   * Germany's only open register export stopped in 2019, and its records are
+   * genuinely valuable — it names the holder of an HRB number, which VIES flatly
+   * refuses to disclose for Germany — but a 2018 identity presented as today's is
+   * the same class of lie as a confirmed territory presented as a swept one. So it
+   * travels: into the CSV, the fact sheet, the report, and a `check` rule that
+   * will not let a dated record found a present-tense claim.
+   */
+  asOf?: string;
 }
 
 /** A legal identifier read off a company's own site, before anyone has confirmed it. */
@@ -273,6 +288,22 @@ export interface RegistryConnector {
 
   /** Can this connector run, given the context? Cheap, synchronous, no network. */
   availability(ctx: ConnectorContext): Availability;
+
+  /**
+   * A bulk open-data export this connector can be ingested from.
+   *
+   * Present when the register publishes everything it has as one large file and
+   * nothing at all as a queryable API — which, measured rather than assumed, is
+   * the normal case outside France: the United Kingdom's Free Company Data
+   * Product and Germany's OffeneRegister export are both files. `ingest` reads
+   * this and nothing else, so adding a bulk source is a connector edit and not a
+   * command edit.
+   *
+   * Typed loosely on purpose (`unknown`, resolved in src/snapshot.ts) to keep the
+   * connector contract from depending on the ingest machinery — the dependency
+   * runs the other way, and a connector must stay readable without it.
+   */
+  snapshot?: unknown;
 
   /** Enumerate every company in a territory. Absent means the register cannot be swept. */
   sweep?(target: GeoTarget, filters: RegistryFilters, ctx: ConnectorContext): Promise<SweepResult>;

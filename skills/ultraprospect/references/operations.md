@@ -58,18 +58,45 @@ under it is taken.
 { "lane": "registry", "mode": "confirm", "connectorId": "eu-vies,gleif",
   "returned": 12, "truncated": false,
   "reason": "confirmed one company at a time: 4 by a published registration number, 8 by a name lookup, 31 not found. This is NOT a sweep — companies absent from OSM are absent from this run." }
+{ "lane": "registry", "mode": "sweep", "connectorId": "gb-companies-house",
+  "returned": 214, "truncated": false,
+  "reason": "enumerated from the Companies House monthly snapshot by POST TOWN \"Hebden Bridge\" — every company the register files there. A post town is not a bounding box, so this lane's shape does not coincide with the OSM lane's, and a company registered at an accountant's address in another town is absent from it." }
 ```
 
-**`mode` is the field to read first.** `"sweep"` means the register was asked
-for every company in the area, and the answer is a territory. `"confirm"` means
-OSM covered the ground and each company was checked afterwards — a company
-nobody has mapped is not in the run at all. Only France can be swept.
+**`mode` is the field to read first**, and the report prints it as a column.
+`"sweep"` means the register was asked for every company in the area and the
+answer is a territory; `"confirm"` means OSM covered the ground and each company
+was checked afterwards, so a company nobody has mapped is not in the run at all.
+
+Two registers can be swept and **they are not swept by the same shape**, which is
+why the `reason` has to be read alongside the mode. France answers a bounding box.
+The United Kingdom answers a POST TOWN out of its monthly snapshot — a real
+enumeration of what the register files there, and not the area the OSM lane
+covered. Repeat that distinction; do not let "sweep" imply it away.
+
+The `confirm` entry above may also mention places **no authority could be asked
+about** — a rate limit, an outage, a rejected key. That is counted apart from "not
+found" on purpose: one is the register's answer and the other is our own loss of
+reach, and reporting the second as the first says a company is unregistered
+because we ran out of quota.
 
 The third entry is not a failure either. "No register can be swept here",
 "skipped" and "failed" are three different states and the manifest keeps them
 apart; describe them differently.
 
 `manifest.truncated` is the OR of every lane. When it is true, say so first.
+
+## Snapshots, and `asOf`
+
+`ingest --country gb|de` fetches a register's bulk export once and indexes it into
+the cache; `ingest --list` says what is cached, its vintage and its size on disk.
+Until then those connectors report themselves unavailable WITH the command to run,
+and the run continues.
+
+Records that came out of a snapshot carry **`asOf`** — the date the record was
+true. Absent means the register was asked just now. It matters most in Germany,
+whose export stopped in 2019: an identity from there is who filed under that
+number THEN. Write it with its date, and expect `check` to object if you do not.
 
 ## Environment
 

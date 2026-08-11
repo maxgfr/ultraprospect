@@ -17,10 +17,24 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll } from "vitest";
+import { brandEngine } from "../src/engine.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "ultraprospect-test-"));
 process.env.ULTRAPROSPECT_CACHE_DIR = join(scratch, "cache");
 process.env.ULTRAPROSPECT_POLITE_DELAY_MS = "0";
+
+// Brand the engine, or the two environment variables above are decoration.
+//
+// The engine reads its settings under a configurable prefix, and until
+// `brandEngine()` runs that prefix is `WEBINDEX_`. So the suite believed it had
+// pinned the cache to a throwaway directory and had actually pinned nothing: any
+// test that wrote through the engine's cache went to the shared default, outside
+// the scratch tree and outside anything the suite cleans up. It surfaced the day
+// a test ingested a register snapshot and the files landed in `<tmpdir>/webindex`.
+//
+// Branding here also makes the unit suite resolve the same env vars, cache root
+// and User-Agent that the CLI does, which is the point of a test harness.
+brandEngine();
 
 beforeAll(() => {
   global.fetch = (async (input: any) => {

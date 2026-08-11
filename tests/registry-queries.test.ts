@@ -17,7 +17,17 @@ let answer: { ok: boolean; status: number; data: unknown } = { ok: true, status:
 /** Hosts pushed back by a Retry-After-shaped signal, so a 429 is observable. */
 const backOffs: Array<{ url: string; ms: number }> = [];
 
-vi.mock("../src/engine.js", () => ({
+// Only the four retrieval symbols are replaced; everything else stays real.
+// A wholesale mock used to be enough, and stopped being when the connectors
+// gained a keyless snapshot route — that path needs the engine's own `cacheDir`,
+// `slugify` and `fnv1a64`, and listing them by hand here would mean this file
+// breaks again the next time a connector reaches for one.
+//
+// The cache is pinned to a throwaway directory by tests/setup.ts and no snapshot
+// is ingested into it, so `hasSnapshot()` is false throughout: these tests are
+// about what the API path ASKS, and the snapshot route is covered on its own.
+vi.mock("../src/engine.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/engine.js")>()),
   awaitHostSlot: async () => 0,
   backOffHost: (url: string, ms: number) => {
     backOffs.push({ url, ms });

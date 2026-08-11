@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // src/cli.ts
-import { readFileSync as readFileSync8 } from "fs";
-import { join as join13 } from "path";
+import { readFileSync as readFileSync9 } from "fs";
+import { join as join15 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 
 // src/vendor/webindex-engine.mjs
@@ -273,10 +273,10 @@ async function ocrPdf(bytes) {
   if (ocrBudgetLeft() <= 0) return void 0;
   const { copyablePdf, tesseract } = await ocrTools();
   if (!copyablePdf || !tesseract) return void 0;
-  const dir = mkdtempSync(join(tmpdir(), `${brand().name}-ocr-`));
+  const dir2 = mkdtempSync(join(tmpdir(), `${brand().name}-ocr-`));
   try {
-    const input = join(dir, "in.pdf");
-    const output = join(dir, "out.pdf");
+    const input = join(dir2, "in.pdf");
+    const output = join(dir2, "out.pdf");
     writeFileSync(input, bytes);
     const lang = env("OCR_LANG") || DEFAULT_LANG;
     const r = await runWithInput("copyable-pdf", ["-o", output, "-m", "-l", lang, input], Buffer.alloc(0), envInt("OCR_TIMEOUT_MS", DEFAULT_TIMEOUT_MS));
@@ -287,7 +287,7 @@ async function ocrPdf(bytes) {
   } catch {
     return void 0;
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir2, { recursive: true, force: true });
   }
 }
 var PDF_EXTRACTORS = ["pdf-inspector", "anydoc", "firecrawl", "pdftotext", "native", "ocr"];
@@ -1606,13 +1606,13 @@ async function searchViaSearxng(query, opts = {}) {
   const pages = Math.max(1, opts.pages ?? 1);
   const limit = Math.max(1, opts.limit ?? 10);
   const acceptLanguage = acceptLanguageHeader(opts.lang, opts.region);
-  const root = `${base}/search?q=${encodeURIComponent(query)}&format=json&safesearch=1` + (opts.lang ? `&language=${encodeURIComponent(opts.lang)}` : "");
+  const root2 = `${base}/search?q=${encodeURIComponent(query)}&format=json&safesearch=1` + (opts.lang ? `&language=${encodeURIComponent(opts.lang)}` : "");
   const notes = [];
   const seen = /* @__PURE__ */ new Set();
   const hits = [];
   const suspended = /* @__PURE__ */ new Map();
   for (let p = 0; p < pages && hits.length < limit; p++) {
-    const r = await httpGet(root + (p > 0 ? `&pageno=${p + 1}` : ""), { accept: "application/json", acceptLanguage, timeoutMs: QUERY_TIMEOUT_MS });
+    const r = await httpGet(root2 + (p > 0 ? `&pageno=${p + 1}` : ""), { accept: "application/json", acceptLanguage, timeoutMs: QUERY_TIMEOUT_MS });
     if (!r.ok) {
       if (p === 0) notes.push(r.status === 429 || r.status === 503 ? `SearXNG rate-limited (HTTP ${r.status}).` : `SearXNG unreachable (status ${r.status}).`);
       break;
@@ -1732,9 +1732,9 @@ function isNoWrite() {
   return flagged || envFlag("NO_WRITE");
 }
 var collected = [];
-function ensureDir(dir) {
+function ensureDir(dir2) {
   if (isNoWrite()) return;
-  mkdirSync3(dir, { recursive: true });
+  mkdirSync3(dir2, { recursive: true });
 }
 function writeArtifact(path, content) {
   if (isNoWrite()) {
@@ -1885,11 +1885,11 @@ function readJsonSafe(path) {
     return void 0;
   }
 }
-function readManifest(dir, file = "manifest.json") {
-  return readJsonSafe(join5(dir, file));
+function readManifest(dir2, file = "manifest.json") {
+  return readJsonSafe(join5(dir2, file));
 }
-function writeManifest(dir, value, file = "manifest.json") {
-  return writeArtifact(join5(dir, file), `${JSON.stringify(value, null, 2)}
+function writeManifest(dir2, value, file = "manifest.json") {
+  return writeArtifact(join5(dir2, file), `${JSON.stringify(value, null, 2)}
 `);
 }
 var nextFree = /* @__PURE__ */ new Map();
@@ -2268,17 +2268,17 @@ function resolveSkillRoot(moduleDir) {
   const here = moduleDir ?? dirname2(fileURLToPath(import.meta.url));
   const name = brand().name;
   const candidates = [resolve3(here, ".."), resolve3(here, "..", "skills", name), resolve3(here, "..", "..", "skills", name)];
-  return candidates.find((dir) => existsSync6(join8(dir, "SKILL.md")));
+  return candidates.find((dir2) => existsSync6(join8(dir2, "SKILL.md")));
 }
 function listResources(moduleDir) {
-  const root = resolveSkillRoot(moduleDir);
-  if (!root) return [];
-  const out2 = [describe(root, "SKILL.md", `${skillName()}: the skill`)];
-  const refDir = join8(root, "references");
+  const root2 = resolveSkillRoot(moduleDir);
+  if (!root2) return [];
+  const out2 = [describe(root2, "SKILL.md", `${skillName()}: the skill`)];
+  const refDir = join8(root2, "references");
   if (!existsSync6(refDir)) return out2;
   for (const file of readdirSync3(refDir).sort()) {
     if (!file.endsWith(".md")) continue;
-    out2.push(describe(root, join8("references", file), `${skillName()} reference: ${basename3(file, ".md")}`));
+    out2.push(describe(root2, join8("references", file), `${skillName()} reference: ${basename3(file, ".md")}`));
   }
   return out2;
 }
@@ -2286,12 +2286,12 @@ function readResource(uri, moduleDir) {
   if (!uri.startsWith(URI_SCHEME)) {
     throw new ResourceError(`unknown resource scheme in "${uri}" (expected ${URI_SCHEME}\u2026)`);
   }
-  const root = resolveSkillRoot(moduleDir);
-  if (!root) throw new ResourceError("no skill payload found next to this build \u2014 nothing to read");
+  const root2 = resolveSkillRoot(moduleDir);
+  if (!root2) throw new ResourceError("no skill payload found next to this build \u2014 nothing to read");
   const rel = uri.slice(URI_SCHEME.length);
   if (!rel) throw new ResourceError("empty resource path");
-  const target = resolve3(root, rel);
-  const rootReal = realpathSync(root);
+  const target = resolve3(root2, rel);
+  const rootReal = realpathSync(root2);
   let targetReal;
   try {
     targetReal = realpathSync(target);
@@ -2306,14 +2306,14 @@ function readResource(uri, moduleDir) {
 }
 var ResourceError = class extends Error {
 };
-function describe(root, rel, fallbackTitle) {
+function describe(root2, rel, fallbackTitle) {
   const decl = {
     uri: `${URI_SCHEME}${rel.split(sep).join("/")}`,
     name: rel.split(sep).join("/"),
     title: fallbackTitle,
     mimeType: "text/markdown"
   };
-  const summary = firstProse(join8(root, rel));
+  const summary = firstProse(join8(root2, rel));
   if (summary) decl.description = summary;
   return decl;
 }
@@ -4131,6 +4131,10 @@ function parseBbox(raw) {
   if (s >= n || w >= e) return void 0;
   return [s, n, w, e];
 }
+function shortLabel(label) {
+  const first = label.split(",")[0]?.trim();
+  return first && first.length > 1 ? first : label;
+}
 
 // src/registry/fr-sirene.ts
 var BASE4 = "https://recherche-entreprises.api.gouv.fr";
@@ -4535,16 +4539,887 @@ var frSirene = {
   }
 };
 
+// src/snapshot.ts
+import { createReadStream as createReadStream2, createWriteStream } from "fs";
+import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync2, readdirSync, rmSync as rmSync2, statSync, writeFileSync as writeFileSync2 } from "fs";
+import { createInterface as createInterface2 } from "readline";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
+import { join as join2 } from "path";
+
+// src/bunzip2.ts
+var MAX_CODE_LEN = 23;
+var BLOCK_MAGIC_HI = 12609;
+var BLOCK_MAGIC_LO = 1495683929;
+var FOOTER_MAGIC_HI = 6002;
+var FOOTER_MAGIC_LO = 1161318544;
+var RUNA = 0;
+var RUNB = 1;
+var Bzip2Error = class extends Error {
+};
+function isBzip2(buf) {
+  return buf.length >= 4 && buf[0] === 66 && buf[1] === 90 && buf[2] === 104 && buf[3] >= 49 && buf[3] <= 57;
+}
+var BitReader = class {
+  pos = 0;
+  bitBuf = 0;
+  bitCount = 0;
+  buf;
+  // An explicit field rather than a parameter property: the latter is TypeScript
+  // syntax that has to be TRANSFORMED rather than stripped, and this module is
+  // worth being able to run under `node --experimental-strip-types` directly when
+  // reaching for it to check something against a real dump.
+  constructor(buf) {
+    this.buf = buf;
+  }
+  /** Up to 24 bits at a time; wider reads are composed by the callers that need them. */
+  bits(n) {
+    while (this.bitCount < n) {
+      if (this.pos >= this.buf.length) throw new Bzip2Error("truncated bzip2 stream");
+      this.bitBuf = this.bitBuf << 8 | this.buf[this.pos++];
+      this.bitCount += 8;
+    }
+    this.bitCount -= n;
+    const out2 = this.bitBuf >>> this.bitCount & (1 << n) - 1;
+    this.bitBuf &= (1 << this.bitCount) - 1;
+    return out2;
+  }
+  bit() {
+    return this.bits(1);
+  }
+  /** 32 bits, in two halves: `1 << 32` is not a number JavaScript can shift to. */
+  uint32() {
+    return this.bits(16) * 65536 + this.bits(16);
+  }
+  atEnd() {
+    return this.pos >= this.buf.length && this.bitCount === 0;
+  }
+  /** Skip to the next byte boundary — only ever between concatenated streams. */
+  alignToByte() {
+    this.bitCount -= this.bitCount % 8;
+    this.bitBuf &= (1 << this.bitCount) - 1;
+  }
+  /** Does a whole `BZh` header start here, ignoring any partial byte? */
+  looksLikeNewStream() {
+    const at = this.pos - Math.floor(this.bitCount / 8);
+    return at + 3 < this.buf.length && this.buf[at] === 66 && this.buf[at + 1] === 90 && this.buf[at + 2] === 104;
+  }
+};
+function decodeTable(lengths, alphaSize) {
+  let minLen = 32;
+  let maxLen = 0;
+  for (let i = 0; i < alphaSize; i++) {
+    const l = lengths[i];
+    if (l > maxLen) maxLen = l;
+    if (l < minLen) minLen = l;
+  }
+  const perm = new Int32Array(alphaSize);
+  let pp = 0;
+  for (let len = minLen; len <= maxLen; len++) {
+    for (let sym = 0; sym < alphaSize; sym++) if (lengths[sym] === len) perm[pp++] = sym;
+  }
+  const base = new Int32Array(MAX_CODE_LEN + 2);
+  const limit = new Int32Array(MAX_CODE_LEN + 2);
+  for (let i = 0; i < alphaSize; i++) {
+    const slot = lengths[i] + 1;
+    base[slot] = (base[slot] ?? 0) + 1;
+  }
+  for (let i = 1; i < base.length; i++) base[i] = base[i] + base[i - 1];
+  let vec = 0;
+  for (let len = minLen; len <= maxLen; len++) {
+    vec += base[len + 1] - base[len];
+    limit[len] = vec - 1;
+    vec <<= 1;
+  }
+  for (let len = minLen + 1; len <= maxLen; len++) base[len] = (limit[len - 1] + 1 << 1) - base[len];
+  return { limit, base, perm, minLen, maxLen };
+}
+function decodeSymbol(r, t) {
+  let len = t.minLen;
+  let vec = r.bits(len);
+  while (len <= t.maxLen && vec > t.limit[len]) {
+    vec = vec << 1 | r.bit();
+    len++;
+  }
+  if (len > t.maxLen) throw new Bzip2Error("bad Huffman code");
+  const idx = vec - t.base[len];
+  if (idx < 0 || idx >= t.perm.length) throw new Bzip2Error("Huffman code out of range");
+  return t.perm[idx];
+}
+function readSymbolMap(r) {
+  const used = [];
+  const groups = r.bits(16);
+  for (let i = 0; i < 16; i++) {
+    if ((groups & 32768 >>> i) === 0) continue;
+    const bits = r.bits(16);
+    for (let j = 0; j < 16; j++) if (bits & 32768 >>> j) used.push(i * 16 + j);
+  }
+  if (used.length === 0) throw new Bzip2Error("block uses no symbols");
+  return Uint8Array.from(used);
+}
+function readSelectors(r, nGroups, nSelectors) {
+  const mtf = new Uint8Array(nGroups);
+  for (let i = 0; i < nGroups; i++) mtf[i] = i;
+  const out2 = new Uint8Array(nSelectors);
+  for (let i = 0; i < nSelectors; i++) {
+    let j = 0;
+    while (r.bit()) {
+      j++;
+      if (j >= nGroups) throw new Bzip2Error("selector out of range");
+    }
+    const v = mtf[j];
+    for (let k = j; k > 0; k--) mtf[k] = mtf[k - 1];
+    mtf[0] = v;
+    out2[i] = v;
+  }
+  return out2;
+}
+function readCodeLengths(r, nGroups, alphaSize) {
+  const tables = [];
+  for (let g = 0; g < nGroups; g++) {
+    const lengths = new Uint8Array(alphaSize);
+    let curr = r.bits(5);
+    for (let s = 0; s < alphaSize; s++) {
+      for (; ; ) {
+        if (curr < 1 || curr > 20) throw new Bzip2Error(`code length ${curr} out of range`);
+        if (!r.bit()) break;
+        curr += r.bit() ? -1 : 1;
+      }
+      lengths[s] = curr;
+    }
+    tables.push(lengths);
+  }
+  return tables;
+}
+function inverseBwt(bwt, nblock, origPtr) {
+  if (origPtr < 0 || origPtr >= nblock) throw new Bzip2Error("origPtr outside the block");
+  const cftab = new Int32Array(257);
+  for (let i = 0; i < nblock; i++) {
+    const slot = bwt[i] + 1;
+    cftab[slot] = (cftab[slot] ?? 0) + 1;
+  }
+  for (let i = 1; i < 257; i++) cftab[i] = cftab[i] + cftab[i - 1];
+  const next = new Int32Array(nblock);
+  for (let i = 0; i < nblock; i++) next[cftab[bwt[i]]++] = i;
+  const out2 = new Uint8Array(nblock);
+  let p = next[origPtr];
+  for (let i = 0; i < nblock; i++) {
+    out2[i] = bwt[p];
+    p = next[p];
+  }
+  return out2;
+}
+function unRle(data, len) {
+  const chunks = [];
+  let out2 = new Uint8Array(Math.max(1024, len * 2));
+  let o = 0;
+  const push = (b) => {
+    if (o === out2.length) {
+      chunks.push(out2);
+      out2 = new Uint8Array(out2.length);
+      o = 0;
+    }
+    out2[o++] = b;
+  };
+  let i = 0;
+  while (i < len) {
+    const b = data[i];
+    let run = 1;
+    while (run < 4 && i + run < len && data[i + run] === b) run++;
+    if (run < 4) {
+      for (let k = 0; k < run; k++) push(b);
+      i += run;
+      continue;
+    }
+    if (i + 4 >= len) throw new Bzip2Error("run-length prefix with no count");
+    const extra = data[i + 4];
+    for (let k = 0; k < 4 + extra; k++) push(b);
+    i += 5;
+  }
+  chunks.push(out2.subarray(0, o));
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const joined = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    joined.set(c, at);
+    at += c.length;
+  }
+  return joined;
+}
+function readBlock(r, blockSize) {
+  r.uint32();
+  if (r.bit()) throw new Bzip2Error("randomised blocks are deprecated and unsupported");
+  const origPtr = r.bits(24);
+  const seqToUnseq = readSymbolMap(r);
+  const alphaSize = seqToUnseq.length + 2;
+  const nGroups = r.bits(3);
+  if (nGroups < 2 || nGroups > 6) throw new Bzip2Error(`nGroups ${nGroups} out of range`);
+  const nSelectors = r.bits(15);
+  const selectors = readSelectors(r, nGroups, nSelectors);
+  const tables = readCodeLengths(r, nGroups, alphaSize).map((l) => decodeTable(l, alphaSize));
+  const bwt = new Uint8Array(blockSize);
+  let nblock = 0;
+  const mtf = Uint8Array.from(seqToUnseq);
+  const eob = alphaSize - 1;
+  let groupNo = -1;
+  let groupPos = 0;
+  let table = tables[0];
+  const nextSymbol = () => {
+    if (groupPos === 0) {
+      groupNo++;
+      if (groupNo >= nSelectors) throw new Bzip2Error("ran out of selectors");
+      groupPos = 50;
+      table = tables[selectors[groupNo]];
+    }
+    groupPos--;
+    return decodeSymbol(r, table);
+  };
+  let sym = nextSymbol();
+  while (sym !== eob) {
+    if (sym === RUNA || sym === RUNB) {
+      let run = 0;
+      let bit = 1;
+      while (sym === RUNA || sym === RUNB) {
+        run += sym === RUNA ? bit : 2 * bit;
+        bit *= 2;
+        sym = nextSymbol();
+      }
+      const b2 = mtf[0];
+      if (nblock + run > blockSize) throw new Bzip2Error("block longer than its declared size");
+      bwt.fill(b2, nblock, nblock + run);
+      nblock += run;
+      continue;
+    }
+    const j = sym - 1;
+    if (j >= mtf.length) throw new Bzip2Error("MTF index out of range");
+    const b = mtf[j];
+    for (let k = j; k > 0; k--) mtf[k] = mtf[k - 1];
+    mtf[0] = b;
+    if (nblock >= blockSize) throw new Bzip2Error("block longer than its declared size");
+    bwt[nblock++] = b;
+    sym = nextSymbol();
+  }
+  return unRle(inverseBwt(bwt, nblock, origPtr), nblock);
+}
+function* bunzip2Blocks(input) {
+  if (!isBzip2(input)) throw new Bzip2Error("not a bzip2 stream (no BZh header)");
+  const r = new BitReader(input);
+  for (; ; ) {
+    if (r.bits(8) !== 66 || r.bits(8) !== 90 || r.bits(8) !== 104) throw new Bzip2Error("bad stream header");
+    const level = r.bits(8) - 48;
+    if (level < 1 || level > 9) throw new Bzip2Error(`bad block-size level ${level}`);
+    const blockSize = level * 1e5;
+    for (; ; ) {
+      const hi = r.bits(16);
+      const lo = r.uint32();
+      if (hi === BLOCK_MAGIC_HI && lo === BLOCK_MAGIC_LO) {
+        const out2 = readBlock(r, blockSize);
+        if (out2.length) yield out2;
+        continue;
+      }
+      if (hi === FOOTER_MAGIC_HI && lo === FOOTER_MAGIC_LO) {
+        r.uint32();
+        break;
+      }
+      throw new Bzip2Error("bzip2 block magic not found");
+    }
+    r.alignToByte();
+    if (r.atEnd() || !r.looksLikeNewStream()) return;
+  }
+}
+
+// src/zip.ts
+import { createReadStream } from "fs";
+import { open } from "fs/promises";
+import { createInflateRaw } from "zlib";
+var EOCD_SIGNATURE = 101010256;
+var EOCD_MIN_SIZE = 22;
+var EOCD_SEARCH_WINDOW = 65536 + EOCD_MIN_SIZE;
+var CENTRAL_SIGNATURE = 33639248;
+var STORED = 0;
+var DEFLATED = 8;
+var ZipError = class extends Error {
+};
+async function zipEntries(path) {
+  const fh = await open(path, "r");
+  try {
+    const { size } = await fh.stat();
+    if (size < EOCD_MIN_SIZE) throw new ZipError("file is too small to be a zip archive");
+    const windowSize = Math.min(size, EOCD_SEARCH_WINDOW);
+    const tail = Buffer.alloc(windowSize);
+    await fh.read(tail, 0, windowSize, size - windowSize);
+    let eocd = -1;
+    for (let i = windowSize - EOCD_MIN_SIZE; i >= 0; i--) {
+      if (tail.readUInt32LE(i) === EOCD_SIGNATURE) {
+        eocd = i;
+        break;
+      }
+    }
+    if (eocd < 0) throw new ZipError("no end-of-central-directory record \u2014 not a zip archive, or truncated");
+    const entryCount = tail.readUInt16LE(eocd + 10);
+    const directorySize2 = tail.readUInt32LE(eocd + 12);
+    const directoryOffset = tail.readUInt32LE(eocd + 16);
+    if (directoryOffset === 4294967295 || entryCount === 65535) {
+      throw new ZipError("ZIP64 archive \u2014 not supported, and refused rather than misread");
+    }
+    const dir2 = Buffer.alloc(directorySize2);
+    await fh.read(dir2, 0, directorySize2, directoryOffset);
+    const entries = [];
+    let at = 0;
+    for (let i = 0; i < entryCount; i++) {
+      if (at + 46 > dir2.length) throw new ZipError("central directory ended early");
+      if (dir2.readUInt32LE(at) !== CENTRAL_SIGNATURE) throw new ZipError("bad central directory signature");
+      const method = dir2.readUInt16LE(at + 10);
+      const compressedSize = dir2.readUInt32LE(at + 20);
+      const uncompressedSize = dir2.readUInt32LE(at + 24);
+      const nameLen = dir2.readUInt16LE(at + 28);
+      const extraLen = dir2.readUInt16LE(at + 30);
+      const commentLen = dir2.readUInt16LE(at + 32);
+      const localHeaderOffset = dir2.readUInt32LE(at + 42);
+      const name = dir2.toString("utf8", at + 46, at + 46 + nameLen);
+      if (compressedSize === 4294967295 || uncompressedSize === 4294967295 || localHeaderOffset === 4294967295) {
+        throw new ZipError(`ZIP64 member "${name}" \u2014 not supported, and refused rather than misread`);
+      }
+      entries.push({ name, compressedSize, uncompressedSize, localHeaderOffset, method });
+      at += 46 + nameLen + extraLen + commentLen;
+    }
+    return entries;
+  } finally {
+    await fh.close();
+  }
+}
+async function dataStart(path, entry) {
+  const fh = await open(path, "r");
+  try {
+    const head = Buffer.alloc(30);
+    await fh.read(head, 0, 30, entry.localHeaderOffset);
+    if (head.readUInt32LE(0) !== 67324752) throw new ZipError(`no local header for "${entry.name}"`);
+    return entry.localHeaderOffset + 30 + head.readUInt16LE(26) + head.readUInt16LE(28);
+  } finally {
+    await fh.close();
+  }
+}
+async function openZipMember(path, entry) {
+  if (entry.method !== DEFLATED && entry.method !== STORED) {
+    throw new ZipError(`member "${entry.name}" uses compression method ${entry.method}; only stored and deflate are supported`);
+  }
+  const start = await dataStart(path, entry);
+  const raw = createReadStream(path, { start, end: start + entry.compressedSize - 1 });
+  return entry.method === STORED ? raw : raw.pipe(createInflateRaw());
+}
+
+// src/snapshot.ts
+var BUCKETS = 256;
+var root = () => join2(cacheDir(), "snapshots");
+var dir = (connectorId) => join2(root(), connectorId);
+function snapshotKey(raw) {
+  return slugify(raw, { max: 120 });
+}
+function bucketOf(key) {
+  return (Number(fnv1a64(key) % BigInt(BUCKETS)) | 0).toString(16).padStart(2, "0");
+}
+function snapshotMeta(connectorId) {
+  const path = join2(dir(connectorId), "meta.json");
+  if (!existsSync2(path)) return void 0;
+  try {
+    return JSON.parse(readFileSync2(path, "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+function hasSnapshot(connectorId) {
+  return snapshotMeta(connectorId) !== void 0;
+}
+function listSnapshots() {
+  if (!existsSync2(root())) return [];
+  return readdirSync(root()).map((id) => snapshotMeta(id)).filter((m) => Boolean(m)).sort((a, b) => a.connectorId.localeCompare(b.connectorId));
+}
+function directorySize(path) {
+  if (!existsSync2(path)) return 0;
+  let total = 0;
+  const walk = (p) => {
+    for (const e of readdirSync(p, { withFileTypes: true })) {
+      const child = join2(p, e.name);
+      if (e.isDirectory()) walk(child);
+      else total += statSync(child).size;
+    }
+  };
+  walk(path);
+  return total;
+}
+async function* linesOf(stream) {
+  const rl = createInterface2({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
+  for await (const line of rl) yield line;
+}
+async function* csvRecords(stream) {
+  let field = "";
+  let row = [];
+  let quoted = false;
+  let pending = false;
+  for await (const chunk of stream) {
+    const text2 = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    for (let i = 0; i < text2.length; i++) {
+      const c = text2[i];
+      if (quoted) {
+        if (c !== '"') {
+          field += c;
+          continue;
+        }
+        if (text2[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else quoted = false;
+        continue;
+      }
+      if (c === '"') {
+        quoted = true;
+        pending = true;
+        continue;
+      }
+      if (c === ",") {
+        row.push(field);
+        field = "";
+        pending = true;
+        continue;
+      }
+      if (c === "\n" || c === "\r") {
+        if (field.length || row.length || pending) {
+          row.push(field);
+          yield row;
+          row = [];
+          field = "";
+          pending = false;
+        }
+        continue;
+      }
+      field += c;
+      pending = true;
+    }
+  }
+  if (field.length || row.length) {
+    row.push(field);
+    yield row;
+  }
+}
+async function* rowsOf(source, path) {
+  if (source.format === "jsonl.bz2") {
+    const compressed = readFileSync2(path);
+    let tail = "";
+    for (const block of bunzip2Blocks(compressed)) {
+      const text2 = tail + Buffer.from(block).toString("utf8");
+      const parts = text2.split("\n");
+      tail = parts.pop() ?? "";
+      for (const line of parts) {
+        if (!line) continue;
+        try {
+          yield JSON.parse(line);
+        } catch {
+          yield void 0;
+        }
+      }
+    }
+    if (tail.trim()) {
+      try {
+        yield JSON.parse(tail);
+      } catch {
+        yield void 0;
+      }
+    }
+    return;
+  }
+  const entries = await zipEntries(path);
+  const csv = entries.find((e) => e.name.toLowerCase().endsWith(".csv"));
+  if (!csv) throw new Error(`no CSV member in ${path} (found: ${entries.map((e) => e.name).join(", ") || "nothing"})`);
+  let header2;
+  for await (const row of csvRecords(await openZipMember(path, csv))) {
+    if (!header2) {
+      header2 = row.map((h) => h.trim());
+      continue;
+    }
+    const obj = {};
+    for (const [i, key] of header2.entries()) obj[key] = (row[i] ?? "").trim();
+    yield obj;
+  }
+}
+async function downloadTo(url, path) {
+  const res = await fetch(url, { headers: { "user-agent": politeUa() } });
+  if (!res.ok || !res.body) return { ok: false, status: res.status };
+  await pipeline(Readable.fromWeb(res.body), createWriteStream(path));
+  return { ok: true, status: res.status, lastModified: res.headers.get("last-modified") ?? void 0 };
+}
+async function ingestSnapshot(connectorId, source, opts = {}) {
+  const note = opts.onNote ?? (() => {
+  });
+  const target = dir(connectorId);
+  const download = join2(target, `download.${source.format.replace(/\./g, "-")}`);
+  mkdirSync(target, { recursive: true });
+  let used;
+  let source_file;
+  if (opts.fromFile) {
+    if (!existsSync2(opts.fromFile)) throw new Error(`ingest: ${opts.fromFile} does not exist`);
+    used = { url: `file://${opts.fromFile}` };
+    source_file = opts.fromFile;
+  } else {
+    note(
+      `ingest: ${connectorId} \u2014 about to download roughly ${Math.round(source.approxBytes / 1e6)} MB and index it into about ${Math.round((source.approxDiskBytes ?? source.approxBytes * 4) / 1e9)} GB under ${cacheDir()}. This runs once; every query afterwards is local.`
+    );
+    const failures = [];
+    let got;
+    for (const url of source.urls(/* @__PURE__ */ new Date())) {
+      const res = await downloadTo(url, download);
+      if (!res.ok) {
+        failures.push(`${url} \u2192 HTTP ${res.status}`);
+        continue;
+      }
+      got = { url, lastModified: res.lastModified };
+      break;
+    }
+    if (!got) throw new Error(`ingest: could not download a snapshot for ${connectorId}. Tried: ${failures.join("; ")}`);
+    used = got;
+    source_file = download;
+    note(`ingest: ${used.url} (${(statSync(download).size / 1e6).toFixed(0)} MB${used.lastModified ? `, last modified ${used.lastModified}` : ""})`);
+  }
+  for (const sub of ["loc", "id"]) rmSync2(join2(target, sub), { recursive: true, force: true });
+  for (const sub of ["loc", "id"]) mkdirSync(join2(target, sub), { recursive: true });
+  const handles = /* @__PURE__ */ new Map();
+  const streamFor = (index, bucket) => {
+    const key = `${index}/${bucket}`;
+    let s = handles.get(key);
+    if (!s) {
+      s = createWriteStream(join2(target, index, `${bucket}.jsonl`), { flags: "a" });
+      handles.set(key, s);
+    }
+    return s;
+  };
+  const writeLine = async (index, bucket, line) => {
+    const s = streamFor(index, bucket);
+    if (!s.write(line)) await new Promise((resolve4) => s.once("drain", () => resolve4()));
+  };
+  const fallbackAsOf = source.vintage ?? (used.lastModified ? new Date(used.lastModified).toISOString().slice(0, 10) : void 0);
+  let rows = 0;
+  let skipped = 0;
+  try {
+    for await (const raw of rowsOf(source, source_file)) {
+      if (opts.limit && rows >= opts.limit) break;
+      const mapped = raw === void 0 ? void 0 : source.parse(raw);
+      if (!mapped) {
+        skipped++;
+        continue;
+      }
+      if (!mapped.record.asOf && fallbackAsOf) mapped.record.asOf = fallbackAsOf;
+      rows++;
+      const localityKey = mapped.locality ? snapshotKey(mapped.locality) : "";
+      const record = `${JSON.stringify({ l: localityKey, r: mapped.record })}
+`;
+      if (localityKey) await writeLine("loc", bucketOf(localityKey), record);
+      for (const id of new Set(mapped.ids.map(snapshotKey).filter(Boolean))) {
+        const line = localityKey ? `${JSON.stringify({ k: id, l: localityKey })}
+` : record;
+        await writeLine("id", bucketOf(id), line);
+      }
+      if (rows % 25e4 === 0) opts.onProgress?.(rows);
+    }
+  } finally {
+    await Promise.all(
+      [...handles.values()].map(
+        (s) => new Promise((resolve4) => {
+          s.end(() => resolve4());
+        })
+      )
+    );
+  }
+  if (rows === 0) {
+    throw new Error(`ingest: ${connectorId} mapped 0 of ${skipped} rows. The export's shape has moved \u2014 do not trust the cache, fix the parser.`);
+  }
+  if (skipped > rows) note(`ingest: ${connectorId} skipped ${skipped} rows and kept ${rows}. That ratio is worth a look \u2014 the export's shape may have moved.`);
+  if (!opts.fromFile) rmSync2(download, { force: true });
+  const meta = {
+    connectorId,
+    sourceUrl: used.url,
+    lastModified: used.lastModified,
+    vintage: source.vintage,
+    licence: source.licence,
+    ingestedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    rows,
+    skipped,
+    bytesOnDisk: directorySize(target)
+  };
+  writeFileSync2(join2(target, "meta.json"), `${JSON.stringify(meta, null, 2)}
+`);
+  note(`ingest: ${connectorId} \u2014 ${rows} records indexed, ${(meta.bytesOnDisk / 1e6).toFixed(0)} MB on disk at ${target}`);
+  return meta;
+}
+async function scanLocality(connectorId, key, keep2, limit) {
+  const path = join2(dir(connectorId), "loc", `${bucketOf(key)}.jsonl`);
+  if (!existsSync2(path)) return [];
+  const out2 = [];
+  for await (const line of linesOf(createReadStream2(path, { encoding: "utf8" }))) {
+    if (!line) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (parsed.l !== key || !parsed.r) continue;
+    if (!keep2(parsed.r)) continue;
+    out2.push(parsed.r);
+    if (out2.length >= limit) break;
+  }
+  return out2;
+}
+function snapshotByLocality(connectorId, locality, keep2, limit = 5e3) {
+  const key = snapshotKey(locality);
+  if (!key) return Promise.resolve([]);
+  return scanLocality(connectorId, key, keep2, limit);
+}
+async function snapshotById(connectorId, id, limit = 20) {
+  const key = snapshotKey(id);
+  if (!key) return [];
+  const path = join2(dir(connectorId), "id", `${bucketOf(key)}.jsonl`);
+  if (!existsSync2(path)) return [];
+  const localities = /* @__PURE__ */ new Set();
+  const inline = [];
+  for await (const line of linesOf(createReadStream2(path, { encoding: "utf8" }))) {
+    if (!line) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof parsed.k === "string" && typeof parsed.l === "string") {
+      if (parsed.k === key) localities.add(parsed.l);
+      continue;
+    }
+    const rec = parsed;
+    if (rec.id && snapshotIdsOf(rec).includes(key)) inline.push(rec);
+  }
+  const out2 = [...inline];
+  for (const locality of localities) {
+    if (out2.length >= limit) break;
+    const found = await scanLocality(connectorId, locality, (r) => snapshotIdsOf(r).includes(key), limit - out2.length);
+    out2.push(...found);
+  }
+  return out2.slice(0, limit);
+}
+function snapshotIdsOf(rec) {
+  const raw = [rec.id, rec.national?.companyNumber, rec.national?.registerNumber];
+  return [
+    ...new Set(
+      raw.filter((x) => typeof x === "string" && x.length > 0).map(snapshotKey).filter(Boolean)
+    )
+  ];
+}
+function forgetSnapshot(connectorId) {
+  const target = dir(connectorId);
+  if (!existsSync2(target)) return false;
+  rmSync2(target, { recursive: true, force: true });
+  return true;
+}
+
+// src/registry/de-offeneregister.ts
+var CONNECTOR_ID5 = "de-offeneregister";
+var DUMP_URL = "https://daten.offeneregister.de/de_companies_ocdata.jsonl.bz2";
+var HOW_TO_INGEST = "run `ultraprospect ingest --country de` once (260 MB, keyless) to index the German register export.";
+var REGISTER_KINDS = ["HRA", "HRB", "GnR", "VR", "PR"];
+function splitNativeNumber(native) {
+  const m = native?.trim().match(/^(.+?)\s+(HRA|HRB|GnR|VR|PR)\s+(\S+(?:\s+\S+)?)$/);
+  if (!m) return {};
+  return { court: m[1], kind: m[2], number: m[3].trim() };
+}
+function parseGermanAddress(raw, fallbackTown) {
+  const text2 = raw?.trim().replace(/\.$/, "");
+  if (!text2) return fallbackTown ? { commune: fallbackTown, pays: "Germany" } : { pays: "Germany" };
+  const m = text2.match(/^(.*?),\s*(\d{5})\s+(.+)$/);
+  if (!m) return { raw: text2, commune: fallbackTown, pays: "Germany" };
+  return { raw: text2, libelleVoie: m[1]?.trim() || void 0, codePostal: m[2], commune: m[3]?.trim() || fallbackTown, pays: "Germany" };
+}
+function statusOf2(raw) {
+  if (raw === "currently registered") return "active";
+  if (raw === "removed") return "ceased";
+  return "unknown";
+}
+function officersOf(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((o) => o && typeof o === "object").map((o) => ({
+    nom: o.other_attributes?.lastname ?? o.name ?? void 0,
+    prenoms: o.other_attributes?.firstname ?? void 0,
+    qualite: o.position ?? void 0
+  })).filter((d) => d.nom);
+}
+var offeneRegisterSnapshot = {
+  format: "jsonl.bz2",
+  urls: () => [DUMP_URL],
+  licence: "German company data: OffeneRegister.de / OpenCorporates, CC-BY 4.0",
+  // The file's own Last-Modified is 2019-02-05, but its records were retrieved
+  // over 2017-2019 and each says when. So no global vintage is declared: the
+  // per-record `retrieved_at` below is more truthful than any single date.
+  approxBytes: 260455433,
+  // Measured on a full ingest: 5 305 727 records.
+  approxDiskBytes: 28e8,
+  parse(row) {
+    const attrs = row?.all_attributes ?? {};
+    const name = row?.name?.trim();
+    const native = attrs.native_company_number;
+    if (!name || !native) return void 0;
+    const { court, kind, number } = splitNativeNumber(native);
+    const town = attrs.registered_office?.trim();
+    const asOf = typeof row.retrieved_at === "string" ? row.retrieved_at.slice(0, 10) : void 0;
+    const record = {
+      connectorId: CONNECTOR_ID5,
+      // The court-qualified number IS the identity. `company_number` in this
+      // export is an OpenCorporates internal key ("K1101R_HRB150148") that no
+      // German legal notice ever prints, so it is dropped entirely rather than
+      // stored under a name that invites somebody to cite it.
+      id: native.trim(),
+      names: [name],
+      legalName: name,
+      officers: officersOf(row.officers),
+      address: parseGermanAddress(row.registered_address, town),
+      countryCode: "de",
+      status: statusOf2(row.current_status),
+      // No activity code: the Handelsregister files none. Declaring a section
+      // would invent a classification the register does not publish.
+      sourceUrl: "https://offeneregister.de/",
+      asOf,
+      // Only what is NOT already derivable from the fields beside it. At 5.3
+      // million rows every repetition is measured in gigabytes: storing
+      // `nativeCompanyNumber` (identical to `id`), `registerKind` (the first token
+      // of `registerNumber`), OpenCorporates' internal key and `retrievedAt`
+      // (identical to `asOf`) cost about a gigabyte to say nothing new.
+      national: {
+        registerNumber: kind && number ? `${kind} ${number}` : void 0,
+        registerCourt: court ?? attrs.registrar,
+        federalState: attrs.federal_state
+      }
+    };
+    const ids = [native.trim(), kind && number ? `${kind} ${number}` : void 0].filter((x) => Boolean(x));
+    return { record, locality: town, ids };
+  }
+};
+var deOffeneRegister = {
+  id: CONNECTOR_ID5,
+  countries: ["de"],
+  label: "Germany \u2014 Handelsregister via OffeneRegister (open export, 2017-2019 vintage)",
+  licence: offeneRegisterSnapshot.licence,
+  // The Handelsregister publishes no activity classification at all, so there is
+  // no scheme to declare. Claiming NACE here would imply codes that do not exist.
+  activityScheme: "none",
+  activityPrefix: CONNECTOR_ID5,
+  docsUrl: "https://offeneregister.de/",
+  snapshot: offeneRegisterSnapshot,
+  availability() {
+    if (hasSnapshot(CONNECTOR_ID5)) return { available: true };
+    return { available: false, reason: "no German register snapshot has been ingested", how: HOW_TO_INGEST };
+  },
+  /**
+   * Look a company up by name in its town.
+   *
+   * A candidate, not a fact — `confirm` puts it through the same identity-dominant
+   * thresholds a French sweep uses. Ceased companies are excluded because 61% of
+   * this export is struck-off entries and a name match against one of them would
+   * attach a dead registration to a business that is trading.
+   */
+  async lookup(query) {
+    const name = query.names.find((n) => n?.trim());
+    if (!name || !query.locality || !hasSnapshot(CONNECTOR_ID5)) return [];
+    const needle = normalizeName(name);
+    if (needle.length < 4) return [];
+    return snapshotByLocality(
+      CONNECTOR_ID5,
+      query.locality,
+      (r) => r.status !== "ceased" && r.names.some((n) => nameSimilarity(n, name) >= 0.6 || normalizeName(n).includes(needle)),
+      Math.min(20, query.limit ?? 5)
+    );
+  },
+  /**
+   * Confirm a register number read off a company's own Impressum.
+   *
+   * German law requires the number and the court on the page (§ 5 DDG), and both
+   * are used when both are there. A number WITHOUT its court is ambiguous by
+   * construction — HRA 4792 exists at several Amtsgerichte — so a bare match is
+   * only returned when the export holds exactly one candidate for it. More than
+   * one and it refuses, which is the same refusal `match` makes on a middle-band
+   * pair and for the same reason: two rows are recoverable, one wrong attribution
+   * is not.
+   */
+  async verifyId(id, ctx) {
+    if (!hasSnapshot(CONNECTOR_ID5)) return void 0;
+    if (!REGISTER_KINDS.some((k) => k.toLowerCase() === id.kind.toLowerCase())) return void 0;
+    const value = id.value.trim().replace(/\s+/g, " ");
+    const court = id.context?.trim();
+    const COURT_REPORT_CAP = 50;
+    const bare = await snapshotById(CONNECTOR_ID5, value, COURT_REPORT_CAP);
+    if (court) {
+      const wanted = normalizeName(court);
+      const byCourt = bare.filter((r) => {
+        const filed = normalizeName(String(r.national?.registerCourt ?? ""));
+        return filed === wanted || filed.includes(wanted) || wanted.includes(filed);
+      });
+      if (byCourt.length === 1) return byCourt[0];
+      if (byCourt.length > 1) {
+        ctx.onNote?.(`de-offeneregister: ${value} at a court matching "${court}" is filed more than once; not attached.`);
+        return void 0;
+      }
+    }
+    if (bare.length === 1) return bare[0];
+    if (bare.length > 1) {
+      const courts = [...new Set(bare.map((r) => r.national?.registerCourt).filter(Boolean))];
+      const atLeast = bare.length >= COURT_REPORT_CAP ? "at least " : "";
+      ctx.onNote?.(
+        `de-offeneregister: ${value} is filed at ${atLeast}${courts.length} different courts (${courts.slice(0, 8).join(", ")}${courts.length > 8 ? ", \u2026" : ""}). German register numbers repeat, so this one is not an identity without its Amtsgericht.`
+      );
+    }
+    return void 0;
+  },
+  /**
+   * Is the export still there, still parseable, and still the same vintage?
+   *
+   * The third check is the interesting one, and it is not a drift alarm: a moved
+   * Last-Modified would mean OffeneRegister had resumed publishing after seven
+   * years, which is news worth knowing rather than a failure. It is reported as
+   * inconclusive so it reads as "go look" instead of "you are broken".
+   */
+  async canary() {
+    const res = await fetch(DUMP_URL, { method: "HEAD" });
+    const lastModified = res.headers.get("last-modified");
+    const checks = [
+      { name: "the OffeneRegister export is still served", ok: res.ok, detail: `HTTP ${res.status}` },
+      {
+        name: "the export's Content-Length is still around 260 MB",
+        ok: Math.abs(Number(res.headers.get("content-length") ?? 0) - offeneRegisterSnapshot.approxBytes) < 5e7,
+        detail: `${res.headers.get("content-length")} bytes`
+      }
+    ];
+    if (lastModified && !lastModified.includes("2019")) {
+      checks.push({
+        name: "the German export has a NEW vintage \u2014 OffeneRegister may have resumed publishing",
+        ok: true,
+        inconclusive: true,
+        detail: `Last-Modified is now ${lastModified}, not 2019. Re-measure the record shape and re-ingest.`
+      });
+    }
+    return checks;
+  },
+  async probe() {
+    const meta = snapshotMeta(CONNECTOR_ID5);
+    if (meta) return { ok: true, detail: `${meta.rows} records in cache, vintage ${meta.lastModified ?? meta.vintage ?? "unknown"}` };
+    const res = await fetch(DUMP_URL, { method: "HEAD" });
+    return { ok: res.ok, detail: res.ok ? `export reachable, not yet ingested \u2014 ${HOW_TO_INGEST}` : `HTTP ${res.status}` };
+  }
+};
+
 // src/registry/gb-companies-house.ts
 var BASE5 = "https://api.company-information.service.gov.uk";
-var CONNECTOR_ID5 = "gb-companies-house";
+var CONNECTOR_ID6 = "gb-companies-house";
 var REQUEST_DELAY_MS5 = 600;
 var RATE_LIMIT_BACKOFF_MS = 3e4;
 var RateLimited = class extends Error {
 };
 var HOW_TO_GET_A_KEY = "Register at https://developer.company-information.service.gov.uk (email only, free, no payment), create an application, then pass --companies-house-key or set ULTRAPROSPECT_COMPANIES_HOUSE_KEY.";
 function keyFrom(ctx) {
-  const key = ctx.keys?.[CONNECTOR_ID5] ?? process.env.ULTRAPROSPECT_COMPANIES_HOUSE_KEY;
+  const key = ctx.keys?.[CONNECTOR_ID6] ?? process.env.ULTRAPROSPECT_COMPANIES_HOUSE_KEY;
   return key?.trim() || void 0;
 }
 async function get3(path, key) {
@@ -4585,7 +5460,7 @@ function toRecord3(company) {
   const { code, section: section2 } = sectionOf(company?.sic_codes);
   const status = company?.company_status;
   return {
-    connectorId: CONNECTOR_ID5,
+    connectorId: CONNECTOR_ID6,
     id: String(number).toUpperCase(),
     names: [company?.company_name, ...previous].filter(Boolean),
     legalName: company?.company_name ?? void 0,
@@ -4609,10 +5484,77 @@ function toRecord3(company) {
     national: { companyNumber: String(number).toUpperCase(), companyStatus: status ?? void 0, sicCodes: company?.sic_codes ?? void 0 }
   };
 }
+var SNAPSHOT_BASE = "https://download.companieshouse.gov.uk";
+function snapshotUrl(now, back) {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 1));
+  const month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  return `${SNAPSHOT_BASE}/BasicCompanyDataAsOneFile-${month}.zip`;
+}
+function sicOf(text2) {
+  const code = text2?.trim().match(/^(\d{4,5})/)?.[1];
+  return code ? { code, section: naceSection(code) } : {};
+}
+function statusOf3(raw) {
+  const s = raw?.trim().toLowerCase();
+  if (!s) return "unknown";
+  return s === "active" ? "active" : "ceased";
+}
+var companiesHouseSnapshot = {
+  format: "csv.zip",
+  // Three candidates: this month, and the two before it. Two is enough for the
+  // publication lag; the third covers a month the product was late.
+  urls: (now) => [0, 1, 2].map((back) => snapshotUrl(now, back)),
+  licence: "UK company data: Companies House, Open Government Licence v3.0",
+  approxBytes: 493e6,
+  // One identifier per record and no officers, so the index is lighter than the
+  // German one despite a similar row count.
+  approxDiskBytes: 18e8,
+  parse(row) {
+    const number = row.CompanyNumber?.trim();
+    const name = row.CompanyName?.trim();
+    if (!number || !name) return void 0;
+    const { code, section: section2 } = sicOf(row["SICCode.SicText_1"]);
+    const previous = [1, 2, 3, 4, 5].map((n) => row[`PreviousName_${n}.CompanyName`]?.trim()).filter((x) => Boolean(x));
+    const postTown = row["RegAddress.PostTown"]?.trim();
+    const street = [row["RegAddress.AddressLine1"], row["RegAddress.AddressLine2"]].map((s) => s?.trim()).filter(Boolean).join(", ");
+    const address = {
+      raw: [street, postTown, row["RegAddress.PostCode"]?.trim()].filter(Boolean).join(", ") || void 0,
+      libelleVoie: row["RegAddress.AddressLine1"]?.trim() || void 0,
+      codePostal: row["RegAddress.PostCode"]?.trim() || void 0,
+      commune: postTown || void 0,
+      pays: row["RegAddress.Country"]?.trim() || "United Kingdom"
+    };
+    const record = {
+      connectorId: CONNECTOR_ID6,
+      id: number.toUpperCase(),
+      names: [name, ...previous],
+      legalName: name,
+      officers: [],
+      address,
+      countryCode: "gb",
+      activityCode: code,
+      section: section2,
+      activityScheme: "nace",
+      legalForm: row.CompanyCategory?.trim() || void 0,
+      status: statusOf3(row.CompanyStatus),
+      dateCreated: row.IncorporationDate?.trim() || void 0,
+      dateClosed: row.DissolutionDate?.trim() || void 0,
+      sourceUrl: `https://find-and-update.company-information.service.gov.uk/company/${number}`,
+      national: { companyNumber: number.toUpperCase(), companyStatus: row.CompanyStatus?.trim() || void 0, sicCodes: code ? [code] : void 0 }
+    };
+    return { record, locality: postTown || void 0, ids: [number] };
+  }
+};
+function passesFilters(rec, filters) {
+  if (!filters.includeCeased && rec.status === "ceased") return false;
+  if (filters.sections?.length && (!rec.section || !filters.sections.includes(rec.section))) return false;
+  if (filters.activityCodes?.length && (!rec.activityCode || !filters.activityCodes.some((c) => rec.activityCode?.startsWith(c)))) return false;
+  return true;
+}
 var gbCompaniesHouse = {
-  id: CONNECTOR_ID5,
+  id: CONNECTOR_ID6,
   countries: ["gb"],
-  label: "United Kingdom \u2014 Companies House (free key required)",
+  label: "United Kingdom \u2014 Companies House (keyless monthly snapshot; a free key adds a live API)",
   licence: "UK company data: Companies House, Open Government Licence v3.0",
   activityScheme: "nace",
   activityPrefix: "sic-uk",
@@ -4628,15 +5570,80 @@ var gbCompaniesHouse = {
     why: "no successful response from Companies House has ever reached this code. An invalid key draws a 401, so the host and the Basic-auth scheme (key as username, empty password) are confirmed to that extent; every field `toRecord` reads is still mapped from the specification rather than from an observed body. It is the only connector here behind a credential, and its canary has reported inconclusive on every scheduled run for want of a key.",
     how: "supply a key and run `pnpm run eval:network`; three assertions are already written and waiting. The keyless snapshot route needs no key and is the one exercised by default."
   },
+  snapshot: companiesHouseSnapshot,
   availability(ctx) {
+    if (hasSnapshot(CONNECTOR_ID6)) return { available: true };
     if (keyFrom(ctx)) return { available: true };
-    return { available: false, reason: "no Companies House key was supplied", how: HOW_TO_GET_A_KEY };
+    return {
+      available: false,
+      reason: "no Companies House snapshot has been ingested and no key was supplied",
+      how: "run `ultraprospect ingest --country gb` for the keyless monthly snapshot (470 MB, no registration), or supply a key for the live API"
+    };
+  },
+  /**
+   * Enumerate the companies the register holds for a territory's post town.
+   *
+   * A sweep, and the coverage says exactly what kind. Only France's register can
+   * be enumerated by a bounding box; here the unit is the registered office's post
+   * town, which does not coincide with the OSM lane's geometry. Both facts belong
+   * in the manifest, so both are in `reason` — the alternative is a "whole
+   * territory" label sitting on a slightly different territory, which is the one
+   * failure this tool exists to refuse.
+   */
+  async sweep(target, filters, ctx) {
+    const notes = [];
+    const town = shortLabel(target.label || target.query);
+    const meta = snapshotMeta(CONNECTOR_ID6);
+    if (!meta) {
+      return {
+        records: [],
+        notes: ["companies-house: no snapshot ingested, so the register lane could not be swept. Run `ultraprospect ingest --country gb`."],
+        coverage: {
+          lane: "registry",
+          connectorId: CONNECTOR_ID6,
+          requested: 0,
+          returned: 0,
+          truncated: true,
+          reason: "no Companies House snapshot in the cache; run `ingest --country gb` (470 MB, keyless) to enumerate the United Kingdom"
+        }
+      };
+    }
+    const max = filters.maxResults ?? 3e3;
+    const all = await snapshotByLocality(CONNECTOR_ID6, town, (r) => passesFilters(r, filters), max + 1);
+    const truncated = all.length > max;
+    const records = truncated ? all.slice(0, max) : all;
+    ctx.onProgress?.(records.length, town);
+    return {
+      records,
+      notes,
+      coverage: {
+        lane: "registry",
+        mode: "sweep",
+        connectorId: CONNECTOR_ID6,
+        requested: max,
+        returned: records.length,
+        truncated,
+        // Both halves of the truth, in the order a reader needs them.
+        reason: truncated ? `enumerated from the ${meta.lastModified ? `${meta.lastModified.slice(0, 16)} ` : ""}Companies House snapshot by POST TOWN "${town}", and stopped at --max-results ${max}. A post town is not a bounding box, so this lane's shape does not coincide with the OSM lane's.` : `enumerated from the Companies House monthly snapshot by POST TOWN "${town}" \u2014 every company the register files there. A post town is not a bounding box, so this lane's shape does not coincide with the OSM lane's, and a company registered at an accountant's address in another town is absent from it.`
+      }
+    };
   },
   async lookup(query, ctx) {
-    const key = keyFrom(ctx);
     const name = query.names.find((n) => n?.trim());
-    if (!key || !name) return [];
+    if (!name) return [];
     const limit = Math.min(20, query.limit ?? 5);
+    if (hasSnapshot(CONNECTOR_ID6) && query.locality) {
+      const needle = normalizeName(name);
+      const hits = await snapshotByLocality(
+        CONNECTOR_ID6,
+        query.locality,
+        (r) => r.status !== "ceased" && r.names.some((n) => nameSimilarity(n, name) >= 0.6 || normalizeName(n).includes(needle)),
+        limit
+      );
+      if (hits.length) return hits;
+    }
+    const key = keyFrom(ctx);
+    if (!key) return [];
     const params = new URLSearchParams({ company_name_includes: name, size: String(limit), company_status: "active" });
     if (query.locality) params.set("location", query.locality);
     const advanced = await get3(`/advanced-search/companies?${params.toString()}`, key);
@@ -4665,12 +5672,16 @@ var gbCompaniesHouse = {
     return out2;
   },
   async verifyId(id, ctx) {
-    const key = keyFrom(ctx);
-    if (!key) return void 0;
     if (id.kind !== "company-number") return void 0;
     const number = id.value.replace(/\s+/g, "").toUpperCase();
     if (!/^(\d{6,8}|[A-Z]{2}\d{6})$/.test(number)) return void 0;
     const padded = /^\d+$/.test(number) ? number.padStart(8, "0") : number;
+    if (hasSnapshot(CONNECTOR_ID6)) {
+      const hit = (await snapshotById(CONNECTOR_ID6, padded))[0];
+      if (hit) return hit;
+    }
+    const key = keyFrom(ctx);
+    if (!key) return void 0;
     const res = await get3(`/company/${encodeURIComponent(padded)}`, key);
     if (res.status === 401 || res.status === 403) {
       ctx.onNote?.(`companies-house: the key was rejected (HTTP ${res.status}). ${HOW_TO_GET_A_KEY}`);
@@ -4709,7 +5720,7 @@ var gbCompaniesHouse = {
 
 // src/registry/gleif.ts
 var BASE6 = "https://api.gleif.org/api/v1";
-var CONNECTOR_ID6 = "gleif";
+var CONNECTOR_ID7 = "gleif";
 var REQUEST_DELAY_MS6 = 400;
 async function get4(path) {
   const url = `${BASE6}${path}`;
@@ -4741,7 +5752,7 @@ function toRecord4(entry) {
   const otherNames = (a?.entity?.otherNames ?? []).map((n) => n?.name).filter(Boolean);
   const country = (a?.entity?.legalAddress?.country ?? "").toLowerCase() || void 0;
   return {
-    connectorId: CONNECTOR_ID6,
+    connectorId: CONNECTOR_ID7,
     id: lei,
     names: [...otherNames, legalName].filter(Boolean),
     legalName,
@@ -4777,7 +5788,7 @@ async function queryRecords(params, limit) {
   return (data?.data ?? []).map(toRecord4).filter((r) => Boolean(r));
 }
 var gleif = {
-  id: CONNECTOR_ID6,
+  id: CONNECTOR_ID7,
   countries: ["*"],
   label: "Worldwide \u2014 Global LEI Index (GLEIF). Covers entities that hold an LEI, not every company.",
   licence: "Legal entity data: Global LEI Index, GLEIF, CC0 1.0",
@@ -4835,7 +5846,7 @@ var gleif = {
 
 // src/registry/no-brreg.ts
 var BASE7 = "https://data.brreg.no/enhetsregisteret/api";
-var CONNECTOR_ID7 = "no-brreg";
+var CONNECTOR_ID8 = "no-brreg";
 var REQUEST_DELAY_MS7 = 300;
 async function get5(path) {
   const url = `${BASE7}${path}`;
@@ -4864,7 +5875,7 @@ function toRecord5(unit) {
   const activityCode = unit?.naeringskode1?.kode ?? void 0;
   const address = addressOf5(unit?.beliggenhetsadresse ?? unit?.postadresse);
   return {
-    connectorId: CONNECTOR_ID7,
+    connectorId: CONNECTOR_ID8,
     id: String(id),
     names: [name, ...historic].filter(Boolean),
     legalName: name,
@@ -4892,7 +5903,7 @@ function toRecord5(unit) {
   };
 }
 var noBrreg = {
-  id: CONNECTOR_ID7,
+  id: CONNECTOR_ID8,
   countries: ["no"],
   label: "Norway \u2014 Enhetsregisteret via data.brreg.no",
   licence: "Norwegian company data: Enhetsregisteret, Br\xF8nn\xF8ysundregistrene, NLOD 2.0",
@@ -4944,7 +5955,7 @@ var noBrreg = {
 
 // src/registry/pl-krs.ts
 var BASE8 = "https://api-krs.ms.gov.pl/api/krs";
-var CONNECTOR_ID8 = "pl-krs";
+var CONNECTOR_ID9 = "pl-krs";
 var REQUEST_DELAY_MS8 = 500;
 async function get6(krs, rejestr) {
   const url = `${BASE8}/OdpisAktualny/${krs}?rejestr=${rejestr}&format=json`;
@@ -4975,7 +5986,7 @@ function toRecord6(payload) {
   const pkd = dzial1?.przedmiotDzialalnosci?.przedmiotPrzewazajacejDzialalnosci?.[0];
   const activityCode = pkd ? [pkd?.dzial, pkd?.grupa, pkd?.podklasa].filter(Boolean).join(".") || void 0 : void 0;
   return {
-    connectorId: CONNECTOR_ID8,
+    connectorId: CONNECTOR_ID9,
     id: String(krs),
     names: [name],
     legalName: name,
@@ -5001,7 +6012,7 @@ function toRecord6(payload) {
   };
 }
 var plKrs = {
-  id: CONNECTOR_ID8,
+  id: CONNECTOR_ID9,
   countries: ["pl"],
   label: "Poland \u2014 KRS (National Court Register). Lookup by KRS number only; the public API has no name search.",
   licence: "Polish company data: Krajowy Rejestr S\u0105dowy, Ministerstwo Sprawiedliwo\u015Bci, open data",
@@ -5070,7 +6081,7 @@ function usSicDivision(code) {
 // src/registry/us-edgar.ts
 var DATA = "https://data.sec.gov";
 var WWW = "https://www.sec.gov";
-var CONNECTOR_ID9 = "us-edgar";
+var CONNECTOR_ID10 = "us-edgar";
 var REQUEST_DELAY_MS9 = 500;
 function secUa() {
   return process.env.ULTRAPROSPECT_SEC_CONTACT ? `ultraprospect ${process.env.ULTRAPROSPECT_SEC_CONTACT}` : "ultraprospect contact@ultraprospect.invalid";
@@ -5114,7 +6125,7 @@ function toRecord7(submissions) {
   const formerNames = (submissions?.formerNames ?? []).map((f) => f?.name).filter(Boolean);
   const address = addressOf7(submissions?.addresses?.business ?? submissions?.addresses?.mailing);
   return {
-    connectorId: CONNECTOR_ID9,
+    connectorId: CONNECTOR_ID10,
     id: String(cik).padStart(10, "0"),
     names: [submissions?.name, ...formerNames].filter(Boolean),
     legalName: submissions?.name ?? void 0,
@@ -5142,7 +6153,7 @@ function usEdgarCoverageNote() {
   return "us-edgar: the United States has no national company register. This connector reaches EDGAR's listed companies only \u2014 about 10 400 with a traded ticker. A company absent from it is not absent from the economy, and nothing here says it is.";
 }
 var usEdgar = {
-  id: CONNECTOR_ID9,
+  id: CONNECTOR_ID10,
   countries: ["us"],
   label: "United States \u2014 SEC EDGAR, listed companies only (~10 400). There is no national US company register.",
   licence: "US filer data: SEC EDGAR, public domain",
@@ -5210,6 +6221,11 @@ var CONNECTORS = [
   // National registers, authoritative for their own country.
   frSirene,
   gbCompaniesHouse,
+  // Before VIES on purpose. For Germany the two answer different questions and
+  // this one answers the harder half: VIES confirms a VAT number is live TODAY and
+  // refuses to name its holder, while this names who filed under an HRB number in
+  // 2017-2019. An identity, even a dated one, beats an anonymous confirmation.
+  deOffeneRegister,
   noBrreg,
   fiPrh,
   czAres,
@@ -5840,54 +6856,50 @@ function applyVerdicts(places, verdicts) {
 }
 
 // src/run.ts
-import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync2, readdirSync } from "fs";
-import { join as join2, resolve } from "path";
+import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync6, readdirSync as readdirSync4 } from "fs";
+import { join as join3, resolve } from "path";
 var DEFAULT_OUT = ".ultraprospect";
-function shortLabel(label) {
-  const first = label.split(",")[0]?.trim();
-  return first && first.length > 1 ? first : label;
-}
 function newRun(outRoot, label) {
   const slug = slugify(shortLabel(label)) || "run";
   const id = runId();
-  const root = resolve(outRoot);
-  const dir = join2(root, "runs", `${slug}-${id}`);
-  mkdirSync(dir, { recursive: true });
-  return { root, dir, slug, id };
+  const root2 = resolve(outRoot);
+  const dir2 = join3(root2, "runs", `${slug}-${id}`);
+  mkdirSync2(dir2, { recursive: true });
+  return { root: root2, dir: dir2, slug, id };
 }
 function resolveRun(pathOrRoot) {
   const p = resolve(pathOrRoot);
-  if (existsSync2(join2(p, "manifest.json"))) return p;
-  const runsDir = existsSync2(join2(p, "runs")) ? join2(p, "runs") : p;
-  if (!existsSync2(runsDir)) throw new Error(`no run directory at ${p}`);
-  const candidates = readdirSync(runsDir, { withFileTypes: true }).filter((e) => e.isDirectory() && existsSync2(join2(runsDir, e.name, "manifest.json"))).map((e) => e.name).sort();
+  if (existsSync3(join3(p, "manifest.json"))) return p;
+  const runsDir = existsSync3(join3(p, "runs")) ? join3(p, "runs") : p;
+  if (!existsSync3(runsDir)) throw new Error(`no run directory at ${p}`);
+  const candidates = readdirSync4(runsDir, { withFileTypes: true }).filter((e) => e.isDirectory() && existsSync3(join3(runsDir, e.name, "manifest.json"))).map((e) => e.name).sort();
   const newest = candidates.at(-1);
   if (!newest) throw new Error(`no run with a manifest.json under ${runsDir}`);
-  return join2(runsDir, newest);
+  return join3(runsDir, newest);
 }
 function requireManifest(runDir) {
   const m = readManifest(runDir);
-  if (!m) throw new Error(`${join2(runDir, "manifest.json")} is missing or unreadable \u2014 is this a run directory?`);
+  if (!m) throw new Error(`${join3(runDir, "manifest.json")} is missing or unreadable \u2014 is this a run directory?`);
   return m;
 }
 function writeRunManifest(runDir, manifest) {
   writeManifest(runDir, manifest);
 }
 function readPlaces(runDir) {
-  const places = readJsonSafe(join2(runDir, "places.json"));
-  if (!places) throw new Error(`${join2(runDir, "places.json")} is missing \u2014 run \`ultraprospect scan\` first`);
+  const places = readJsonSafe(join3(runDir, "places.json"));
+  if (!places) throw new Error(`${join3(runDir, "places.json")} is missing \u2014 run \`ultraprospect scan\` first`);
   return places;
 }
 function writePlaces(runDir, places) {
-  writeArtifact(join2(runDir, "places.json"), JSON.stringify(places, null, 2) + "\n");
+  writeArtifact(join3(runDir, "places.json"), JSON.stringify(places, null, 2) + "\n");
 }
 function writeJson(runDir, file, value) {
-  writeArtifact(join2(runDir, file), JSON.stringify(value, null, 2) + "\n");
+  writeArtifact(join3(runDir, file), JSON.stringify(value, null, 2) + "\n");
 }
 function readPageText(runDir, extractRelPath) {
-  const p = join2(runDir, extractRelPath);
-  if (!existsSync2(p)) return void 0;
-  return readFileSync2(p, "utf8");
+  const p = join3(runDir, extractRelPath);
+  if (!existsSync3(p)) return void 0;
+  return readFileSync6(p, "utf8");
 }
 var LICENCES = [
   "Places and tags: \xA9 OpenStreetMap contributors, ODbL (https://www.openstreetmap.org/copyright)",
@@ -5934,27 +6946,27 @@ function emptyManifest(label) {
 }
 
 // src/fixture.ts
-import { existsSync as existsSync3, mkdirSync as mkdirSync2 } from "fs";
-import { join as join3 } from "path";
-function loadFixture(dir) {
-  const target = readJsonSafe(join3(dir, "target.json"));
-  if (!target) throw new Error(`${join3(dir, "target.json")} is missing \u2014 a fixture needs the geocoded target it was recorded for`);
+import { existsSync as existsSync7, mkdirSync as mkdirSync5 } from "fs";
+import { join as join9 } from "path";
+function loadFixture(dir2) {
+  const target = readJsonSafe(join9(dir2, "target.json"));
+  if (!target) throw new Error(`${join9(dir2, "target.json")} is missing \u2014 a fixture needs the geocoded target it was recorded for`);
   for (const file of ["osm.json", "registry.json"]) {
-    if (!existsSync3(join3(dir, file))) throw new Error(`${join3(dir, file)} is missing \u2014 record it with \`ultraprospect scan --record <dir>\``);
+    if (!existsSync7(join9(dir2, file))) throw new Error(`${join9(dir2, file)} is missing \u2014 record it with \`ultraprospect scan --record <dir>\``);
   }
-  const registry = readJsonSafe(join3(dir, "registry.json")) ?? [];
+  const registry = readJsonSafe(join9(dir2, "registry.json")) ?? [];
   return {
     target,
-    osm: readJsonSafe(join3(dir, "osm.json")) ?? [],
+    osm: readJsonSafe(join9(dir2, "osm.json")) ?? [],
     registry,
     connectorId: registry[0]?.connectorId
   };
 }
-function recordFixture(dir, outcome, target) {
-  mkdirSync2(dir, { recursive: true });
-  writeArtifact(join3(dir, "target.json"), JSON.stringify(target, null, 2) + "\n");
-  writeArtifact(join3(dir, "osm.json"), JSON.stringify(outcome.osm, null, 2) + "\n");
-  writeArtifact(join3(dir, "registry.json"), JSON.stringify(outcome.registry, null, 2) + "\n");
+function recordFixture(dir2, outcome, target) {
+  mkdirSync5(dir2, { recursive: true });
+  writeArtifact(join9(dir2, "target.json"), JSON.stringify(target, null, 2) + "\n");
+  writeArtifact(join9(dir2, "osm.json"), JSON.stringify(outcome.osm, null, 2) + "\n");
+  writeArtifact(join9(dir2, "registry.json"), JSON.stringify(outcome.registry, null, 2) + "\n");
 }
 
 // src/scan.ts
@@ -6326,7 +7338,7 @@ function legalIdCoverage(countryCode) {
 }
 
 // src/confirm.ts
-import { join as join9 } from "path";
+import { join as join10 } from "path";
 function needsConfirming(places) {
   const targets = places.filter((p) => !p.registry && Boolean(p.name?.trim()));
   return [...targets].sort((a, b) => (b.pages.length > 0 ? 1 : 0) - (a.pages.length > 0 ? 1 : 0));
@@ -6445,7 +7457,7 @@ async function runConfirm(runDir, places, opts = {}) {
     let anyAnswer = false;
     for (const pageId of place.pages) {
       if (attached) break;
-      const text2 = readPageText(runDir, join9("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${pageId}.md`));
+      const text2 = readPageText(runDir, join10("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${pageId}.md`));
       if (!text2) continue;
       for (const id of extractLegalIds(text2, opts.countryCode, pageId)) {
         idsFound++;
@@ -6563,12 +7575,34 @@ function sharesToken(place, rec) {
   }
   return false;
 }
+function persistConfirm(runDir, places, manifest, outcome) {
+  writePlaces(runDir, places);
+  writeJson(runDir, "registry.json", mergeRegistryRecords(runDir, outcome.records));
+  if (outcome.undecided.length) {
+    const existing = readJsonSafe(join10(runDir, "MATCH.todo.json"))?.pairs ?? [];
+    writeJson(runDir, "MATCH.todo.json", buildMatchTodo([...existing, ...outcome.undecided]));
+  }
+  manifest.lanes = [...manifest.lanes.filter((l) => l.lane !== "registry" || l.mode === "sweep"), outcome.coverage];
+  manifest.counts.registry += outcome.records.length;
+  manifest.counts.confirmed = outcome.verified + outcome.matched;
+  manifest.counts.undecided += outcome.undecided.length;
+  for (const rec of outcome.records) manifest.counts.byConnector[rec.connectorId] = (manifest.counts.byConnector[rec.connectorId] ?? 0) + 1;
+  manifest.licences = licencesFor(manifest.lanes);
+  manifest.notes.push(...outcome.notes);
+  writeRunManifest(runDir, manifest);
+}
+function mergeRegistryRecords(runDir, fresh) {
+  const existing = readJsonSafe(join10(runDir, "registry.json")) ?? [];
+  const byKey = /* @__PURE__ */ new Map();
+  for (const rec of [...existing, ...fresh]) byKey.set(`${rec.connectorId}:${rec.establishmentId ?? rec.id}`, rec);
+  return [...byKey.values()];
+}
 
 // src/pages.ts
-import { mkdirSync as mkdirSync5 } from "fs";
-import { join as join10 } from "path";
+import { mkdirSync as mkdirSync6 } from "fs";
+import { join as join11 } from "path";
 function pageDirFor(placeId) {
-  return join10("pages", placeId.replace(/[^a-zA-Z0-9._-]/g, "_"));
+  return join11("pages", placeId.replace(/[^a-zA-Z0-9._-]/g, "_"));
 }
 var MIN_READABLE_CHARS = 120;
 function newPageStore(existing = []) {
@@ -6587,8 +7621,8 @@ async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
     return { ok: false, reason: "no-readable-text", status: result.status ?? 0, chars: text2.length };
   }
   const id = `P${store.next++}`;
-  const dir = pageDirFor(placeId);
-  const extract = join10(dir, `${id}.md`);
+  const dir2 = pageDirFor(placeId);
+  const extract = join11(dir2, `${id}.md`);
   const fetchedAt = (/* @__PURE__ */ new Date()).toISOString();
   const header2 = [
     `# ${id} \u2014 ${result.title ?? url}`,
@@ -6602,8 +7636,8 @@ async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
     "---",
     ""
   ].join("\n");
-  if (!isNoWrite()) mkdirSync5(join10(runDir, dir), { recursive: true });
-  writeArtifact(join10(runDir, extract), header2 + text2 + markupEvidence(result.html) + "\n");
+  if (!isNoWrite()) mkdirSync6(join11(runDir, dir2), { recursive: true });
+  writeArtifact(join11(runDir, extract), header2 + text2 + markupEvidence(result.html) + "\n");
   return {
     ok: true,
     page: {
@@ -7480,6 +8514,14 @@ async function runEnrich(runDir, places, store, opts) {
   );
   return outcome;
 }
+function persistEnrich(runDir, places, tier, outcome) {
+  writePlaces(runDir, places);
+  const manifest = requireManifest(runDir);
+  if (tier === 1) manifest.counts.enrichedTier1 = outcome.enriched;
+  else manifest.counts.enrichedTier2 = outcome.enriched;
+  manifest.notes.push(...outcome.notes);
+  writeRunManifest(runDir, manifest);
+}
 
 // src/score.ts
 var FRESH_DAYS = 180;
@@ -7559,8 +8601,8 @@ function ranked(places) {
 }
 
 // src/dossier.ts
-import { existsSync as existsSync7, readFileSync as readFileSync6 } from "fs";
-import { join as join11 } from "path";
+import { existsSync as existsSync8, readFileSync as readFileSync7 } from "fs";
+import { join as join12 } from "path";
 
 // src/classification/index.ts
 var NACE_VOCABULARY = {
@@ -7595,7 +8637,7 @@ function vocabularyOf(scheme) {
 
 // src/dossier.ts
 function dossierPathFor(place) {
-  return join11("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
+  return join12("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
 }
 function streetLine(a) {
   const type = a.typeVoie?.trim();
@@ -7767,16 +8809,16 @@ function buildDossierPacket(runDir, place, manifest) {
   parts.push(`## Pages (${place.pages.length})`);
   parts.push("");
   for (const id of place.pages) {
-    const rel = join11("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${id}.md`);
-    const abs = join11(runDir, rel);
-    if (!existsSync7(abs)) {
+    const rel = join12("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${id}.md`);
+    const abs = join12(runDir, rel);
+    if (!existsSync8(abs)) {
       parts.push(`### ${id} \u2014 MISSING (${rel})`);
       parts.push("");
       parts.push("This page is listed on the place but its extract is not on disk. Do not cite it.");
       parts.push("");
       continue;
     }
-    parts.push(readFileSync6(abs, "utf8").trimEnd());
+    parts.push(readFileSync7(abs, "utf8").trimEnd());
     parts.push("");
     parts.push("---");
     parts.push("");
@@ -7785,8 +8827,8 @@ function buildDossierPacket(runDir, place, manifest) {
 }
 
 // src/check.ts
-import { existsSync as existsSync8, readFileSync as readFileSync7, readdirSync as readdirSync4 } from "fs";
-import { basename, join as join12 } from "path";
+import { existsSync as existsSync9, readFileSync as readFileSync8, readdirSync as readdirSync5 } from "fs";
+import { basename, join as join13 } from "path";
 var citationRe = () => /\[P(\d+)\]/g;
 var MODEL_MARK = /\[M\]/;
 function isStructural(line) {
@@ -7815,11 +8857,11 @@ function runCheck(input) {
   const pageText = /* @__PURE__ */ new Map();
   const pageOwner = /* @__PURE__ */ new Map();
   for (const place of places) {
-    const dir = join12(runDir, "pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"));
+    const dir2 = join13(runDir, "pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"));
     for (const id of place.pages) {
-      const file = join12(dir, `${id}.md`);
+      const file = join13(dir2, `${id}.md`);
       pageOwner.set(id, place.id);
-      if (existsSync8(file)) pageText.set(id, readFileSync7(file, "utf8"));
+      if (existsSync9(file)) pageText.set(id, readFileSync8(file, "utf8"));
     }
   }
   let contacts = 0;
@@ -7888,12 +8930,12 @@ function runCheck(input) {
       );
     }
   }
-  const dossierDir = join12(runDir, "dossiers");
-  const files = existsSync8(dossierDir) ? readdirSync4(dossierDir).filter((f) => f.endsWith(".md")) : [];
+  const dossierDir = join13(runDir, "dossiers");
+  const files = existsSync9(dossierDir) ? readdirSync5(dossierDir).filter((f) => f.endsWith(".md")) : [];
   const byDossierName = new Map(places.map((p) => [`${p.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`, p]));
   let citations = 0;
   for (const file of files) {
-    const rel = join12("dossiers", file);
+    const rel = join13("dossiers", file);
     const place = byDossierName.get(basename(file));
     if (!place) {
       err(
@@ -7903,7 +8945,7 @@ function runCheck(input) {
       );
       continue;
     }
-    const text2 = readFileSync7(join12(dossierDir, file), "utf8");
+    const text2 = readFileSync8(join13(dossierDir, file), "utf8");
     const owned = new Set(place.pages);
     for (const m of text2.matchAll(citationRe())) {
       citations++;
@@ -8546,6 +9588,8 @@ function buildDelta(delta, before, after) {
 }
 
 // src/mcp/adapter.ts
+import { join as join14 } from "path";
+var envKeys = () => Object.fromEntries(CONNECTORS.filter((c) => c.needsKey?.env).map((c) => [c.id, process.env[c.needsKey.env]]));
 var str = (v, name) => {
   if (typeof v !== "string" || !v.trim()) throw new ToolError(`${name} must be a non-empty string`);
   return v.trim();
@@ -8616,6 +9660,90 @@ var TOOLS = [
     title: "Run the gate",
     description: "Re-opens every citation, demands a source or an [M] on every factual line, and re-reads every contact against the page it claims to come from. Returns the findings. A non-empty error list means the run must not be presented.",
     inputSchema: { type: "object", properties: { run: { type: "string" } }, required: ["run"] }
+  },
+  {
+    name: "ultraprospect_ingest",
+    title: "Ingest a keyless bulk register",
+    description: "Fetch and index a register's bulk open-data export, once. `gb` is Companies House's monthly snapshot (470 MB, indexes to ~1.8 GB) and turns the United Kingdom into a territory that can be ENUMERATED without a key; `de` is the German Handelsregister export (260 MB, ~3 GB) and gives `confirm` a source that names the holder of an HRB number. Slow \u2014 minutes, not seconds \u2014 and needed only once per country. Pass `list: true` to see what is already cached instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        country: { type: "string", description: "ISO-3166-1 alpha-2: gb or de. The only two registers publishing a bulk export." },
+        list: { type: "boolean", description: "Report what is cached \u2014 rows, vintage, disk \u2014 and ingest nothing." },
+        limit: { type: "number", description: "Stop after this many rows. For a first look at a source." }
+      },
+      required: []
+    }
+  },
+  {
+    name: "ultraprospect_confirm",
+    title: "Attach a register identity, company by company",
+    description: "For a run whose register lane could not be swept: read the registration number off each company's own legal notice (Impressum, aviso legal \u2014 both legally mandatory) and ask an authority whose it is. Run it AFTER enrich tier 1, or it can only look companies up by name, which is a candidate rather than a fact \u2014 it refuses rather than doing the weak half silently. Returns how many were verified by a published number, matched by name, attested without a holder, not found, and NOT ASKED because no authority answered. Those last two are different findings.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        run: { type: "string" },
+        limit: { type: "number", description: "Only confirm this many places. The strongest route runs first, so a limit cuts the speculative half." },
+        registry: { type: "string", description: "Restrict to these connector ids, comma-separated." }
+      },
+      required: ["run"]
+    }
+  },
+  {
+    name: "ultraprospect_enrich",
+    title: "Read the corroborated websites",
+    description: "Tier 1 reads the homepage and the legal notice on every site `resolve` proved belongs to its company: four requests, and it answers whether the site is alive, what it says it does, whether a hiring pipeline exists, and whether a registration is published there. Tier 2 is the expensive one \u2014 a page per role plus the openings read out of the ATS API rather than a JavaScript shell \u2014 so spend it on the companies you have a reason to care about, not on a whole town.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        run: { type: "string" },
+        tier: { type: "number", description: "1 or 2. Default 1." },
+        limit: { type: "number", description: "Only enrich this many places." },
+        only: { type: "string", description: "Restrict to these place ids, comma-separated." }
+      },
+      required: ["run"]
+    }
+  },
+  {
+    name: "ultraprospect_score",
+    title: "Rank by measured signals",
+    description: "Adds a total from things the run counted: site alive, recently touched, roles open, headcount band, revenue filed, contactable. It does NOT score whether a company matches a brief, however that brief is phrased \u2014 that judgement is yours, and it belongs in `fit`, which sits beside `total` and never overwrites it. Folding verdicts back in is deliberately CLI-only: it takes a file of considered answers.",
+    inputSchema: { type: "object", properties: { run: { type: "string" }, limit: { type: "number" } }, required: ["run"] }
+  },
+  {
+    name: "ultraprospect_render",
+    title: "Write the deliverables",
+    description: "Writes PROSPECTS.csv (flat, CRM-shaped, score and fit in separate columns, each contact's source page beside it), prospects.json, REPORT.md and a self-contained index.html that makes no network requests. The report's opening sentence is DERIVED from the lanes, so it cannot claim a sweep the run did not perform, and a truncated run leads with that. If PRIVACY.md appears in the file list, the run holds named individuals.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        run: { type: "string" },
+        minScore: { type: "number" },
+        minFit: { type: "string", description: "strong, possible or weak \u2014 only rows you judged at least that." },
+        noPeople: { type: "boolean", description: "Strip named individuals from the deliverables." }
+      },
+      required: ["run"]
+    }
+  },
+  {
+    name: "ultraprospect_watch",
+    title: "Diff two runs",
+    description: "What moved between an earlier run and this one: who appeared, disappeared, ceased, started or stopped hiring, gained a website. A DISAPPEARANCE IS NOT A CLOSURE \u2014 a company drops out of a sweep for half a dozen reasons and only the register can say a business ceased, which is why the two are counted apart. If either run is truncated, a difference may be coverage rather than change, and the output says so.",
+    inputSchema: {
+      type: "object",
+      properties: { run: { type: "string" }, since: { type: "string", description: "The earlier run directory." } },
+      required: ["run", "since"]
+    }
+  },
+  {
+    name: "ultraprospect_doctor",
+    title: "Why did a run come back thin",
+    description: "Probes node, the geocoders, every Overpass mirror and the register connectors that serve a country. Also reports which connectors have NEVER been exercised against their live API \u2014 a separate question from whether one is up right now, and one a reader deciding how much to trust a record needs answered.",
+    inputSchema: {
+      type: "object",
+      properties: { country: { type: "string", description: "Narrow the register probes to this country." } },
+      required: []
+    }
   }
 ];
 function createAdapter() {
@@ -8628,7 +9756,11 @@ function createAdapter() {
     capAdvice: {
       ultraprospect_places: "pass a smaller `limit`, or `withWebsiteOnly: true`.",
       ultraprospect_dossier: "pass `factSheetOnly: true` to skip the page texts.",
-      ultraprospect_scan: "narrow with `section` or `minEmployees`, or lower `maxResults`."
+      ultraprospect_scan: "narrow with `section` or `minEmployees`, or lower `maxResults`.",
+      ultraprospect_score: "pass a smaller `limit`.",
+      // `watch` has no narrowing argument — the delta is as large as the change —
+      // so the advice names where the whole thing already is instead.
+      ultraprospect_watch: "the full diff was written to `DELTA.md` in the run directory; read it from there."
     },
     async callTool(name, args) {
       switch (name) {
@@ -8711,6 +9843,147 @@ function createAdapter() {
           return { text: `${formatReport(report)}
 
 ${JSON.stringify({ ok: report.ok, errors: report.errors, warnings: report.warnings }, null, 2)}` };
+        }
+        case "ultraprospect_ingest": {
+          if (args.list === true) return { text: JSON.stringify({ cacheDir: cacheDir(), snapshots: listSnapshots() }, null, 2) };
+          const country = str(args.country, "country").toLowerCase();
+          const applicable = CONNECTORS.filter((c) => c.snapshot && servesCountry(c, country));
+          if (applicable.length === 0) {
+            const available = CONNECTORS.filter((c) => c.snapshot).map((c) => c.countries.join("/"));
+            throw new ToolError(`no register serving ${country} publishes a bulk open-data export. Countries that do: ${available.join(", ")}`);
+          }
+          const notes = [];
+          const done = [];
+          for (const connector of applicable) {
+            done.push(
+              await ingestSnapshot(connector.id, connector.snapshot, {
+                limit: typeof args.limit === "number" ? clampInt(args.limit, 1, 1e8, 1e3) : void 0,
+                onNote: (n) => notes.push(n)
+              })
+            );
+          }
+          return { text: JSON.stringify({ ingested: done, notes }, null, 2) };
+        }
+        case "ultraprospect_confirm": {
+          const runDir = resolveRun(str(args.run, "run"));
+          const manifest = requireManifest(runDir);
+          const places = readPlaces(runDir);
+          const targets = needsConfirming(places);
+          if (targets.length === 0)
+            return { text: JSON.stringify({ run: runDir, verified: 0, matched: 0, note: "every place already carries a register record" }, null, 2) };
+          if (targets.filter((p) => p.pages.length > 0).length === 0) {
+            throw new ToolError(
+              `none of the ${targets.length} place(s) has a fetched page, so no legal notice can be read. Run ultraprospect_enrich with tier 1 first (which needs resolve's corroborated websites).`
+            );
+          }
+          const notes = [];
+          const outcome = await runConfirm(runDir, places, {
+            countryCode: manifest.target.countryCode,
+            town: manifest.target.label,
+            limit: typeof args.limit === "number" ? clampInt(args.limit, 1, 1e5, 200) : void 0,
+            registryIds: typeof args.registry === "string" ? args.registry.split(",").map((s) => s.trim()) : void 0,
+            keys: envKeys(),
+            onNote: (n) => notes.push(n)
+          });
+          persistConfirm(runDir, places, manifest, outcome);
+          return {
+            text: JSON.stringify(
+              {
+                run: runDir,
+                verified: outcome.verified,
+                matched: outcome.matched,
+                attested: outcome.attested,
+                undecided: outcome.undecided.length,
+                notFound: outcome.notFound,
+                notAsked: outcome.notAsked,
+                coverage: outcome.coverage,
+                notes
+              },
+              null,
+              2
+            ),
+            artifact: runDir
+          };
+        }
+        case "ultraprospect_enrich": {
+          const runDir = resolveRun(str(args.run, "run"));
+          const places = readPlaces(runDir);
+          if (enrichable(places).length === 0) {
+            throw new ToolError(
+              "no place has a corroborated website yet. Enrichment only ever reads sites proved to belong to their company; run `resolve` first."
+            );
+          }
+          const tier = typeof args.tier === "number" ? clampInt(args.tier, 1, 2, 1) : 1;
+          const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }))));
+          const notes = [];
+          const outcome = await runEnrich(runDir, places, store, {
+            tier,
+            limit: typeof args.limit === "number" ? clampInt(args.limit, 1, 1e5, 20) : void 0,
+            only: typeof args.only === "string" ? args.only.split(",").map((s) => s.trim()) : void 0,
+            onNote: (n) => notes.push(n)
+          });
+          persistEnrich(runDir, places, tier, outcome);
+          return { text: JSON.stringify({ run: runDir, tier, ...outcome, notes }, null, 2), artifact: runDir };
+        }
+        case "ultraprospect_score": {
+          const runDir = resolveRun(str(args.run, "run"));
+          const places = readPlaces(runDir);
+          scoreAll(places);
+          writePlaces(runDir, places);
+          const limit = typeof args.limit === "number" ? clampInt(args.limit, 1, 5e3, 50) : 50;
+          return {
+            text: JSON.stringify(
+              {
+                run: runDir,
+                note: "`total` is measured. `fit` is a judgement and is not set here \u2014 fold verdicts in with the CLI's `score --apply`.",
+                ranked: ranked(places).slice(0, limit).map((p) => ({
+                  id: p.id,
+                  name: p.name,
+                  total: p.score?.total ?? 0,
+                  fit: p.score?.fit,
+                  website: p.website?.url,
+                  openRoles: p.signals?.openRoles ?? 0
+                }))
+              },
+              null,
+              2
+            )
+          };
+        }
+        case "ultraprospect_render": {
+          const runDir = resolveRun(str(args.run, "run"));
+          const manifest = requireManifest(runDir);
+          const outcome = buildAll(readPlaces(runDir), manifest, {
+            noPeople: args.noPeople === true,
+            minScore: typeof args.minScore === "number" ? clampInt(args.minScore, 0, 1e4, 0) : void 0,
+            minFit: typeof args.minFit === "string" ? args.minFit : void 0
+          });
+          for (const file of outcome.files) writeArtifact(join14(runDir, file.path), file.content);
+          return {
+            text: JSON.stringify(
+              {
+                run: runDir,
+                files: outcome.files.map((f) => join14(runDir, f.path)),
+                truncated: manifest.truncated,
+                privacy: outcome.files.some((f) => f.path === "PRIVACY.md")
+              },
+              null,
+              2
+            ),
+            artifact: runDir
+          };
+        }
+        case "ultraprospect_watch": {
+          const after = resolveRun(str(args.run, "run"));
+          const before = resolveRun(str(args.since, "since"));
+          const delta = diffRuns(readPlaces(before), readPlaces(after));
+          const markdown = buildDelta(delta, requireManifest(before), requireManifest(after));
+          writeArtifact(join14(after, "DELTA.md"), markdown);
+          return { text: markdown, artifact: after };
+        }
+        case "ultraprospect_doctor": {
+          const probes = await probeAll(typeof args.country === "string" ? args.country : void 0, envKeys());
+          return { text: JSON.stringify({ version: VERSION, cacheDir: cacheDir(), probes }, null, 2) };
         }
         default:
           throw new ToolError(`unknown tool "${name}"`);
@@ -9002,6 +10275,7 @@ Do not write the file yourself \u2014 the orchestrator saves it and runs the gat
 // src/cli.ts
 var COMMANDS = [
   "where",
+  "ingest",
   "scan",
   "match",
   "confirm",
@@ -9035,6 +10309,7 @@ var VALUE_FLAGS = [
   "min-employees",
   "registry",
   "companies-house-key",
+  "from-file",
   "max-results",
   "overpass",
   "apply",
@@ -9066,6 +10341,7 @@ var BOOL_FLAGS = [
   "engine-search",
   "eco",
   "list",
+  "forget",
   "stdout",
   "help",
   "version"
@@ -9077,6 +10353,7 @@ USAGE
 
 COMMANDS
   where <query>          Resolve a place name to a search area. Refuses to guess when ambiguous.
+  ingest --country <cc>  Fetch and index a register's bulk open-data export. Once, then local.
   scan                   Discover every company in the area, from OSM and the country's register.
   match --apply <file>   Fold the agent's adjudication of MATCH.todo.json back into places.json.
   confirm                Check each company against its country's register, outside France's sweep.
@@ -9088,7 +10365,7 @@ COMMANDS
   render                 CSV, JSON, report and a self-contained HTML page.
   watch --since <run>    Diff this run against an earlier one: who opened, closed, started hiring.
   orchestrate            Emit the fan-out: one search phase and two judgement phases.
-  mcp                    Serve the run over MCP: where, scan, places, dossier, check.
+  mcp                    Serve the run over MCP: where, ingest, scan, places, confirm, enrich, score, dossier, check, render, watch, doctor.
   doctor                 Check node, network and every upstream. --country narrows the registers.
   version                Print the version.
 
@@ -9138,6 +10415,14 @@ DOSSIER
 ADJUDICATION (match)
   --apply <file>         A JSON array of {osmId, registryId, connectorId?, merge, why}. "-" reads stdin.
 
+BULK OPEN DATA (ingest)
+  --country <cc>         Which country's export to ingest: gb (Companies House, 470 MB),
+                         de (Handelsregister via OffeneRegister, 260 MB). Both keyless.
+  --list                 What is already in the cache: rows, vintage, size on disk.
+  --forget               Delete a country's ingested snapshot.
+  --from-file <path>     Index a file already on disk instead of downloading one.
+  --limit <n>            Stop after this many rows. For a first look at a new source.
+
 REGISTER CONFIRMATION (confirm)
   --limit <n>            Only confirm this many places.
   --companies-house-key <key>   UK Companies House key. Free, email only. Or set the env var.
@@ -9168,7 +10453,8 @@ OUTPUT
   --version              Print the version.
 
 ENVIRONMENT
-  ULTRAPROSPECT_CACHE_DIR      Where fetched pages are cached. Default <tmpdir>/ultraprospect.
+  ULTRAPROSPECT_CACHE_DIR      Where fetched pages and ingested snapshots are cached.
+                               Default <tmpdir>/ultraprospect. "ingest --list" reports the size.
   ULTRAPROSPECT_NO_WRITE=1     Same as --stdout.
   ULTRAPROSPECT_POLITE_DELAY_MS  Per-host delay between requests. Default 400.
   ULTRAPROSPECT_COMPANIES_HOUSE_KEY  UK register key. Free, email only. Same as --companies-house-key.
@@ -9189,6 +10475,55 @@ function list(raw) {
   if (!raw) return void 0;
   const items = raw.split(",").map((s) => s.trim()).filter(Boolean);
   return items.length ? items : void 0;
+}
+async function cmdIngest(values, bools) {
+  const withSnapshots = CONNECTORS.filter((c) => c.snapshot);
+  if (bools.has("list")) {
+    const cached = listSnapshots();
+    if (bools.has("json")) {
+      out(jsonLine({ cacheDir: cacheDir(), snapshots: cached }));
+      return EXIT_OK;
+    }
+    if (cached.length === 0) {
+      say("ingest: nothing ingested yet.");
+      for (const c of withSnapshots) say(`  available: ${c.id} \u2014 ${c.label} (ultraprospect ingest --country ${c.countries[0]})`);
+      return EXIT_OK;
+    }
+    for (const m of cached) {
+      out(
+        `${m.connectorId.padEnd(22)} ${String(m.rows).padStart(9)} records  ${(m.bytesOnDisk / 1e6).toFixed(0).padStart(5)} MB  vintage ${m.lastModified ?? m.vintage ?? "unknown"}`
+      );
+    }
+    say("");
+    say(`  cache: ${cacheDir()}`);
+    return EXIT_OK;
+  }
+  const country = values.country?.trim().toLowerCase();
+  if (!country) {
+    throw new UsageError(`ingest needs --country <cc>, or --list. Countries with a bulk export: ${withSnapshots.map((c) => c.countries.join("/")).join(", ")}`);
+  }
+  const applicable = withSnapshots.filter((c) => servesCountry(c, country));
+  if (applicable.length === 0) {
+    say(`ingest: no register serving ${country} publishes a bulk open-data export.`);
+    for (const c of withSnapshots) say(`  available: ${c.countries.join("/")} \u2014 ${c.id}`);
+    return EXIT_USAGE;
+  }
+  if (bools.has("forget")) {
+    for (const c of applicable) say(`ingest: ${forgetSnapshot(c.id) ? "forgot" : "nothing cached for"} ${c.id}`);
+    return EXIT_OK;
+  }
+  for (const connector of applicable) {
+    const meta = await ingestSnapshot(connector.id, connector.snapshot, {
+      limit: values.limit ? clampInt(values.limit, 1, 1e8, 1e3) : void 0,
+      fromFile: values["from-file"],
+      onNote: (n) => say(`  ${n}`),
+      onProgress: (rows) => say(`  ingest: ${rows} records indexed\u2026`)
+    });
+    if (bools.has("json")) out(jsonLine(meta));
+  }
+  say("");
+  say(`next: ultraprospect scan --where "<place>" --country ${country}`);
+  return EXIT_OK;
 }
 async function cmdConfirm(values, bools) {
   if (!values.run) throw new UsageError("confirm needs --run <dir>");
@@ -9221,20 +10556,7 @@ async function cmdConfirm(values, bools) {
       if (done % 10 === 0 || done === total) say(`  confirm: ${done}/${total} \u2014 ${name}`);
     }
   });
-  writePlaces(runDir, places);
-  writeJson(runDir, "registry.json", mergeRegistryRecords(runDir, outcome.records));
-  if (outcome.undecided.length) {
-    const existing = readJsonSafe(join13(runDir, "MATCH.todo.json"))?.pairs ?? [];
-    writeJson(runDir, "MATCH.todo.json", buildMatchTodo([...existing, ...outcome.undecided]));
-  }
-  manifest.lanes = [...manifest.lanes.filter((l) => l.lane !== "registry" || l.mode === "sweep"), outcome.coverage];
-  manifest.counts.registry += outcome.records.length;
-  manifest.counts.confirmed = outcome.verified + outcome.matched;
-  manifest.counts.undecided += outcome.undecided.length;
-  for (const rec of outcome.records) manifest.counts.byConnector[rec.connectorId] = (manifest.counts.byConnector[rec.connectorId] ?? 0) + 1;
-  manifest.licences = licencesFor(manifest.lanes);
-  manifest.notes.push(...outcome.notes);
-  writeRunManifest(runDir, manifest);
+  persistConfirm(runDir, places, manifest, outcome);
   if (bools.has("json")) {
     out(
       jsonLine({
@@ -9270,12 +10592,6 @@ function connectorKeys(values) {
     keys[connector.id] = values[flag] ?? process.env[connector.needsKey.env];
   }
   return keys;
-}
-function mergeRegistryRecords(runDir, fresh) {
-  const existing = readJsonSafe(join13(runDir, "registry.json")) ?? [];
-  const byKey = /* @__PURE__ */ new Map();
-  for (const rec of [...existing, ...fresh]) byKey.set(`${rec.connectorId}:${rec.establishmentId ?? rec.id}`, rec);
-  return [...byKey.values()];
 }
 async function targetFrom(values, positional) {
   const radiusM = values.radius ? parseDistanceM(values.radius) : void 0;
@@ -9402,7 +10718,7 @@ async function cmdMatch(values, bools) {
   if (!values.run) throw new UsageError("match needs --run <dir>");
   if (!values.apply) throw new UsageError('match needs --apply <file> (a JSON array of {osmId, registryId, merge}), or "-" for stdin');
   const runDir = resolveRun(values.run);
-  const raw = values.apply === "-" ? readFileSync8(0, "utf8") : readFileSync8(values.apply, "utf8");
+  const raw = values.apply === "-" ? readFileSync9(0, "utf8") : readFileSync9(values.apply, "utf8");
   let verdicts;
   try {
     const parsedJson = JSON.parse(raw);
@@ -9450,7 +10766,7 @@ async function cmdResolve(values, bools) {
     else for (const item of plan) for (const q of item.queries) out(q);
     say("");
     say(`resolve: ${plan.length} place(s) need a website, ${plan.reduce((n, p) => n + p.queries.length, 0)} quer(y|ies) to run.`);
-    say(`  worklist: ${join13(runDir, "RESOLVE.todo.json")}`);
+    say(`  worklist: ${join15(runDir, "RESOLVE.todo.json")}`);
     say("  Run your own WebSearch once per query. Pool EVERY hit into ONE JSON array,");
     say('  duplicates and all: [{"url": "\u2026", "title": "\u2026", "snippet": "\u2026", "placeId": "\u2026"}]');
     say(`next: ultraprospect resolve --run ${runDir} --web-results <file>`);
@@ -9459,7 +10775,7 @@ async function cmdResolve(values, bools) {
   }
   let webResults;
   if (values["web-results"]) {
-    const raw = values["web-results"] === "-" ? readFileSync8(0, "utf8") : readFileSync8(values["web-results"], "utf8");
+    const raw = values["web-results"] === "-" ? readFileSync9(0, "utf8") : readFileSync9(values["web-results"], "utf8");
     try {
       const parsed = JSON.parse(raw);
       webResults = Array.isArray(parsed) ? parsed : parsed?.hits ?? [];
@@ -9525,12 +10841,7 @@ async function cmdEnrich(values, bools) {
       if (done % 5 === 0 || done === total) say(`  enrich: ${done}/${total} \u2014 ${name}`);
     }
   });
-  writePlaces(runDir, places);
-  const manifest = requireManifest(runDir);
-  if (tier === 1) manifest.counts.enrichedTier1 = outcome.enriched;
-  else manifest.counts.enrichedTier2 = outcome.enriched;
-  manifest.notes.push(...outcome.notes);
-  writeRunManifest(runDir, manifest);
+  persistEnrich(runDir, places, tier, outcome);
   if (bools.has("json")) out(jsonLine({ run: runDir, tier, ...outcome, notes: void 0 }));
   say("");
   say(
@@ -9539,7 +10850,7 @@ async function cmdEnrich(values, bools) {
   return outcome.enriched > 0 ? EXIT_OK : EXIT_FAILURE;
 }
 function readJsonArg(value, what) {
-  const raw = value === "-" ? readFileSync8(0, "utf8") : readFileSync8(value, "utf8");
+  const raw = value === "-" ? readFileSync9(0, "utf8") : readFileSync9(value, "utf8");
   try {
     return JSON.parse(raw);
   } catch (e) {
@@ -9608,7 +10919,7 @@ async function cmdDossier(values, bools) {
   const packet = buildDossierPacket(runDir, place, requireManifest(runDir));
   out(packet.markdown);
   say("");
-  say(`write your dossier to ${join13(runDir, dossierPathFor(place))}`);
+  say(`write your dossier to ${join15(runDir, dossierPathFor(place))}`);
   say(`next: ultraprospect check --run ${runDir}`);
   return EXIT_OK;
 }
@@ -9637,16 +10948,16 @@ async function cmdRender(values, bools) {
     minScore: values["min-score"] ? clampInt(values["min-score"], 0, 1e4, 0) : void 0,
     minFit: values["min-fit"] ?? void 0
   });
-  for (const file of outcome.files) writeArtifact(join13(runDir, file.path), file.content);
-  if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join13(runDir, f.path)) }));
-  else for (const file of outcome.files) out(join13(runDir, file.path));
+  for (const file of outcome.files) writeArtifact(join15(runDir, file.path), file.content);
+  if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join15(runDir, f.path)) }));
+  else for (const file of outcome.files) out(join15(runDir, file.path));
   say("");
   if (manifest.truncated) {
     say("  \u26A0 this run is TRUNCATED \u2014 the report and the page both lead with that, and so must you.");
   }
   const privacy = outcome.files.some((f) => f.path === "PRIVACY.md");
   if (privacy) say("  PRIVACY.md was written: this run holds named individuals. Read it before sharing the CSV.");
-  say(`next: open ${join13(runDir, "index.html")}`);
+  say(`next: open ${join15(runDir, "index.html")}`);
   return EXIT_OK;
 }
 async function cmdWatch(values, bools) {
@@ -9657,7 +10968,7 @@ async function cmdWatch(values, bools) {
   if (afterDir === beforeDir) throw new UsageError("--run and --since resolve to the same run; there is nothing to compare");
   const delta = diffRuns(readPlaces(beforeDir), readPlaces(afterDir));
   const markdown = buildDelta(delta, requireManifest(beforeDir), requireManifest(afterDir));
-  writeArtifact(join13(afterDir, "DELTA.md"), markdown);
+  writeArtifact(join15(afterDir, "DELTA.md"), markdown);
   if (bools.has("json")) {
     out(
       jsonLine({
@@ -9672,7 +10983,7 @@ async function cmdWatch(values, bools) {
       })
     );
   } else {
-    out(join13(afterDir, "DELTA.md"));
+    out(join15(afterDir, "DELTA.md"));
   }
   say("");
   say(
@@ -9738,6 +11049,8 @@ async function main(argv) {
   if (bools.has("stdout") || process.env.ULTRAPROSPECT_NO_WRITE === "1") setNoWrite(true);
   const text2 = positionalText(parsed);
   switch (command) {
+    case "ingest":
+      return cmdIngest(values, bools);
     case "where":
       return cmdWhere(values, bools, text2);
     case "scan":

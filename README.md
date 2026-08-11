@@ -2,8 +2,8 @@
 
 **Turn a place into a prospect list you can defend.** Give it a town, a street
 or a radius; it sweeps OpenStreetMap worldwide, attaches whatever company
-register the country actually has, and refuses to guess where guessing would be
-invisible.
+register the country actually has — France and the UK can be enumerated outright,
+both without a key — and refuses to guess where guessing would be invisible.
 
 Zero dependencies, no API keys, no install. One vendorable `engine.mjs`, a CLI,
 and a [skills.sh](https://skills.sh) agent skill. The web-retrieval half is
@@ -53,15 +53,20 @@ starts lying, so it is where most of the care went.
 Measured against the live services, and the single most important thing to
 understand about a run:
 
-**Exactly one public register in the world can enumerate the companies inside a
-territory without an API key, and it is France's.** Everywhere else a register
+**Two public registers can be enumerated without an API key, and they are not
+enumerated the same way.** France's answers a bounding box over an API. The United
+Kingdom's publishes a monthly open-data snapshot of every live company — 470 MB of
+zipped CSV, no key, no registration — which `ingest` fetches once and which files
+each company under its registered office's POST TOWN. Everywhere else a register
 can confirm a company you already found, and nothing more.
 
-So there are two shapes of run, and the manifest always says which one you got:
+So there are three shapes of register lane, and the manifest always says which one
+you got — `mode` is a column in the report's Coverage table:
 
 | Mode | What it means | Where |
 |---|---|---|
-| **sweep** | The register was asked for every company in the area. The answer is a territory. | France |
+| **sweep**, by area | The register was asked for every company inside the bounding box. The answer is a territory. | France |
+| **sweep**, by post town | The monthly snapshot holds every company the register files under that post town. A real enumeration, and **a post town is not a bounding box** — so it does not coincide with the OSM lane's geometry, and a company registered at its accountant's address in the next town is absent. | United Kingdom, after `ingest --country gb` |
 | **confirm** | OSM covered the ground; each company was then checked against the register one at a time. **A company absent from OpenStreetMap is absent from the run.** | everywhere else |
 
 ```bash
@@ -79,8 +84,10 @@ ultraprospect confirm --run <dir>              # reads it, asks the authority
 
 | Country | Register | Key | What it can do |
 |---|---|---|---|
-| France | `recherche-entreprises.api.gouv.fr` (Sirene/RNE) | none | **sweep**, lookup, verify |
-| United Kingdom | Companies House | free, email only | lookup, verify |
+| France | `recherche-entreprises.api.gouv.fr` (Sirene/RNE) | none | **sweep** by area, lookup, verify |
+| United Kingdom | Companies House — monthly open-data snapshot | none | **sweep** by post town, lookup, verify — after `ingest --country gb` |
+| United Kingdom | Companies House REST API | free, email only | lookup, verify — a day fresher than the snapshot, and never required |
+| Germany | Handelsregister via the OffeneRegister export | none | lookup, verify — **and it names the HRB holder VIES will not**. Data stops in 2019; every record carries `asOf`. After `ingest --country de` |
 | Norway | Enhetsregisteret (Brønnøysund) | none | lookup, verify — exact headcount and the company's own website |
 | Finland | PRH / YTJ | none | lookup, verify |
 | Czechia | ARES | none | lookup, verify |
@@ -89,18 +96,43 @@ ultraprospect confirm --run <dir>              # reads it, asks the authority
 | EU-27 | VIES | none | verify a VAT number |
 | worldwide | GLEIF | none | lookup, verify — entities holding an LEI |
 
-**Germany, Spain and the United States have no open register to sweep or
-search.** What Germany and Spain have instead is the law: `enrich --tier 1`
-fetches the legal notice every company there is required to publish
-(`Impressum`, § 5 DDG; `aviso legal`, Ley 34/2002), `confirm` reads the
+**Spain and the United States have no open register to sweep or search, and
+Germany has no official one.** What Germany and Spain have instead is the law:
+`enrich --tier 1` fetches the legal notice every company there is required to
+publish (`Impressum`, § 5 DDG; `aviso legal`, Ley 34/2002), `confirm` reads the
 registration number off it, and an authority is asked whether that number is
 real and whose it is.
+
+Germany also has something unofficial and genuinely useful. The Handelsregister
+is 150 databases held by local courts, free to search at handelsregister.de since
+2022 and offered through no API at all; what exists as open data is one export
+published by the Open Knowledge Foundation Deutschland with OpenCorporates —
+4.5 million companies and their officers, CC-BY 4.0. Two measured facts decide how
+it is used:
+
+- **It names the holder of an HRB number**, which is precisely what VIES refuses
+  to do for Germany. That is the gap it closes and the reason it is here.
+- **It stopped in 2019.** Its SQL API is gone (502) and its records were retrieved
+  between 2017 and 2019, each stamped with its own date. So every record carries
+  `asOf`, it declares no `sweep` — an enumeration from 2018 presented as the
+  businesses in a Berlin district would be the exact lie this tool refuses — and
+  the gate will not let a dated record found a present-tense claim.
+
+So a German run has two independent register answers, and they answer different
+questions: VIES says a VAT number is live TODAY without saying whose, and the
+export says who filed under an HRB number THEN. Neither alone is a current
+identity. Together they are worth more than either, as long as both dates are
+stated.
 
 What the authorities will not say is reported rather than smoothed over:
 
 - **VIES does not name the holder for Germany or Spain.** It answers `"---"`.
   A number can be confirmed live without its owner being disclosed, and that is
   recorded as an attested identifier, never as an identity.
+- **A German register number is not an identity without its court.** `HRA 4792`
+  exists at several Amtsgerichte — GLEIF once resolved one to a company in another
+  Land. The export carries the court, so a number qualified by its Amtsgericht is
+  matched exactly and a bare one is refused when more than one court has it.
 - **VIES only knows numbers enabled for intra-community trade.** A small
   trader's perfectly legitimate VAT number is unknown to it, and the run says so
   rather than implying the page is lying.
@@ -129,8 +161,16 @@ to adjudicate. A wrong merge produces one plausible company holding somebody
 else's registration — invisible forever.
 
 **It refuses to call a partial sweep complete.** Every lane reports its own
-coverage, and a confirmed territory is never presented as a swept one.
-`manifest.truncated` is the headline, and the report leads with it.
+coverage and its own `mode`, both as columns in the report's table, and a
+confirmed territory is never presented as a swept one — the report's opening
+sentence is DERIVED from the lanes rather than asserted, so there is no code path
+that can claim a sweep the run did not perform. `manifest.truncated` is the
+headline, and the report leads with it.
+
+**It dates what came out of a snapshot.** A record carrying `asOf` is a fact about
+that date, not about today, and the gate will not let one found a present-tense
+claim. That is what makes a seven-year-old German register export usable instead of
+misleading.
 
 **It refuses to invent a contact.** Every email, phone number and person must
 appear verbatim in a fetched page or an open-data record. No address is ever
@@ -207,6 +247,7 @@ node scripts/ultraprospect.mjs --help
 | Command | What it does |
 |---|---|
 | `where <query>` | Resolve a place to a search area. Exits 2 with candidates when ambiguous. |
+| `ingest --country` | Fetch and index a register's bulk open-data export. Once; then every query is local. `--list` says what is cached. |
 | `scan` | Sweep OSM over the area, and the register too where one can be swept. |
 | `match --apply` | Fold an adjudication of `MATCH.todo.json` back into the run. |
 | `confirm` | Attach a register identity company by company, where no sweep exists. |
@@ -218,7 +259,7 @@ node scripts/ultraprospect.mjs --help
 | `render` | `PROSPECTS.csv`, `prospects.json`, `REPORT.md`, a self-contained `index.html`. |
 | `watch --since` | What moved: who opened, closed, started hiring, gained a site. |
 | `orchestrate` | Fan the search and judgement phases out across subagents. |
-| `mcp` | Serve it over MCP: where, scan, places, dossier, check. |
+| `mcp` | Serve it over MCP: where, ingest, scan, places, confirm, enrich, score, dossier, check, render, watch, doctor. The two `--apply` folds and `resolve` stay CLI-only, on purpose. |
 | `doctor` | Check every upstream. `--country` narrows the register probes. |
 
 ### A run, end to end
@@ -238,7 +279,8 @@ ultraprospect render  --run "$RUN"
 
 ```bash
 ultraprospect scan --where "Lyon" --section M --min-employees 20
-ultraprospect scan --where "Manchester" --country gb --companies-house-key $KEY
+ultraprospect ingest --country gb                         # once: 470 MB, no key
+ultraprospect scan --where "Hebden Bridge" --country gb   # the UK register, enumerated
 ultraprospect scan --lat 52.5389 --long 13.4244 --radius 350m --country de
 ultraprospect scan --where "Nantes" --no-people          # organisation data only
 ultraprospect scan --record ./fixtures/x                 # record a replayable sweep

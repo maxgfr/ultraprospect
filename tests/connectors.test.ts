@@ -285,8 +285,11 @@ describe("gb-companies-house", () => {
     const availability = gbCompaniesHouse.availability({ keys: {} });
     expect(availability.available).toBe(false);
     if (!availability.available) {
-      // The message has to be actionable: it is printed verbatim into a run.
-      expect(availability.how).toContain("developer.company-information.service.gov.uk");
+      // The message has to be actionable: it is printed verbatim into a run. And
+      // it now leads with the KEYLESS route, because that is the one that keeps
+      // the tool's promise — a key is an optional upgrade, not the way in.
+      expect(availability.how).toContain("ingest --country gb");
+      expect(availability.reason).toContain("no Companies House snapshot");
     }
   });
 
@@ -326,17 +329,36 @@ describe("the connector table", () => {
     }
   });
 
-  it("declares exactly one sweepable register, and it is France's", () => {
-    // The load-bearing fact of the whole design. If a second connector ever
-    // gains `sweep`, the report's wording about coverage has to be revisited.
+  it("names every sweepable register, and there are now two of them", () => {
+    // This assertion used to read "exactly one, and it is France's", and its own
+    // comment anticipated the day it would change: "If a second connector ever
+    // gains `sweep`, the report's wording about coverage has to be revisited."
+    // That day was the Companies House Free Company Data Product — a keyless
+    // monthly export that enumerates the register by post town. The report's
+    // wording WAS revisited: `render` derives its coverage sentence from the lane's
+    // mode, and the UK lane's reason says in words that a post town is not a
+    // bounding box. Anything else gaining `sweep` needs the same treatment.
     const sweepers = CONNECTORS.filter((c) => c.sweep);
-    expect(sweepers.map((c) => c.id)).toEqual(["fr-sirene"]);
+    expect(sweepers.map((c) => c.id).sort()).toEqual(["fr-sirene", "gb-companies-house"]);
+  });
+
+  it("declares a bulk snapshot only where the register publishes one", () => {
+    // The two registers with no queryable API and a file instead. `ingest` reads
+    // this rather than a list of its own, so a new bulk source is a connector edit.
+    expect(
+      CONNECTORS.filter((c) => c.snapshot)
+        .map((c) => c.id)
+        .sort(),
+    ).toEqual(["de-offeneregister", "gb-companies-house"]);
   });
 
   it("gives a country with no sweepable register its confirm connectors", () => {
     const germany = connectorsFor("de");
     expect(germany.sweep).toBeUndefined();
+    // de-offeneregister is absent until its snapshot is ingested, and says so
+    // rather than being dropped — the same treatment a missing key gets.
     expect(germany.confirm.map((c) => c.id)).toEqual(["eu-vies", "gleif"]);
+    expect(germany.unavailable.map(({ connector }) => connector.id)).toContain("de-offeneregister");
   });
 
   it("puts national registers before the cross-border authorities", () => {
