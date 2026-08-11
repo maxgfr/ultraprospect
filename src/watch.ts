@@ -101,7 +101,10 @@ export function buildDelta(delta: Delta, before: RunManifest, after: RunManifest
   const l: string[] = [];
   l.push(`# What changed — ${shortLabel(after.slug)}`);
   l.push("");
-  l.push(`Comparing the sweep of ${before.builtAt.slice(0, 10)} with the one of ${after.builtAt.slice(0, 10)}.`);
+  // "the sweep" was wrong on every run outside France, where the register half
+  // was confirmed company by company rather than enumerated. "run" is true in
+  // both modes, and the mode itself is in each run's own manifest.
+  l.push(`Comparing the run of ${before.builtAt.slice(0, 10)} with the one of ${after.builtAt.slice(0, 10)}.`);
   l.push("");
 
   if (before.truncated || after.truncated) {

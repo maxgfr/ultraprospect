@@ -6383,8 +6383,8 @@ async function runConfirm(runDir, places, opts = {}) {
     note(`confirm: ${outcome.coverage.reason}`);
     return outcome;
   }
-  const coverage = legalIdCoverage(opts.countryCode);
-  note(`confirm: ${coverage.note}`);
+  const coverage2 = legalIdCoverage(opts.countryCode);
+  note(`confirm: ${coverage2.note}`);
   const targets = needsConfirming(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
   outcome.coverage.requested = targets.length;
   const withPages = targets.filter((p) => p.pages.length > 0).length;
@@ -6494,7 +6494,7 @@ async function runConfirm(runDir, places, opts = {}) {
   outcome.coverage.returned = outcome.records.length;
   outcome.coverage.connectorId = [...usedConnectors].sort().join(",") || selection.confirm[0]?.id;
   outcome.coverage.reason = `confirmed one company at a time: ${outcome.verified} by a published registration number, ${outcome.matched} by a name lookup, ${outcome.notFound} not found. This is NOT a sweep \u2014 companies absent from OSM are absent from this run.`;
-  if (coverage.expected && idsFound === 0 && targets.length > 0) {
+  if (coverage2.expected && idsFound === 0 && targets.length > 0) {
     note(
       `confirm: not one of ${targets.length} site(s) published a registration number, though ${opts.countryCode} requires it. Either the legal pages were not fetched (run \`enrich --tier 1\` first) or they were not reachable.`
     );
@@ -8089,6 +8089,29 @@ function truncationBanner(manifest) {
     ""
   ];
 }
+function coverage(manifest) {
+  const date = manifest.builtAt.slice(0, 10);
+  const version = `ultraprospect ${manifest.toolVersion}`;
+  const registry = manifest.lanes.filter((l) => l.lane === "registry");
+  const osm = manifest.lanes.find((l) => l.lane === "osm");
+  const osmRan = Boolean(osm) && osm?.reason !== "skipped (--no-osm)";
+  if (registry.some((l) => l.mode === "sweep")) {
+    return { sentence: `Swept ${date} with ${version}.`, short: `swept ${date}` };
+  }
+  if (registry.some((l) => l.mode === "confirm")) {
+    return {
+      sentence: `OpenStreetMap swept ${date}; the register confirmed company by company, so a company nobody has mapped is not in this list. ${version}.`,
+      short: `OSM swept ${date}, register confirmed company by company`
+    };
+  }
+  if (osmRan) {
+    return {
+      sentence: `OpenStreetMap swept ${date}; no register lane covered this territory. ${version}.`,
+      short: `OSM swept ${date}, no register lane`
+    };
+  }
+  return { sentence: `Built ${date} with ${version}.`, short: `built ${date}` };
+}
 function activityLabel(place) {
   const rec = place.registry;
   const section2 = rec?.section;
@@ -8131,14 +8154,15 @@ function buildReport(places, manifest) {
   l.push(...truncationBanner(manifest));
   l.push(`${manifest.target.label}`);
   l.push("");
-  l.push(`Swept ${manifest.builtAt.slice(0, 10)} with ultraprospect ${manifest.toolVersion}.`);
+  l.push(coverage(manifest).sentence);
   l.push("");
   l.push("## Coverage");
   l.push("");
-  l.push("| Lane | Returned | Complete | Note |");
-  l.push("|---|---:|---|---|");
+  l.push("| Lane | Mode | Returned | Complete | Note |");
+  l.push("|---|---|---:|---|---|");
   for (const lane of manifest.lanes) {
-    l.push(`| ${lane.lane} | ${lane.returned} | ${lane.truncated ? "**no**" : "yes"} | ${lane.reason ?? ""} |`);
+    const mode2 = lane.mode ?? (lane.lane === "registry" ? "not swept" : "\u2014");
+    l.push(`| ${lane.lane} | ${mode2} | ${lane.returned} | ${lane.truncated ? "**no**" : "yes"} | ${lane.reason ?? ""} |`);
   }
   l.push("");
   l.push(
@@ -8264,7 +8288,7 @@ footer p{margin:.25rem 0}
 <body>
 <main>
 <h1>${esc(shortLabel(manifest.target.label || manifest.slug))}</h1>
-<p class="sub">${esc(manifest.target.label)} \xB7 swept ${esc(manifest.builtAt.slice(0, 10))} \xB7 ultraprospect ${esc(manifest.toolVersion)}</p>
+<p class="sub">${esc(manifest.target.label)} \xB7 ${esc(coverage(manifest).short)} \xB7 ultraprospect ${esc(manifest.toolVersion)}</p>
 ${banner}
 <div class="cards">
 <div class="card"><b>${places.length}</b><span>companies</span></div>
@@ -8396,7 +8420,7 @@ function buildDelta(delta, before, after) {
   const l = [];
   l.push(`# What changed \u2014 ${shortLabel(after.slug)}`);
   l.push("");
-  l.push(`Comparing the sweep of ${before.builtAt.slice(0, 10)} with the one of ${after.builtAt.slice(0, 10)}.`);
+  l.push(`Comparing the run of ${before.builtAt.slice(0, 10)} with the one of ${after.builtAt.slice(0, 10)}.`);
   l.push("");
   if (before.truncated || after.truncated) {
     l.push("> \u26A0 **One of these runs is truncated**, so an appearance or a disappearance here");

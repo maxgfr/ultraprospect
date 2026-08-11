@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CSV_COLUMNS, toCsv } from "../src/csv.js";
 import { buildHtml, buildPrivacyNote, buildReport } from "../src/render.js";
-import { diffRuns, identityOf } from "../src/watch.js";
+import { buildDelta, diffRuns, identityOf } from "../src/watch.js";
 import type { Place, RunManifest } from "../src/types.js";
 import { rec } from "./factories.js";
 
@@ -147,6 +147,69 @@ describe("REPORT.md", () => {
     expect(buildReport([place()], manifest()).split("\n")[0]).toBe("# Vincennes");
   });
 
+  // The header used to read `Swept <date>` unconditionally, eight lines above a
+  // coverage table saying `This is NOT a sweep`. The document contradicted itself
+  // about the one distinction the architecture exists to keep straight, on every
+  // run outside France. These are the tests that would have caught it on day one,
+  // and the reason the manifest factory now gets a register lane at all.
+  const confirmLane = {
+    lane: "registry" as const,
+    mode: "confirm" as const,
+    connectorId: "eu-vies",
+    requested: 40,
+    returned: 12,
+    truncated: false,
+    reason: "confirmed one company at a time: 4 by a published registration number. This is NOT a sweep — companies absent from OSM are absent from this run.",
+  };
+  const sweepLane = { lane: "registry" as const, mode: "sweep" as const, connectorId: "fr-sirene", requested: 0, returned: 672, truncated: false };
+  const osmLane = { lane: "osm" as const, requested: 0, returned: 1069, truncated: false };
+
+  it("never calls a confirmed territory a sweep", () => {
+    const report = buildReport([place()], manifest({ lanes: [osmLane, confirmLane] }));
+    const header = report.split("## Coverage")[0]!;
+    // OSM did sweep the ground, so the word may appear about OSM — never as the
+    // unqualified claim the register was enumerated.
+    expect(header).not.toMatch(/^Swept /m);
+    expect(header).toContain("confirmed company by company");
+    expect(header).toContain("a company nobody has mapped is not in this list");
+  });
+
+  it("still says Swept where the register really was swept", () => {
+    // France, and the reason the fix is a derivation rather than a deletion.
+    expect(buildReport([place()], manifest({ lanes: [osmLane, sweepLane] }))).toContain("Swept 2026-08-10 with ultraprospect 1.0.0.");
+  });
+
+  it("answers on whether ANY lane swept, not on whichever lane came first", () => {
+    // A French run that also ran `confirm` carries BOTH lanes, confirm appended
+    // last. Reading lanes[0] — or lanes.at(-1) — answers differently by accident.
+    const bothWays = [
+      buildReport([place()], manifest({ lanes: [osmLane, sweepLane, confirmLane] })),
+      buildReport([place()], manifest({ lanes: [confirmLane, sweepLane, osmLane] })),
+    ];
+    for (const report of bothWays) expect(report).toContain("Swept 2026-08-10");
+  });
+
+  it("says OSM covered the ground when no register lane ran at all", () => {
+    const report = buildReport([place()], manifest({ lanes: [osmLane] }));
+    expect(report).toContain("no register lane covered this territory");
+  });
+
+  it("prints each lane's mode as a column, not only inside its note", () => {
+    // `mode` is what types.ts calls the most important field in LaneCoverage and
+    // it was rendered nowhere: a reader had to find it in the middle of a prose
+    // reason, or not at all.
+    const table = buildReport([place()], manifest({ lanes: [osmLane, confirmLane] })).split("## Coverage")[1]!;
+    expect(table).toContain("| Lane | Mode | Returned | Complete | Note |");
+    expect(table).toMatch(/\| registry \| confirm \|/);
+    // A register lane that neither swept nor was confirmed is the ambiguous case,
+    // so it is named rather than left blank.
+    const notYet = buildReport(
+      [place()],
+      manifest({ lanes: [{ lane: "registry", requested: 0, returned: 0, truncated: false, reason: "no register can be swept for country=de" }] }),
+    );
+    expect(notYet).toMatch(/\| registry \| not swept \|/);
+  });
+
   it("reports unreadable job boards separately from companies that are not hiring", () => {
     const base = {
       hasWebsite: true,
@@ -194,6 +257,27 @@ describe("index.html", () => {
 
   it("shows the truncation banner when the run is partial", () => {
     expect(buildHtml([place()], manifest({ truncated: true }))).toContain("does not cover the whole territory");
+  });
+
+  it("does not call a confirmed territory swept in the subtitle either", () => {
+    // The page carried the same defect as the report's third line: a bare
+    // "· swept <date> ·" under the town name, on every German or British run.
+    const confirmed = buildHtml(
+      [place()],
+      manifest({
+        lanes: [
+          { lane: "osm", requested: 0, returned: 40, truncated: false },
+          { lane: "registry", mode: "confirm", connectorId: "eu-vies", requested: 40, returned: 12, truncated: false },
+        ],
+      }),
+    );
+    expect(confirmed).not.toContain("· swept ");
+    expect(confirmed).toContain("register confirmed company by company");
+    const swept = buildHtml(
+      [place()],
+      manifest({ lanes: [{ lane: "registry", mode: "sweep", connectorId: "fr-sirene", requested: 0, returned: 672, truncated: false }] }),
+    );
+    expect(swept).toContain("· swept 2026-08-10 ·");
   });
 });
 
@@ -270,5 +354,13 @@ describe("watch", () => {
   it("does not count an unverified candidate as gaining a website", () => {
     const after = place({ website: { url: "https://maybe.fr", confidence: "unverified", evidence: ["P1"] } });
     expect(diffRuns([place()], [after]).gotWebsite).toHaveLength(0);
+  });
+
+  it("DELTA.md compares two runs without calling either one a sweep", () => {
+    // Same defect as the report's header, third occurrence: two German runs are
+    // both confirm-mode, and "comparing the sweep of" describes neither.
+    const delta = buildDelta(diffRuns([place()], [place()]), manifest(), manifest({ builtAt: "2026-09-10T00:00:00.000Z" }));
+    expect(delta).toContain("Comparing the run of 2026-08-10 with the one of 2026-09-10.");
+    expect(delta).not.toContain("Comparing the sweep");
   });
 });

@@ -42,6 +42,52 @@ function truncationBanner(manifest: RunManifest): string[] {
 }
 
 /**
+ * What this run actually DID to the territory, in one sentence, derived.
+ *
+ * The header used to read `Swept <date>` unconditionally — eight lines above a
+ * coverage table reporting `This is NOT a sweep`, on every run outside France.
+ * The document contradicted itself about the one thing the whole architecture
+ * exists to keep straight, and the word it chose was the one four documents
+ * forbid.
+ *
+ * So the sentence is DERIVED from `manifest.lanes` and there is no longer a code
+ * path that can claim a sweep the run did not perform. Two properties matter:
+ *
+ *   * The question is whether ANY register lane swept, never what the first one
+ *     happened to say. A French run that also ran `confirm` carries both lanes
+ *     (cli.ts keeps the `sweep` one and appends the `confirm` one), and reading
+ *     `lanes[0]` would answer differently depending on which arrived first.
+ *   * OSM sweeps worldwide, so its half is a sweep in every mode. Only the
+ *     REGISTER half changes shape, and only that half is hedged.
+ */
+function coverage(manifest: RunManifest): { sentence: string; short: string } {
+  const date = manifest.builtAt.slice(0, 10);
+  const version = `ultraprospect ${manifest.toolVersion}`;
+  const registry = manifest.lanes.filter((l) => l.lane === "registry");
+  const osm = manifest.lanes.find((l) => l.lane === "osm");
+  const osmRan = Boolean(osm) && osm?.reason !== "skipped (--no-osm)";
+
+  if (registry.some((l) => l.mode === "sweep")) {
+    // The register was asked for every company in the area. France, and only
+    // where a keyless enumeration exists.
+    return { sentence: `Swept ${date} with ${version}.`, short: `swept ${date}` };
+  }
+  if (registry.some((l) => l.mode === "confirm")) {
+    return {
+      sentence: `OpenStreetMap swept ${date}; the register confirmed company by company, so a company nobody has mapped is not in this list. ${version}.`,
+      short: `OSM swept ${date}, register confirmed company by company`,
+    };
+  }
+  if (osmRan) {
+    return {
+      sentence: `OpenStreetMap swept ${date}; no register lane covered this territory. ${version}.`,
+      short: `OSM swept ${date}, no register lane`,
+    };
+  }
+  return { sentence: `Built ${date} with ${version}.`, short: `built ${date}` };
+}
+
+/**
  * Group by activity, saying which taxonomy each row comes from.
  *
  * Several vocabularies are in play and they are NOT comparable. A register files
@@ -100,15 +146,19 @@ export function buildReport(places: readonly Place[], manifest: RunManifest): st
   l.push(...truncationBanner(manifest));
   l.push(`${manifest.target.label}`);
   l.push("");
-  l.push(`Swept ${manifest.builtAt.slice(0, 10)} with ultraprospect ${manifest.toolVersion}.`);
+  l.push(coverage(manifest).sentence);
   l.push("");
 
   l.push("## Coverage");
   l.push("");
-  l.push("| Lane | Returned | Complete | Note |");
-  l.push("|---|---:|---|---|");
+  // `mode` is the field types.ts calls the most important one in LaneCoverage,
+  // and until now it was rendered nowhere: the sweep/confirm distinction reached
+  // this table only as prose smuggled inside `reason`. It gets a column.
+  l.push("| Lane | Mode | Returned | Complete | Note |");
+  l.push("|---|---|---:|---|---|");
   for (const lane of manifest.lanes) {
-    l.push(`| ${lane.lane} | ${lane.returned} | ${lane.truncated ? "**no**" : "yes"} | ${lane.reason ?? ""} |`);
+    const mode = lane.mode ?? (lane.lane === "registry" ? "not swept" : "—");
+    l.push(`| ${lane.lane} | ${mode} | ${lane.returned} | ${lane.truncated ? "**no**" : "yes"} | ${lane.reason ?? ""} |`);
   }
   l.push("");
   l.push(
@@ -266,7 +316,7 @@ footer p{margin:.25rem 0}
 <body>
 <main>
 <h1>${esc(shortLabel(manifest.target.label || manifest.slug))}</h1>
-<p class="sub">${esc(manifest.target.label)} · swept ${esc(manifest.builtAt.slice(0, 10))} · ultraprospect ${esc(manifest.toolVersion)}</p>
+<p class="sub">${esc(manifest.target.label)} · ${esc(coverage(manifest).short)} · ultraprospect ${esc(manifest.toolVersion)}</p>
 ${banner}
 <div class="cards">
 <div class="card"><b>${places.length}</b><span>companies</span></div>
