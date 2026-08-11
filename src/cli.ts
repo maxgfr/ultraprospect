@@ -348,6 +348,7 @@ async function cmdConfirm(values: Record<string, string>, bools: ReadonlySet<str
         attested: outcome.attested,
         undecided: outcome.undecided.length,
         notFound: outcome.notFound,
+        notAsked: outcome.notAsked,
       }),
     );
   }
@@ -357,6 +358,9 @@ async function cmdConfirm(values: Record<string, string>, bools: ReadonlySet<str
   say(`  number read, holder not named    ${outcome.attested}`);
   say(`  undecided (in MATCH.todo.json)   ${outcome.undecided.length}`);
   say(`  no register record found         ${outcome.notFound}`);
+  // Printed only when it happened, and worded so it cannot be read as the line
+  // above it: one is the register's answer, the other is our failure to get one.
+  if (outcome.notAsked) say(`  NO authority could be asked      ${outcome.notAsked}  (not the same as not found)`);
   say("");
   say("  This is a per-company confirmation, not a territory sweep: a company");
   say("  that is not in OpenStreetMap is not in this run at all.");
@@ -965,8 +969,10 @@ export async function main(argv: readonly string[]): Promise<number> {
     case "mcp":
       return cmdMcp(values);
     case "doctor":
-      // `--country` narrows the register probes to the ones that serve it.
-      return runDoctor({ json: bools.has("json"), out, say }, values.country);
+      // `--country` narrows the register probes to the ones that serve it, and
+      // the keys go WITH the probe: a diagnostic handed a credential must use
+      // it, not report the connector as skipped for want of it.
+      return runDoctor({ json: bools.has("json"), out, say }, values.country, connectorKeys(values));
     case "version":
       out(VERSION);
       return EXIT_OK;

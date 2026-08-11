@@ -1,9 +1,18 @@
 // The connectors' mappers, against the shapes their APIs actually returned.
 //
 // Every fixture in this file is a trimmed copy of a real response, captured
-// while building the connector. The cases are deliberately weighted towards the
-// four traps that were found by RUNNING the connectors rather than by reading
-// their documentation — each of them produced a confidently wrong record first:
+// while building the connector — WITH ONE EXCEPTION, named here rather than left
+// for a reader to discover. `gb-companies-house`'s cases are hand-written
+// minimal objects: it is the only connector behind a credential, nobody has ever
+// held the key, and its canary has therefore reported INCONCLUSIVE on every
+// scheduled run since it was written. Calling those stubs captured responses
+// would make this comment the same kind of claim the rest of the file exists to
+// prevent. The connector declares the gap in `unverified`, and its keyless
+// snapshot route is what actually gets exercised.
+//
+// The cases are deliberately weighted towards the four traps that were found by
+// RUNNING the connectors rather than by reading their documentation — each of
+// them produced a confidently wrong record first:
 //
 //   * PRH's `status` is not a liveness flag. Nokia came back "ceased".
 //   * VIES redacts the trader name for some member states. A record with no
@@ -295,6 +304,15 @@ describe("gb-companies-house", () => {
   it("resolves a UK SIC code to the same NACE section a French code would", () => {
     // "62012" and "62.01Z" are the same division in two national spellings.
     expect(chRecord({ company_number: "01", company_name: "X", sic_codes: ["62012"] })!.section).toBe("J");
+  });
+
+  it("reads the legal form under BOTH names Companies House gives it", () => {
+    // The company profile resource calls it `type`; every search resource calls
+    // it `company_type`. `lookup` goes through /advanced-search first, so reading
+    // only `type` dropped the legal form on the primary path and kept it on the
+    // fallback — the same record arriving by two routes, one of them poorer.
+    expect(chRecord({ company_number: "01", company_name: "X", type: "ltd" })!.legalForm).toBe("ltd");
+    expect(chRecord({ company_number: "01", company_name: "X", company_type: "plc" })!.legalForm).toBe("plc");
   });
 });
 

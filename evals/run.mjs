@@ -147,10 +147,16 @@ async function network() {
   if (connectors.length === 0) {
     check("the connector table reached the eval", false, "the bundle exported no CONNECTORS — every register canary was skipped");
   }
+  // Credentials come from the environment, read off each connector's own
+  // `needsKey` declaration rather than a list written here — the same rule the
+  // connector table already imposes on everything else that reads it. Without
+  // this the canary passed `{}`, so a connector behind a key reported
+  // INCONCLUSIVE even in a workflow that had been given the key.
+  const keys = Object.fromEntries(connectors.filter((c) => c.needsKey?.env).map((c) => [c.id, process.env[c.needsKey.env]]));
   for (const connector of connectors) {
     let results;
     try {
-      results = await connector.canary({ onNote: () => {} });
+      results = await connector.canary({ keys, onNote: () => {} });
     } catch (e) {
       check(`${connector.id} canary ran`, false, `threw: ${e?.message ?? e}`);
       continue;

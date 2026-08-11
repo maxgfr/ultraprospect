@@ -60,6 +60,18 @@ export interface ConfirmOutcome {
   /** Places that were asked about and came back with nothing. A finding, not a gap. */
   notFound: number;
   /**
+   * Places NO authority could be asked about, because every applicable
+   * connector failed to answer — a rate limit, an outage, a rejected key.
+   *
+   * Kept apart from `notFound` for the reason `isHiring: false` is kept apart
+   * from `isHiring` absent. A register that answered "no such company" is
+   * evidence; a register that never answered is our own loss of reach, and
+   * counting the second as the first reports a company as unregistered because
+   * we ran out of quota. Companies House permits 600 requests per five minutes,
+   * so on a long confirm run this is reachable rather than theoretical.
+   */
+  notAsked: number;
+  /**
    * Identifiers an authority confirmed as live without naming their holder.
    *
    * Germany and Spain answer VIES this way. It is not an identity and never
@@ -153,22 +165,30 @@ function toCandidate(place: Place, rec: RegistryRecord, score: number, matchedNa
  * "nobody could answer" and "we did not ask" are different findings and the
  * place record has to be able to tell them apart.
  */
-async function verify(id: LegalId, connectors: readonly RegistryConnector[], ctx: ConnectorContext): Promise<{ record?: RegistryRecord; asked: string[] }> {
+async function verify(
+  id: LegalId,
+  connectors: readonly RegistryConnector[],
+  ctx: ConnectorContext,
+): Promise<{ record?: RegistryRecord; asked: string[]; answered: number }> {
   const asked: string[] = [];
+  // Asked and ANSWERED are different counts. "We put the question to VIES" is
+  // not "VIES replied", and only the second one makes a silence into evidence.
+  let answered = 0;
   for (const connector of connectors) {
     if (!connector.verifyId) continue;
     if (!connector.countries.includes("*") && !connector.countries.includes(id.countryCode)) continue;
     asked.push(connector.id);
     try {
       const record = await connector.verifyId(id, ctx);
-      if (record) return { record, asked };
+      answered++;
+      if (record) return { record, asked, answered };
     } catch {
       // One authority being down must not stop the next one being asked. The
       // lane's coverage records what was reached; a throw here would lose the
       // companies that came after.
     }
   }
-  return { asked };
+  return { asked, answered };
 }
 
 export async function runConfirm(runDir: string, places: Place[], opts: ConfirmOptions = {}): Promise<ConfirmOutcome> {
@@ -194,6 +214,7 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
     matched: 0,
     undecided: [],
     notFound: 0,
+    notAsked: 0,
     attested: 0,
     notes,
     coverage: {
@@ -239,6 +260,9 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
     // ---- Route 1: an identifier the company published on its own site -------
     let attached: { rec: RegistryRecord; how: string; from?: string; legalId?: string } | undefined;
     const found: NonNullable<Place["legalIds"]> = [];
+    // Did ANY authority actually reply about this place, on either route? A
+    // place nobody could be asked about is not a place with no register record.
+    let anyAnswer = false;
     for (const pageId of place.pages) {
       if (attached) break;
       // `place.pages` holds page IDS ("P17"), not paths. The extract lives at
@@ -250,7 +274,8 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
       if (!text) continue;
       for (const id of extractLegalIds(text, opts.countryCode, pageId)) {
         idsFound++;
-        const { record: rec, asked } = await verify(id, selection.confirm, ctx);
+        const { record: rec, asked, answered } = await verify(id, selection.confirm, ctx);
+        if (answered > 0) anyAnswer = true;
         if (!rec) {
           // The number was read off a page this run holds, and no authority
           // named its holder. That is a real finding — the identifier is on the
@@ -321,8 +346,11 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
         try {
           hits = await connector.lookup(query, ctx);
         } catch {
+          // Could not ask. Deliberately NOT counted as an answer, so the place
+          // does not end up reported as absent from a register that never spoke.
           continue;
         }
+        anyAnswer = true;
         usedConnectors.add(connector.id);
         let best: { rec: RegistryRecord; score: number; matchedName?: string } | undefined;
         for (const rec of hits) {
@@ -352,14 +380,24 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
       usedConnectors.add(attached.rec.connectorId);
       if (attached.how === "verified-id") outcome.verified++;
       else outcome.matched++;
-    } else {
+    } else if (anyAnswer) {
       outcome.notFound++;
+    } else {
+      outcome.notAsked++;
     }
   }
 
   outcome.coverage.returned = outcome.records.length;
   outcome.coverage.connectorId = [...usedConnectors].sort().join(",") || selection.confirm[0]?.id;
-  outcome.coverage.reason = `confirmed one company at a time: ${outcome.verified} by a published registration number, ${outcome.matched} by a name lookup, ${outcome.notFound} not found. This is NOT a sweep — companies absent from OSM are absent from this run.`;
+  // `notAsked` is only mentioned when it happened. Naming a zero would suggest
+  // the run had a reach problem it did not have.
+  const unreachable = outcome.notAsked ? `, ${outcome.notAsked} that NO authority could be asked about` : "";
+  outcome.coverage.reason = `confirmed one company at a time: ${outcome.verified} by a published registration number, ${outcome.matched} by a name lookup, ${outcome.notFound} not found${unreachable}. This is NOT a sweep — companies absent from OSM are absent from this run.`;
+  if (outcome.notAsked) {
+    note(
+      `confirm: ${outcome.notAsked} place(s) reached no authority at all — every applicable register failed to answer (a rate limit, an outage, a rejected key). They are NOT recorded as having no register entry, because nobody asked.`,
+    );
+  }
 
   if (coverage.expected && idsFound === 0 && targets.length > 0) {
     note(

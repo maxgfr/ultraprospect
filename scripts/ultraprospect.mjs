@@ -1912,6 +1912,11 @@ async function awaitHostSlot(url, delayMs = hostDelayMs(), now = Date.now()) {
   if (waited > 0) await sleep(waited);
   return waited;
 }
+function backOffHost(url, ms, now = Date.now()) {
+  const host = hostOf(url);
+  if (!host || ms <= 0) return;
+  nextFree.set(host, Math.max(nextFree.get(host) ?? 0, now + ms));
+}
 var WORKFLOW_FORBIDDEN = ["Date.now(", "Math.random(", "new Date("];
 function toBatches(ids, batchSize) {
   const width = Math.max(1, Math.floor(batchSize));
@@ -4534,6 +4539,9 @@ var frSirene = {
 var BASE5 = "https://api.company-information.service.gov.uk";
 var CONNECTOR_ID5 = "gb-companies-house";
 var REQUEST_DELAY_MS5 = 600;
+var RATE_LIMIT_BACKOFF_MS = 3e4;
+var RateLimited = class extends Error {
+};
 var HOW_TO_GET_A_KEY = "Register at https://developer.company-information.service.gov.uk (email only, free, no payment), create an application, then pass --companies-house-key or set ULTRAPROSPECT_COMPANIES_HOUSE_KEY.";
 function keyFrom(ctx) {
   const key = ctx.keys?.[CONNECTOR_ID5] ?? process.env.ULTRAPROSPECT_COMPANIES_HOUSE_KEY;
@@ -4550,6 +4558,7 @@ async function get3(path, key) {
     // token, whatever the word "key" suggests.
     headers: { authorization: `Basic ${Buffer.from(`${key}:`).toString("base64")}` }
   });
+  if (res.status === 429) backOffHost(url, RATE_LIMIT_BACKOFF_MS);
   return { ok: res.ok, status: res.status, data: res.data };
 }
 function addressOf3(raw) {
@@ -4586,7 +4595,11 @@ function toRecord3(company) {
     activityCode: code,
     section: section2,
     activityScheme: "nace",
-    legalForm: company?.type ?? void 0,
+    // The company profile resource calls this `type`; every SEARCH resource
+    // calls it `company_type`. `lookup` goes through /advanced-search first, so
+    // reading only `type` dropped the legal form on the primary path and kept it
+    // on the fallback — silently, and on every hit.
+    legalForm: company?.type ?? company?.company_type ?? void 0,
     dateCreated: company?.date_of_creation ?? void 0,
     dateClosed: company?.date_of_cessation ?? void 0,
     // "active" is the only status that means trading. "dissolved", "liquidation"
@@ -4605,6 +4618,16 @@ var gbCompaniesHouse = {
   activityPrefix: "sic-uk",
   docsUrl: "https://developer-specs.company-information.service.gov.uk/",
   needsKey: { flag: "--companies-house-key", env: "ULTRAPROSPECT_COMPANIES_HOUSE_KEY", how: HOW_TO_GET_A_KEY },
+  unverified: {
+    // Worded from what is actually known, and it is less than nothing but far
+    // less than a working path. A deliberately invalid key was sent once: the
+    // host resolved and answered HTTP 401, which proves the URL and that the
+    // Basic-auth header is PARSED. It proves nothing about a valid key, and
+    // nothing at all about the response bodies this file maps — no 200 from
+    // Companies House has ever reached this code.
+    why: "no successful response from Companies House has ever reached this code. An invalid key draws a 401, so the host and the Basic-auth scheme (key as username, empty password) are confirmed to that extent; every field `toRecord` reads is still mapped from the specification rather than from an observed body. It is the only connector here behind a credential, and its canary has reported inconclusive on every scheduled run for want of a key.",
+    how: "supply a key and run `pnpm run eval:network`; three assertions are already written and waiting. The keyless snapshot route needs no key and is the one exercised by default."
+  },
   availability(ctx) {
     if (keyFrom(ctx)) return { available: true };
     return { available: false, reason: "no Companies House key was supplied", how: HOW_TO_GET_A_KEY };
@@ -4614,7 +4637,7 @@ var gbCompaniesHouse = {
     const name = query.names.find((n) => n?.trim());
     if (!key || !name) return [];
     const limit = Math.min(20, query.limit ?? 5);
-    const params = new URLSearchParams({ company_name_includes: name, size: String(limit) });
+    const params = new URLSearchParams({ company_name_includes: name, size: String(limit), company_status: "active" });
     if (query.locality) params.set("location", query.locality);
     const advanced = await get3(`/advanced-search/companies?${params.toString()}`, key);
     if (advanced.ok && Array.isArray(advanced.data?.items) && advanced.data.items.length) {
@@ -4624,7 +4647,14 @@ var gbCompaniesHouse = {
       ctx.onNote?.(`companies-house: the key was rejected (HTTP ${advanced.status}). ${HOW_TO_GET_A_KEY}`);
       return [];
     }
+    if (advanced.status === 429) {
+      ctx.onNote?.(
+        "companies-house: rate limited (600 requests per 5 minutes). Backing off; the places not asked about are counted apart from the ones not found."
+      );
+      throw new RateLimited("companies-house rate limit");
+    }
     const basic = await get3(`/search/companies?q=${encodeURIComponent(name)}&items_per_page=${limit}`, key);
+    if (basic.status === 429) throw new RateLimited("companies-house rate limit");
     const numbers = (basic.data?.items ?? []).map((i) => i?.company_number).filter(Boolean).slice(0, limit);
     const out2 = [];
     for (const number of numbers) {
@@ -4637,16 +4667,16 @@ var gbCompaniesHouse = {
   async verifyId(id, ctx) {
     const key = keyFrom(ctx);
     if (!key) return void 0;
-    if (id.kind !== "company-number" && id.kind !== "vat") return void 0;
-    if (id.kind === "vat") return void 0;
+    if (id.kind !== "company-number") return void 0;
     const number = id.value.replace(/\s+/g, "").toUpperCase();
-    if (!/^([A-Z]{2})?\d{6,8}$/.test(number)) return void 0;
+    if (!/^(\d{6,8}|[A-Z]{2}\d{6})$/.test(number)) return void 0;
     const padded = /^\d+$/.test(number) ? number.padStart(8, "0") : number;
     const res = await get3(`/company/${encodeURIComponent(padded)}`, key);
     if (res.status === 401 || res.status === 403) {
       ctx.onNote?.(`companies-house: the key was rejected (HTTP ${res.status}). ${HOW_TO_GET_A_KEY}`);
       return void 0;
     }
+    if (res.status === 429) throw new RateLimited("companies-house rate limit");
     return toRecord3(res.data);
   },
   async canary(ctx) {
@@ -5445,7 +5475,7 @@ async function probeOverpass(url) {
   });
   return { name: "overpass", target: new URL(url).host, required: false, ...r };
 }
-async function probeAll(countryCode) {
+async function probeAll(countryCode, keys) {
   const probes = [];
   probes.push({
     name: "node",
@@ -5470,7 +5500,8 @@ async function probeAll(countryCode) {
   probes.push({ name: "ban", target: "api-adresse.data.gouv.fr", required: false, ...ban });
   const applicable = countryCode ? CONNECTORS.filter((c) => c.countries.includes("*") || c.countries.includes(countryCode.toLowerCase())) : CONNECTORS;
   for (const connector of applicable) {
-    const availability = connector.availability({});
+    const ctx = { keys };
+    const availability = connector.availability(ctx);
     if (!availability.available) {
       probes.push({
         name: connector.id,
@@ -5479,21 +5510,22 @@ async function probeAll(countryCode) {
         ok: true,
         skipped: true,
         detail: `${availability.reason}. ${availability.how ?? ""}`.trim(),
+        unverified: connector.unverified?.why,
         ms: 0
       });
       continue;
     }
     const probe = await timed(async () => {
-      const result = await connector.probe({});
+      const result = await connector.probe(ctx);
       return { ok: result.ok, detail: result.detail };
     });
-    probes.push({ name: connector.id, target: new URL(connector.docsUrl).host, required: false, ...probe });
+    probes.push({ name: connector.id, target: new URL(connector.docsUrl).host, required: false, unverified: connector.unverified?.why, ...probe });
   }
   probes.push(...await Promise.all(OVERPASS_MIRRORS.map(probeOverpass)));
   return probes;
 }
-async function runDoctor(io, countryCode) {
-  const probes = await probeAll(countryCode);
+async function runDoctor(io, countryCode, keys) {
+  const probes = await probeAll(countryCode, keys);
   const overpass = probes.filter((p) => p.name === "overpass");
   const liveMirrors = overpass.filter((p) => p.ok).length;
   const healthy = probes.filter((p) => p.required).every((p) => p.ok) && liveMirrors > 0;
@@ -5512,6 +5544,11 @@ async function runDoctor(io, countryCode) {
   io.out("");
   io.out(`  ${liveMirrors}/${overpass.length} Overpass mirrors answering`);
   if (countryCode) io.out(`  register connectors shown are the ones serving ${countryCode}; omit --country to probe them all`);
+  const neverMeasured = probes.filter((p) => p.unverified);
+  for (const p of neverMeasured) {
+    io.out("");
+    io.out(`  ${p.name}: NEVER EXERCISED AGAINST THE LIVE API \u2014 ${p.unverified}`);
+  }
   if (!healthy) {
     io.say("");
     io.say("ultraprospect: an upstream this skill cannot work without is unreachable.");
@@ -6335,17 +6372,19 @@ function toCandidate3(place, rec, score, matchedName) {
 }
 async function verify(id, connectors, ctx) {
   const asked = [];
+  let answered = 0;
   for (const connector of connectors) {
     if (!connector.verifyId) continue;
     if (!connector.countries.includes("*") && !connector.countries.includes(id.countryCode)) continue;
     asked.push(connector.id);
     try {
       const record = await connector.verifyId(id, ctx);
-      if (record) return { record, asked };
+      answered++;
+      if (record) return { record, asked, answered };
     } catch {
     }
   }
-  return { asked };
+  return { asked, answered };
 }
 async function runConfirm(runDir, places, opts = {}) {
   const notes = [];
@@ -6368,6 +6407,7 @@ async function runConfirm(runDir, places, opts = {}) {
     matched: 0,
     undecided: [],
     notFound: 0,
+    notAsked: 0,
     attested: 0,
     notes,
     coverage: {
@@ -6402,13 +6442,15 @@ async function runConfirm(runDir, places, opts = {}) {
     opts.onProgress?.(done, targets.length, place.name);
     let attached;
     const found = [];
+    let anyAnswer = false;
     for (const pageId of place.pages) {
       if (attached) break;
       const text2 = readPageText(runDir, join9("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${pageId}.md`));
       if (!text2) continue;
       for (const id of extractLegalIds(text2, opts.countryCode, pageId)) {
         idsFound++;
-        const { record: rec, asked } = await verify(id, selection.confirm, ctx);
+        const { record: rec, asked, answered } = await verify(id, selection.confirm, ctx);
+        if (answered > 0) anyAnswer = true;
         if (!rec) {
           found.push({
             kind: id.kind,
@@ -6464,6 +6506,7 @@ async function runConfirm(runDir, places, opts = {}) {
         } catch {
           continue;
         }
+        anyAnswer = true;
         usedConnectors.add(connector.id);
         let best;
         for (const rec of hits) {
@@ -6487,13 +6530,21 @@ async function runConfirm(runDir, places, opts = {}) {
       usedConnectors.add(attached.rec.connectorId);
       if (attached.how === "verified-id") outcome.verified++;
       else outcome.matched++;
-    } else {
+    } else if (anyAnswer) {
       outcome.notFound++;
+    } else {
+      outcome.notAsked++;
     }
   }
   outcome.coverage.returned = outcome.records.length;
   outcome.coverage.connectorId = [...usedConnectors].sort().join(",") || selection.confirm[0]?.id;
-  outcome.coverage.reason = `confirmed one company at a time: ${outcome.verified} by a published registration number, ${outcome.matched} by a name lookup, ${outcome.notFound} not found. This is NOT a sweep \u2014 companies absent from OSM are absent from this run.`;
+  const unreachable = outcome.notAsked ? `, ${outcome.notAsked} that NO authority could be asked about` : "";
+  outcome.coverage.reason = `confirmed one company at a time: ${outcome.verified} by a published registration number, ${outcome.matched} by a name lookup, ${outcome.notFound} not found${unreachable}. This is NOT a sweep \u2014 companies absent from OSM are absent from this run.`;
+  if (outcome.notAsked) {
+    note(
+      `confirm: ${outcome.notAsked} place(s) reached no authority at all \u2014 every applicable register failed to answer (a rate limit, an outage, a rejected key). They are NOT recorded as having no register entry, because nobody asked.`
+    );
+  }
   if (coverage2.expected && idsFound === 0 && targets.length > 0) {
     note(
       `confirm: not one of ${targets.length} site(s) published a registration number, though ${opts.countryCode} requires it. Either the legal pages were not fetched (run \`enrich --tier 1\` first) or they were not reachable.`
@@ -9192,7 +9243,8 @@ async function cmdConfirm(values, bools) {
         matched: outcome.matched,
         attested: outcome.attested,
         undecided: outcome.undecided.length,
-        notFound: outcome.notFound
+        notFound: outcome.notFound,
+        notAsked: outcome.notAsked
       })
     );
   }
@@ -9202,6 +9254,7 @@ async function cmdConfirm(values, bools) {
   say(`  number read, holder not named    ${outcome.attested}`);
   say(`  undecided (in MATCH.todo.json)   ${outcome.undecided.length}`);
   say(`  no register record found         ${outcome.notFound}`);
+  if (outcome.notAsked) say(`  NO authority could be asked      ${outcome.notAsked}  (not the same as not found)`);
   say("");
   say("  This is a per-company confirmation, not a territory sweep: a company");
   say("  that is not in OpenStreetMap is not in this run at all.");
@@ -9712,7 +9765,7 @@ async function main(argv) {
     case "mcp":
       return cmdMcp(values);
     case "doctor":
-      return runDoctor({ json: bools.has("json"), out, say }, values.country);
+      return runDoctor({ json: bools.has("json"), out, say }, values.country, connectorKeys(values));
     case "version":
       out(VERSION);
       return EXIT_OK;

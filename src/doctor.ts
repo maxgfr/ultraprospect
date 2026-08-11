@@ -27,6 +27,12 @@ export interface DoctorProbe {
   required: boolean;
   /** True when nothing was asked — a connector with no key, typically. Not a failure. */
   skipped?: boolean;
+  /**
+   * The connector declares that no request on this path has ever been answered
+   * live. Independent of `ok`: a path can be up today and still never have been
+   * measured, and a reader deciding whether to trust a record needs both.
+   */
+  unverified?: string;
 }
 
 async function timed(fn: () => Promise<{ ok: boolean; detail: string }>): Promise<{ ok: boolean; detail: string; ms: number }> {
@@ -86,8 +92,15 @@ async function probeOverpass(url: string): Promise<DoctorProbe> {
  * @param countryCode Narrows the register probes to the country in play.
  *   Omitted, every connector is probed — then the question really is "which of
  *   these is up".
+ * @param keys Credentials by connector id. Without them `doctor` answers a
+ *   different question than the one it was asked: it used to build the probe
+ *   context as `{}`, so `doctor --country gb --companies-house-key XXX`
+ *   reported the connector as skipped for want of a key that had just been
+ *   handed to it. Only the environment variable worked, and only by the
+ *   connector's own `process.env` fallback — which is exactly the shape of bug
+ *   a diagnostic must not have.
  */
-export async function probeAll(countryCode?: string): Promise<DoctorProbe[]> {
+export async function probeAll(countryCode?: string, keys?: Record<string, string | undefined>): Promise<DoctorProbe[]> {
   const probes: DoctorProbe[] = [];
 
   probes.push({
@@ -124,7 +137,8 @@ export async function probeAll(countryCode?: string): Promise<DoctorProbe[]> {
   // is up".
   const applicable = countryCode ? CONNECTORS.filter((c) => c.countries.includes("*") || c.countries.includes(countryCode.toLowerCase())) : CONNECTORS;
   for (const connector of applicable) {
-    const availability = connector.availability({});
+    const ctx = { keys };
+    const availability = connector.availability(ctx);
     if (!availability.available) {
       // Not a failure. A connector needing a key it was not given is a fact
       // about this invocation, and `doctor` says what to do about it.
@@ -135,15 +149,16 @@ export async function probeAll(countryCode?: string): Promise<DoctorProbe[]> {
         ok: true,
         skipped: true,
         detail: `${availability.reason}. ${availability.how ?? ""}`.trim(),
+        unverified: connector.unverified?.why,
         ms: 0,
       });
       continue;
     }
     const probe = await timed(async () => {
-      const result = await connector.probe({});
+      const result = await connector.probe(ctx);
       return { ok: result.ok, detail: result.detail };
     });
-    probes.push({ name: connector.id, target: new URL(connector.docsUrl).host, required: false, ...probe });
+    probes.push({ name: connector.id, target: new URL(connector.docsUrl).host, required: false, unverified: connector.unverified?.why, ...probe });
   }
 
   // Mirrors are probed in parallel: they are independent, and doing it serially
@@ -159,8 +174,8 @@ export interface DoctorIo {
   say: (line: string) => void;
 }
 
-export async function runDoctor(io: DoctorIo, countryCode?: string): Promise<number> {
-  const probes = await probeAll(countryCode);
+export async function runDoctor(io: DoctorIo, countryCode?: string, keys?: Record<string, string | undefined>): Promise<number> {
+  const probes = await probeAll(countryCode, keys);
   const overpass = probes.filter((p) => p.name === "overpass");
   const liveMirrors = overpass.filter((p) => p.ok).length;
   // Every required probe, plus at least one Overpass mirror — losing all of
@@ -184,6 +199,15 @@ export async function runDoctor(io: DoctorIo, countryCode?: string): Promise<num
   io.out("");
   io.out(`  ${liveMirrors}/${overpass.length} Overpass mirrors answering`);
   if (countryCode) io.out(`  register connectors shown are the ones serving ${countryCode}; omit --country to probe them all`);
+
+  // Printed apart from the probe line, and after it, because it answers a
+  // different question. A probe says whether the upstream is up now; this says
+  // whether anyone has ever seen it answer the requests this code makes.
+  const neverMeasured = probes.filter((p) => p.unverified);
+  for (const p of neverMeasured) {
+    io.out("");
+    io.out(`  ${p.name}: NEVER EXERCISED AGAINST THE LIVE API — ${p.unverified}`);
+  }
 
   if (!healthy) {
     io.say("");

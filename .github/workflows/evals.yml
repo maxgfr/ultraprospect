@@ -46,6 +46,15 @@ jobs:
       - name: Upstream canaries (report-only)
         id: canaries
         continue-on-error: true
+        # Credentials for the connectors that declare a `needsKey`. Every source
+        # this skill needs is keyless, so an absent secret is the normal case and
+        # the canary reports INCONCLUSIVE rather than red — but a canary that can
+        # never receive a key can never verify the path behind it either, and
+        # that is how Companies House's three written assertions sat dormant from
+        # the day they were written. The wiring is here so supplying the secret is
+        # the only remaining step.
+        env:
+          ULTRAPROSPECT_COMPANIES_HOUSE_KEY: ${{ secrets.ULTRAPROSPECT_COMPANIES_HOUSE_KEY }}
         # pipefail, or the pipe hands back tee's exit code and the canary can
         # NEVER report a failure — which is how one silently red canary sat in a
         # green run.

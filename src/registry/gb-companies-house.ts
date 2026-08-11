@@ -19,7 +19,7 @@
 // Authentication is HTTP Basic with the key as the username and an empty
 // password, which is unusual enough to be worth stating: `Authorization: Basic
 // base64(key + ":")`.
-import { awaitHostSlot, httpJson } from "../engine.js";
+import { awaitHostSlot, backOffHost, httpJson } from "../engine.js";
 import { naceSection } from "../classification/nace.js";
 import { politeUa } from "../net.js";
 import type { PostalAddress } from "../types.js";
@@ -29,6 +29,20 @@ const BASE = "https://api.company-information.service.gov.uk";
 const CONNECTOR_ID = "gb-companies-house";
 /** 600 requests per five minutes is the published ceiling. We pace well under it. */
 const REQUEST_DELAY_MS = 600;
+/**
+ * How long every OTHER queued request for this host waits after a 429.
+ *
+ * `awaitHostSlot` paces us under the ceiling; it cannot know we have already
+ * crossed it. Without this, hitting the limit on company 40 of 200 means hitting
+ * it again on 41, 42 and 43 — and because a failed lookup used to read as "no
+ * such company", the run would have reported a hundred real businesses as
+ * unregistered. Thirty seconds is well inside the five-minute window the quota
+ * resets on.
+ */
+const RATE_LIMIT_BACKOFF_MS = 30_000;
+
+/** Thrown when the register could not be asked, as opposed to answering nothing. */
+class RateLimited extends Error {}
 
 const HOW_TO_GET_A_KEY =
   "Register at https://developer.company-information.service.gov.uk (email only, free, no payment), create an application, then pass --companies-house-key or set ULTRAPROSPECT_COMPANIES_HOUSE_KEY.";
@@ -49,6 +63,10 @@ async function get(path: string, key: string): Promise<{ ok: boolean; status: nu
     // token, whatever the word "key" suggests.
     headers: { authorization: `Basic ${Buffer.from(`${key}:`).toString("base64")}` },
   });
+  // A 429 is not an answer about a company. Push the whole host's next departure
+  // out so the rest of this run's queue waits rather than spending the next
+  // forty requests discovering the same limit.
+  if (res.status === 429) backOffHost(url, RATE_LIMIT_BACKOFF_MS);
   return { ok: res.ok, status: res.status, data: res.data };
 }
 
@@ -95,7 +113,11 @@ export function toRecord(company: any): RegistryRecord | undefined {
     activityCode: code,
     section,
     activityScheme: "nace",
-    legalForm: company?.type ?? undefined,
+    // The company profile resource calls this `type`; every SEARCH resource
+    // calls it `company_type`. `lookup` goes through /advanced-search first, so
+    // reading only `type` dropped the legal form on the primary path and kept it
+    // on the fallback — silently, and on every hit.
+    legalForm: company?.type ?? company?.company_type ?? undefined,
     dateCreated: company?.date_of_creation ?? undefined,
     dateClosed: company?.date_of_cessation ?? undefined,
     // "active" is the only status that means trading. "dissolved", "liquidation"
@@ -115,6 +137,16 @@ export const gbCompaniesHouse: RegistryConnector = {
   activityPrefix: "sic-uk",
   docsUrl: "https://developer-specs.company-information.service.gov.uk/",
   needsKey: { flag: "--companies-house-key", env: "ULTRAPROSPECT_COMPANIES_HOUSE_KEY", how: HOW_TO_GET_A_KEY },
+  unverified: {
+    // Worded from what is actually known, and it is less than nothing but far
+    // less than a working path. A deliberately invalid key was sent once: the
+    // host resolved and answered HTTP 401, which proves the URL and that the
+    // Basic-auth header is PARSED. It proves nothing about a valid key, and
+    // nothing at all about the response bodies this file maps — no 200 from
+    // Companies House has ever reached this code.
+    why: "no successful response from Companies House has ever reached this code. An invalid key draws a 401, so the host and the Basic-auth scheme (key as username, empty password) are confirmed to that extent; every field `toRecord` reads is still mapped from the specification rather than from an observed body. It is the only connector here behind a credential, and its canary has reported inconclusive on every scheduled run for want of a key.",
+    how: "supply a key and run `pnpm run eval:network`; three assertions are already written and waiting. The keyless snapshot route needs no key and is the one exercised by default.",
+  },
 
   availability(ctx: ConnectorContext): Availability {
     if (keyFrom(ctx)) return { available: true };
@@ -130,7 +162,20 @@ export const gbCompaniesHouse: RegistryConnector = {
     // Advanced search first: it takes a locality, which is what turns a common
     // name into one company. It answers `items` with the company already
     // expanded, so no second request per hit.
-    const params = new URLSearchParams({ company_name_includes: name, size: String(limit) });
+    //
+    // `company_status=active` is not a convenience. Without it a dissolved shell
+    // sharing a trading name scores exactly as well as the business standing at
+    // the address, and `confirm` attaches on name agreement — so a live shop
+    // would acquire a dead company's registration and read as dissolved
+    // downstream forever. `fr-sirene` pins `etatAdministratif: "A"` for the same
+    // reason. A company that really has ceased is `watch`'s finding to make from
+    // a swept register, never a name lookup's.
+    //
+    // `query.postcode` is deliberately NOT sent. A UK registered office is very
+    // often the company's accountant, not its premises, so narrowing on the
+    // postcode OSM saw at the door would discard correct matches — the opposite
+    // of the mistake it looks like it prevents.
+    const params = new URLSearchParams({ company_name_includes: name, size: String(limit), company_status: "active" });
     if (query.locality) params.set("location", query.locality);
     const advanced = await get(`/advanced-search/companies?${params.toString()}`, key);
     if (advanced.ok && Array.isArray(advanced.data?.items) && advanced.data.items.length) {
@@ -140,10 +185,19 @@ export const gbCompaniesHouse: RegistryConnector = {
       ctx.onNote?.(`companies-house: the key was rejected (HTTP ${advanced.status}). ${HOW_TO_GET_A_KEY}`);
       return [];
     }
+    // Rate limited: the register was NOT asked about this company. Throwing says
+    // so; returning [] would have it recorded as having no register entry.
+    if (advanced.status === 429) {
+      ctx.onNote?.(
+        "companies-house: rate limited (600 requests per 5 minutes). Backing off; the places not asked about are counted apart from the ones not found.",
+      );
+      throw new RateLimited("companies-house rate limit");
+    }
 
     // Plain search returns a thinner item — enough to identify, not enough to
     // fill a record — so each hit is fetched by number.
     const basic = await get(`/search/companies?q=${encodeURIComponent(name)}&items_per_page=${limit}`, key);
+    if (basic.status === 429) throw new RateLimited("companies-house rate limit");
     const numbers: string[] = (basic.data?.items ?? [])
       .map((i: any) => i?.company_number)
       .filter(Boolean)
@@ -160,19 +214,25 @@ export const gbCompaniesHouse: RegistryConnector = {
   async verifyId(id: LegalId, ctx: ConnectorContext): Promise<RegistryRecord | undefined> {
     const key = keyFrom(ctx);
     if (!key) return undefined;
-    if (id.kind !== "company-number" && id.kind !== "vat") return undefined;
-    // A UK company number is 8 characters: eight digits, or two letters and six
-    // digits for Scotland (SC), Northern Ireland (NI) and the others. A VAT
-    // number is NOT the company number and cannot be converted to one.
-    if (id.kind === "vat") return undefined;
+    // Company numbers only. A UK VAT number is NOT the company number and cannot
+    // be derived from it, so there is nothing to attempt — the two clauses this
+    // replaces admitted `vat` and then rejected it one line later, which read as
+    // an unfinished thought rather than a decision.
+    if (id.kind !== "company-number") return undefined;
+    // Eight characters: eight digits, or a two-letter prefix and six digits for
+    // Scotland (SC), Northern Ireland (NI) and the others. Anchored on the total
+    // length, so a prefix glued to eight digits is rejected rather than padded.
     const number = id.value.replace(/\s+/g, "").toUpperCase();
-    if (!/^([A-Z]{2})?\d{6,8}$/.test(number)) return undefined;
+    if (!/^(\d{6,8}|[A-Z]{2}\d{6})$/.test(number)) return undefined;
     const padded = /^\d+$/.test(number) ? number.padStart(8, "0") : number;
     const res = await get(`/company/${encodeURIComponent(padded)}`, key);
     if (res.status === 401 || res.status === 403) {
       ctx.onNote?.(`companies-house: the key was rejected (HTTP ${res.status}). ${HOW_TO_GET_A_KEY}`);
       return undefined;
     }
+    // Not an answer about this number. `undefined` here would be indistinguishable
+    // from "no such company", which is the one thing it must not be.
+    if (res.status === 429) throw new RateLimited("companies-house rate limit");
     return toRecord(res.data);
   },
 

@@ -14,9 +14,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const calls: Array<{ method: string; url: string; body?: unknown; headers?: Record<string, string> }> = [];
 /** What the fake upstream answers next. Set per test. */
 let answer: { ok: boolean; status: number; data: unknown } = { ok: true, status: 200, data: {} };
+/** Hosts pushed back by a Retry-After-shaped signal, so a 429 is observable. */
+const backOffs: Array<{ url: string; ms: number }> = [];
 
 vi.mock("../src/engine.js", () => ({
   awaitHostSlot: async () => 0,
+  backOffHost: (url: string, ms: number) => {
+    backOffs.push({ url, ms });
+  },
   mapLimit: async (items: readonly unknown[], _l: number, fn: (i: any, n: number) => Promise<unknown>) => {
     const out = [];
     for (const [i, item] of items.entries()) out.push(await fn(item, i));
@@ -41,6 +46,7 @@ const ctx = { keys: {} as Record<string, string | undefined> };
 
 beforeEach(() => {
   calls.length = 0;
+  backOffs.length = 0;
   answer = { ok: true, status: 200, data: {} };
   resetCompanyIndex();
   delete process.env.ULTRAPROSPECT_COMPANIES_HOUSE_KEY;
@@ -224,5 +230,47 @@ describe("gb-companies-house", () => {
     calls.length = 0;
     await gbCompaniesHouse.verifyId!({ kind: "company-number", value: "SC123456", countryCode: "gb" }, keyed);
     expect(calls[0]!.url).toContain("/company/SC123456");
+  });
+
+  it("rejects a prefix glued to eight digits rather than padding it into a real number", async () => {
+    // The old pattern anchored the digits but not the total length, so
+    // "SC12345678" passed and was requested as a company that is not that one.
+    const keyed = { keys: { "gb-companies-house": "secret" } };
+    expect(await gbCompaniesHouse.verifyId!({ kind: "company-number", value: "SC12345678", countryCode: "gb" }, keyed)).toBeUndefined();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("asks only about companies that are still active", async () => {
+    // A dissolved shell sharing a trading name scores as well as the business at
+    // the address, and `confirm` attaches on name agreement — so the live shop
+    // would acquire a dead company's registration and read as dissolved forever.
+    answer = { ok: true, status: 200, data: { items: [] } };
+    await gbCompaniesHouse.lookup!({ names: ["Tesco"], countryCode: "gb", locality: "Welwyn" }, { keys: { "gb-companies-house": "secret" } });
+    expect(decodeURIComponent(calls[0]!.url)).toContain("company_status=active");
+  });
+
+  it("does not send the postcode, because a UK registered office is often the accountant's", async () => {
+    // Narrowing on the postcode OSM saw at the door would discard correct
+    // matches — the opposite of the mistake it looks like it prevents.
+    answer = { ok: true, status: 200, data: { items: [] } };
+    await gbCompaniesHouse.lookup!(
+      { names: ["Tesco"], countryCode: "gb", locality: "Welwyn", postcode: "AL7 1GA" },
+      { keys: { "gb-companies-house": "secret" } },
+    );
+    expect(decodeURIComponent(calls[0]!.url)).not.toContain("AL7");
+  });
+
+  it("THROWS on a rate limit instead of answering that the company does not exist", async () => {
+    // 600 requests per five minutes, and a confirm run is one request per
+    // company. Returning [] made every throttled company read as unregistered.
+    answer = { ok: false, status: 429, data: {} };
+    const keyed = { keys: { "gb-companies-house": "secret" } };
+    await expect(gbCompaniesHouse.lookup!({ names: ["Tesco"], countryCode: "gb" }, keyed)).rejects.toThrow(/rate limit/i);
+    await expect(gbCompaniesHouse.verifyId!({ kind: "company-number", value: "00445790", countryCode: "gb" }, keyed)).rejects.toThrow(/rate limit/i);
+    // And the whole host waits, not just the request that discovered the limit —
+    // otherwise the next forty requests each rediscover it.
+    expect(backOffs.length).toBeGreaterThan(0);
+    expect(backOffs[0]!.url).toContain("api.company-information.service.gov.uk");
+    expect(backOffs[0]!.ms).toBeGreaterThan(0);
   });
 });

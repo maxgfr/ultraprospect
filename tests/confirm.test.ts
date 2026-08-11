@@ -261,4 +261,36 @@ describe("runConfirm — coverage honesty", () => {
     const outcome = await runConfirm(mkdtempSync(join(tmpdir(), "up-")), places, { countryCode: "de", limit: 2 });
     expect(outcome.coverage.requested).toBe(2);
   });
+
+  // "The register said no" and "the register never answered" were the same
+  // number. Companies House allows 600 requests per five minutes and a confirm
+  // run is one request per company, so a throttled run reported real businesses
+  // as having no register entry — the same class of lie as reading an unreadable
+  // job board as "not hiring".
+  it("counts a place NO authority could be asked about apart from one that was", async () => {
+    selection.confirm = [
+      fake({
+        id: "throttled",
+        lookup: async () => {
+          throw new Error("companies-house rate limit");
+        },
+      }),
+    ];
+    const outcome = await runConfirm(mkdtempSync(join(tmpdir(), "up-")), [place()], { countryCode: "gb" });
+
+    expect(outcome.notAsked).toBe(1);
+    expect(outcome.notFound).toBe(0);
+    expect(outcome.coverage.reason).toContain("NO authority could be asked about");
+    expect(outcome.notes.join(" ")).toContain("NOT recorded as having no register entry");
+  });
+
+  it("still counts a register that answered nothing as not found", async () => {
+    // The distinction has to cut both ways, or it just relabels the old count.
+    selection.confirm = [fake({ lookup: async () => [] })];
+    const outcome = await runConfirm(mkdtempSync(join(tmpdir(), "up-")), [place()], { countryCode: "de" });
+
+    expect(outcome.notFound).toBe(1);
+    expect(outcome.notAsked).toBe(0);
+    expect(outcome.coverage.reason).not.toContain("NO authority could be asked about");
+  });
 });

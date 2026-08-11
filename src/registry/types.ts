@@ -254,6 +254,22 @@ export interface RegistryConnector {
    * territory has no register.
    */
   needsKey?: { flag: string; env: string; how: string };
+  /**
+   * Set when NO request this path makes has ever been answered by the live API.
+   *
+   * Not a defect, and not a degradation: it is the difference between a response
+   * shape MEASURED and one read in a specification, and the run says which it
+   * had. CONTRIBUTING.md requires the opposite as the norm — "Write the canary
+   * from the live response, not from the docs" — precisely because every
+   * connector here had at least one field that did not mean what its name
+   * suggested. A path nobody has exercised has not yet had its turn to be wrong,
+   * and saying so out loud is cheaper than a reader assuming it has.
+   *
+   * `doctor` prints it and the manifest notes it whenever such a path attaches a
+   * record. Deleting the field is how it stops being true; deleting the claim it
+   * makes is how it stops being honest.
+   */
+  unverified?: { why: string; how: string };
 
   /** Can this connector run, given the context? Cheap, synchronous, no network. */
   availability(ctx: ConnectorContext): Availability;
