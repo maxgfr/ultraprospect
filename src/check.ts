@@ -7,7 +7,7 @@
 // like the right one. So the claims are checked mechanically against what is on
 // disk, and the run fails rather than being presented with a caveat.
 //
-// Four errors and a set of warnings. The errors are the ones where a human
+// Five errors and a set of warnings. The errors are the ones where a human
 // reading the output could not possibly tell:
 //
 //   1. A [P#] that does not resolve to a stored page.
@@ -16,6 +16,9 @@
 //      from. This is the one that matters most: an invented email is the single
 //      most damaging thing this tool could emit, because it will be sent to.
 //   4. A dossier for a place that is not in the run.
+//   5. A write-up that states a DATED register record without its date. Germany's
+//      only open register export stopped in 2019, and "is registered at" reads
+//      exactly like "was, as of 2018-07" to everyone downstream.
 //
 // Warnings cover coverage and staleness — things a reader can see for
 // themselves once told.
@@ -228,6 +231,32 @@ export function runCheck(input: CheckInput): CheckReport {
     }
     const text = readFileSync(join(dossierDir, file), "utf8");
     const owned = new Set(place.pages);
+
+    // ---- Rule 5: a dated register record may not be written as today's fact ---
+    //
+    // A record carrying `asOf` came out of a bulk snapshot, not from asking the
+    // register. Germany's only open export stopped in 2019, so "is registered at
+    // …" is a claim this run cannot support where "was, as of 2018-07" is exactly
+    // what it holds. The two read identically to anyone downstream, which is the
+    // whole reason this is a gate and not a note.
+    //
+    // Checked by DEMANDING THE DATE rather than by guessing at tense. Tense
+    // detection over prose is unreliable and would either miss the real cases or
+    // flag correct ones; requiring the date to appear is unambiguous, easy to
+    // satisfy honestly, and impossible to satisfy dishonestly.
+    const asOf = place.registry?.asOf;
+    if (asOf) {
+      const year = asOf.slice(0, 4);
+      const month = asOf.slice(0, 7);
+      const mentionsDate = text.includes(asOf) || text.includes(month) || (text.includes(year) && /as of|as at/i.test(text));
+      if (!mentionsDate) {
+        err(
+          "dated-record-undated",
+          rel,
+          `the register record for this company is dated ${asOf} — it comes from a bulk snapshot, not from asking the register — and this write-up never says so. State the date beside the register facts ("registered at …, as of ${month}"), or the reader will take a ${year} filing for today's.`,
+        );
+      }
+    }
 
     // Rule 1: every citation resolves, and belongs to THIS place.
     for (const m of text.matchAll(citationRe())) {

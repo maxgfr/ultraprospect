@@ -166,6 +166,21 @@ export function buildReport(places: readonly Place[], manifest: RunManifest): st
   );
   l.push("");
 
+  // Records out of a bulk snapshot are facts about their date, and the report is
+  // where a reader who will never open places.json finds that out. Grouped by date
+  // rather than counted, because "1 412 records as of 2018" is the sentence that
+  // matters and "some records are dated" is not.
+  const dated = places.filter((p) => p.registry?.asOf);
+  if (dated.length) {
+    const years = [...new Set(dated.map((p) => p.registry!.asOf!.slice(0, 4)))].sort();
+    l.push("> ⚠ **Some register records are dated.**");
+    l.push(">");
+    l.push(
+      `> ${dated.length} of ${places.length} companies carry a register record from a bulk open-data snapshot rather than from asking the register: ${years.join(", ")}. Those identities were true then. They are not evidence about today, and the \`registry_as_of\` column in the CSV carries the date for each one.`,
+    );
+    l.push("");
+  }
+
   l.push("## What is there");
   l.push("");
   l.push(`- ${withSite.length} with a website we corroborated · ${places.length - withSite.length} without one`);

@@ -82,6 +82,14 @@ export function factSheet(place: Place): string {
       const ev = place.registryEvidence;
       l.push(`- how the register was matched: ${ev.mode} / ${ev.how}${ev.legalId ? ` (${ev.legalId}${ev.from ? ` read from [${ev.from}]` : ""})` : ""}`);
     }
+    // A record out of a bulk snapshot is a fact about its date, and the write-up
+    // is generated FROM this sheet — so the date has to be visible here or the
+    // date will not be in the write-up. `check` fails a dossier that omits it.
+    if (s.asOf) {
+      l.push(
+        `- **AS OF ${s.asOf}** — this register record comes from a bulk open-data snapshot, not from asking the register. Write it with its date; the gate requires it.`,
+      );
+    }
     // Two levels, and where they differ the difference is real rather than a
     // data flaw: Orange is a telecom operator (61.10Z, section J) and its
     // Vincennes establishment is a phone shop (47.42Z, section G). Both are

@@ -230,7 +230,8 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 
 10. **Render, and hand over what the render says.** `render` writes
     `PROSPECTS.csv` (flat, CRM-shaped, with `score` and `fit` in separate
-    columns and each contact's source page beside it), `prospects.json`,
+    columns, each contact's source page beside it, and `registry_as_of` carrying
+    the date of any record that came from a snapshot), `prospects.json`,
     `REPORT.md`, and a self-contained `index.html` that makes no network
     requests. If the run is truncated, both the report and the page lead with
     that — repeat it, do not paraphrase it away. If `PRIVACY.md` was written,

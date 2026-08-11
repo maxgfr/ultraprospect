@@ -240,3 +240,55 @@ describe("warnings", () => {
     expect(r.ok).toBe(true);
   });
 });
+
+describe("a dated register record", () => {
+  // Germany's only open register export stopped in 2019. A record from it is who
+  // filed under that number THEN, and "is registered at" reads exactly like "was,
+  // as of 2018-07" to everyone downstream — which is the same class of claim as a
+  // confirmed territory presented as a swept one.
+  const dated = () =>
+    place({
+      registry: {
+        connectorId: "de-offeneregister",
+        id: "Berlin (Charlottenburg) HRB 158855",
+        names: ["Zalando SE"],
+        legalName: "Zalando SE",
+        officers: [],
+        address: { commune: "Berlin" },
+        countryCode: "de",
+        status: "active",
+        asOf: "2018-11-01",
+      },
+      pages: [],
+    });
+
+  it("FAILS a write-up that states it without its date", () => {
+    writeDossier(
+      "osm:n1",
+      "# Zalando SE\n\n**Identity.** The company is registered at the Amtsgericht Charlottenburg under HRB 158855, and trades from Berlin. [M]\n",
+    );
+    const report = runCheck({ runDir, places: [dated()], manifest: manifest() });
+    expect(report.ok).toBe(false);
+    expect(report.errors.map((e) => e.rule)).toContain("dated-record-undated");
+    // The message has to say what to write instead, not merely that it is wrong.
+    expect(report.errors.find((e) => e.rule === "dated-record-undated")!.message).toContain("as of 2018-11");
+  });
+
+  it("passes once the date is stated", () => {
+    writeDossier(
+      "osm:n1",
+      "# Zalando SE\n\n**Identity.** The register held HRB 158855 at the Amtsgericht Charlottenburg as of 2018-11-01, the date of the open-data snapshot this run used. [M]\n",
+    );
+    const report = runCheck({ runDir, places: [dated()], manifest: manifest() });
+    expect(report.errors.map((e) => e.rule)).not.toContain("dated-record-undated");
+  });
+
+  it("says nothing about a LIVE record, which has no date to state", () => {
+    // `asOf` absent means the register was asked just now. Demanding a date there
+    // would train whoever writes the dossier to invent one.
+    writeDossier("osm:n1", "# X\n\n**Identity.** The company is registered under SIREN 123456789 and trades from Vincennes. [M]\n");
+    const live = place({ registry: { connectorId: "fr-sirene", id: "123456789", names: ["X"], officers: [], address: {}, status: "active" }, pages: [] });
+    const report = runCheck({ runDir, places: [live], manifest: manifest() });
+    expect(report.errors.map((e) => e.rule)).not.toContain("dated-record-undated");
+  });
+});

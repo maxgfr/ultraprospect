@@ -210,6 +210,22 @@ describe("REPORT.md", () => {
     expect(notYet).toMatch(/\| registry \| not swept \|/);
   });
 
+  it("says out loud when register records are dated, and names the years", () => {
+    // The report is where a reader who will never open places.json learns that an
+    // identity was true in 2018 and is not evidence about today.
+    const report = buildReport(
+      [place({ id: "a", registry: rec({ asOf: "2018-11-01" }) }), place({ id: "b", registry: rec({}) })],
+      manifest({ lanes: [osmLane, confirmLane] }),
+    );
+    expect(report).toContain("Some register records are dated");
+    expect(report).toContain("1 of 2 companies");
+    expect(report).toContain("2018");
+    expect(report).toContain("registry_as_of");
+    // And says nothing at all when every record is live — a warning about zero
+    // dated records would train a reader to skip the banner.
+    expect(buildReport([place({ registry: rec({}) })], manifest())).not.toContain("Some register records are dated");
+  });
+
   it("reports unreadable job boards separately from companies that are not hiring", () => {
     const base = {
       hasWebsite: true,

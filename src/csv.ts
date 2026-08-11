@@ -47,6 +47,10 @@ const HEADER = [
   "establishment_id",
   "registry_url",
   "registry_evidence",
+  // The date the register record was TRUE, when it came from a bulk snapshot
+  // rather than from asking the register. Empty means live. A CRM importing this
+  // column is the last place the distinction can still be made.
+  "registry_as_of",
   "is_head_office",
   "registered_since",
   "street",
@@ -138,6 +142,7 @@ export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
         // confirmed against an identifier read off the company's own site. Not
         // equally strong, so the CSV says which.
         place.registryEvidence ? `${place.registryEvidence.mode}:${place.registryEvidence.how}` : "",
+        place.registry?.asOf ?? "",
         s?.isHeadOffice ? "yes" : s ? "no" : "",
         s?.dateCreated ?? "",
         streetOf(place),

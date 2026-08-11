@@ -8675,6 +8675,11 @@ function factSheet(place) {
       const ev = place.registryEvidence;
       l.push(`- how the register was matched: ${ev.mode} / ${ev.how}${ev.legalId ? ` (${ev.legalId}${ev.from ? ` read from [${ev.from}]` : ""})` : ""}`);
     }
+    if (s.asOf) {
+      l.push(
+        `- **AS OF ${s.asOf}** \u2014 this register record comes from a bulk open-data snapshot, not from asking the register. Write it with its date; the gate requires it.`
+      );
+    }
     if (s.activityCode) l.push(`- activity, this establishment: ${s.activityCode}${s.section ? ` (${schemeName} section ${s.section})` : ""}`);
     if (s.parent?.activityCode && s.parent.activityCode !== s.activityCode) {
       l.push(
@@ -8947,6 +8952,19 @@ function runCheck(input) {
     }
     const text2 = readFileSync8(join13(dossierDir, file), "utf8");
     const owned = new Set(place.pages);
+    const asOf = place.registry?.asOf;
+    if (asOf) {
+      const year = asOf.slice(0, 4);
+      const month = asOf.slice(0, 7);
+      const mentionsDate = text2.includes(asOf) || text2.includes(month) || text2.includes(year) && /as of|as at/i.test(text2);
+      if (!mentionsDate) {
+        err(
+          "dated-record-undated",
+          rel,
+          `the register record for this company is dated ${asOf} \u2014 it comes from a bulk snapshot, not from asking the register \u2014 and this write-up never says so. State the date beside the register facts ("registered at \u2026, as of ${month}"), or the reader will take a ${year} filing for today's.`
+        );
+      }
+    }
     for (const m of text2.matchAll(citationRe())) {
       citations++;
       const id = `P${m[1]}`;
@@ -9054,6 +9072,10 @@ var HEADER = [
   "establishment_id",
   "registry_url",
   "registry_evidence",
+  // The date the register record was TRUE, when it came from a bulk snapshot
+  // rather than from asking the register. Empty means live. A CRM importing this
+  // column is the last place the distinction can still be made.
+  "registry_as_of",
   "is_head_office",
   "registered_since",
   "street",
@@ -9135,6 +9157,7 @@ function toCsv(places, opts = {}) {
         // confirmed against an identifier read off the company's own site. Not
         // equally strong, so the CSV says which.
         place.registryEvidence ? `${place.registryEvidence.mode}:${place.registryEvidence.how}` : "",
+        place.registry?.asOf ?? "",
         s?.isHeadOffice ? "yes" : s ? "no" : "",
         s?.dateCreated ?? "",
         streetOf(place),
@@ -9262,6 +9285,16 @@ function buildReport(places, manifest) {
     `${places.length} companies after fusion (${manifest.counts.merged} matched across both lanes, ${manifest.counts.undecided} pairs left for adjudication).`
   );
   l.push("");
+  const dated = places.filter((p) => p.registry?.asOf);
+  if (dated.length) {
+    const years = [...new Set(dated.map((p) => p.registry.asOf.slice(0, 4)))].sort();
+    l.push("> \u26A0 **Some register records are dated.**");
+    l.push(">");
+    l.push(
+      `> ${dated.length} of ${places.length} companies carry a register record from a bulk open-data snapshot rather than from asking the register: ${years.join(", ")}. Those identities were true then. They are not evidence about today, and the \`registry_as_of\` column in the CSV carries the date for each one.`
+    );
+    l.push("");
+  }
   l.push("## What is there");
   l.push("");
   l.push(`- ${withSite.length} with a website we corroborated \xB7 ${places.length - withSite.length} without one`);
