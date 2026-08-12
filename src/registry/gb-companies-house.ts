@@ -447,28 +447,64 @@ export const gbCompaniesHouse: RegistryConnector = {
   },
 
   async canary(ctx: ConnectorContext): Promise<CanaryCheck[]> {
+    const checks: CanaryCheck[] = [];
+
+    // THE SNAPSHOT PATH IS THE PRIMARY ONE, so it is probed first and without a
+    // key. It is also the more fragile of the two: the URL encodes a date, so a
+    // change in the file's naming or publication cadence turns `ingest` into a
+    // 404 with no other symptom — the same silent-drift risk the API canary
+    // exists for, on the route that actually runs.
+    //
+    // The candidate list is walked exactly as `ingest` walks it, so this fails
+    // only when EVERY candidate is gone rather than when the current month is
+    // merely not published yet.
+    const candidates = companiesHouseSnapshot.urls(new Date());
+    let served: { url: string; length: number } | undefined;
+    for (const url of candidates) {
+      const res = await fetch(url, { method: "HEAD", headers: { "user-agent": politeUa() } }).catch(() => undefined);
+      if (res?.ok) {
+        served = { url, length: Number(res.headers.get("content-length") ?? 0) };
+        break;
+      }
+    }
+    checks.push({
+      name: "the Free Company Data Product is still published under a dated monthly URL",
+      ok: Boolean(served),
+      detail: served ? `${served.url} (${Math.round(served.length / 1e6)} MB)` : `none of ${candidates.length} candidate months answered — the naming or the cadence changed`,
+    });
+    if (served && served.length > 0) {
+      // A snapshot that suddenly halves is a different product, not a smaller
+      // month. Generous bounds: this is drift detection, not a size assertion.
+      checks.push({
+        name: "the snapshot is still roughly half a gigabyte",
+        ok: served.length > 200e6 && served.length < 1.5e9,
+        detail: `${Math.round(served.length / 1e6)} MB`,
+      });
+    }
+
     const key = keyFrom(ctx);
     if (!key) {
       // Not a failure. The canary's job is to notice upstream drift, and an
-      // absent key means we learn nothing either way — reporting it as red is
-      // how a canary teaches people to ignore it.
-      return [
-        {
-          name: "companies-house: skipped, no key supplied",
-          ok: true,
-          inconclusive: true,
-          detail: HOW_TO_GET_A_KEY,
-        },
-      ];
+      // absent key means we learn nothing either way about the API — reporting
+      // it as red is how a canary teaches people to ignore it. The snapshot
+      // checks above ran regardless, which is the point of doing them first.
+      checks.push({
+        name: "companies-house API: skipped, no key supplied",
+        ok: true,
+        inconclusive: true,
+        detail: HOW_TO_GET_A_KEY,
+      });
+      return checks;
     }
     // 00000006 is one of the oldest live registrations and is not going away.
     const res = await get("/company/00000006", key);
     const rec = toRecord(res.data);
-    return [
+    checks.push(
       { name: "Companies House still authenticates a key as the Basic username", ok: res.status !== 401, detail: `HTTP ${res.status}` },
       { name: "Companies House still returns company_name and registered_office_address", ok: Boolean(rec?.legalName && rec?.address.codePostal) },
       { name: "Companies House sic_codes still resolve to a NACE section", ok: Boolean(rec?.section || !res.data?.sic_codes?.length) },
-    ];
+    );
+    return checks;
   },
 
   async probe(ctx: ConnectorContext): Promise<{ ok: boolean; detail: string }> {

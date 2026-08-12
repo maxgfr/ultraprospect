@@ -5691,24 +5691,46 @@ var gbCompaniesHouse = {
     return toRecord3(res.data);
   },
   async canary(ctx) {
+    const checks = [];
+    const candidates = companiesHouseSnapshot.urls(/* @__PURE__ */ new Date());
+    let served;
+    for (const url of candidates) {
+      const res2 = await fetch(url, { method: "HEAD", headers: { "user-agent": politeUa() } }).catch(() => void 0);
+      if (res2?.ok) {
+        served = { url, length: Number(res2.headers.get("content-length") ?? 0) };
+        break;
+      }
+    }
+    checks.push({
+      name: "the Free Company Data Product is still published under a dated monthly URL",
+      ok: Boolean(served),
+      detail: served ? `${served.url} (${Math.round(served.length / 1e6)} MB)` : `none of ${candidates.length} candidate months answered \u2014 the naming or the cadence changed`
+    });
+    if (served && served.length > 0) {
+      checks.push({
+        name: "the snapshot is still roughly half a gigabyte",
+        ok: served.length > 2e8 && served.length < 15e8,
+        detail: `${Math.round(served.length / 1e6)} MB`
+      });
+    }
     const key = keyFrom(ctx);
     if (!key) {
-      return [
-        {
-          name: "companies-house: skipped, no key supplied",
-          ok: true,
-          inconclusive: true,
-          detail: HOW_TO_GET_A_KEY
-        }
-      ];
+      checks.push({
+        name: "companies-house API: skipped, no key supplied",
+        ok: true,
+        inconclusive: true,
+        detail: HOW_TO_GET_A_KEY
+      });
+      return checks;
     }
     const res = await get3("/company/00000006", key);
     const rec = toRecord3(res.data);
-    return [
+    checks.push(
       { name: "Companies House still authenticates a key as the Basic username", ok: res.status !== 401, detail: `HTTP ${res.status}` },
       { name: "Companies House still returns company_name and registered_office_address", ok: Boolean(rec?.legalName && rec?.address.codePostal) },
       { name: "Companies House sic_codes still resolve to a NACE section", ok: Boolean(rec?.section || !res.data?.sic_codes?.length) }
-    ];
+    );
+    return checks;
   },
   async probe(ctx) {
     const key = keyFrom(ctx);
