@@ -5135,6 +5135,7 @@ async function ingestSnapshot(connectorId, source, opts = {}) {
   if (!opts.fromFile) rmSync2(download, { force: true });
   const meta = {
     connectorId,
+    toolVersion: VERSION,
     sourceUrl: used.url,
     lastModified: used.lastModified,
     vintage: source.vintage,
@@ -5211,6 +5212,9 @@ function snapshotIdsOf(rec) {
     )
   ];
 }
+function staleSnapshots() {
+  return listSnapshots().filter((m) => m.toolVersion !== VERSION);
+}
 function forgetSnapshot(connectorId) {
   const target = dir(connectorId);
   if (!existsSync2(target)) return false;
@@ -5256,8 +5260,8 @@ var offeneRegisterSnapshot = {
   // over 2017-2019 and each says when. So no global vintage is declared: the
   // per-record `retrieved_at` below is more truthful than any single date.
   approxBytes: 260455433,
-  // Measured on a full ingest: 5 305 727 records.
-  approxDiskBytes: 28e8,
+  // Measured on a full ingest: 5 305 727 records, 3377 MB.
+  approxDiskBytes: 34e8,
   parse(row) {
     const attrs = row?.all_attributes ?? {};
     const name = row?.name?.trim();
@@ -5448,16 +5452,25 @@ function addressOf3(raw) {
     pays: raw?.country ?? "United Kingdom"
   };
 }
+var ADMINISTRATIVE_SIC = {
+  "99999": "dormant company",
+  "98000": "residents property management"
+};
+function sectionOfSic(code) {
+  if (!code) return {};
+  const administrative = ADMINISTRATIVE_SIC[code];
+  if (administrative) return { code, administrative };
+  return { code, section: naceSection(code) };
+}
 function sectionOf(sicCodes) {
   const first = Array.isArray(sicCodes) ? sicCodes.find((c) => typeof c === "string") : void 0;
-  if (typeof first !== "string") return {};
-  return { code: first, section: naceSection(first) };
+  return typeof first === "string" ? sectionOfSic(first) : {};
 }
 function toRecord3(company) {
   const number = company?.company_number;
   if (!number) return void 0;
   const previous = (company?.previous_company_names ?? []).map((p) => p?.name).filter(Boolean);
-  const { code, section: section2 } = sectionOf(company?.sic_codes);
+  const { code, section: section2, administrative } = sectionOf(company?.sic_codes);
   const status = company?.company_status;
   return {
     connectorId: CONNECTOR_ID6,
@@ -5481,7 +5494,12 @@ function toRecord3(company) {
     // and "administration" are all not-active and must not be flattened to it.
     status: status === "active" ? "active" : status ? "ceased" : "unknown",
     sourceUrl: `https://find-and-update.company-information.service.gov.uk/company/${number}`,
-    national: { companyNumber: String(number).toUpperCase(), companyStatus: status ?? void 0, sicCodes: company?.sic_codes ?? void 0 }
+    national: {
+      companyNumber: String(number).toUpperCase(),
+      companyStatus: status ?? void 0,
+      sicCodes: company?.sic_codes ?? void 0,
+      administrativeSic: administrative
+    }
   };
 }
 var SNAPSHOT_BASE = "https://download.companieshouse.gov.uk";
@@ -5491,8 +5509,7 @@ function snapshotUrl(now, back) {
   return `${SNAPSHOT_BASE}/BasicCompanyDataAsOneFile-${month}.zip`;
 }
 function sicOf(text2) {
-  const code = text2?.trim().match(/^(\d{4,5})/)?.[1];
-  return code ? { code, section: naceSection(code) } : {};
+  return sectionOfSic(text2?.trim().match(/^(\d{4,5})/)?.[1]);
 }
 function statusOf3(raw) {
   const s = raw?.trim().toLowerCase();
@@ -5506,14 +5523,17 @@ var companiesHouseSnapshot = {
   urls: (now) => [0, 1, 2].map((back) => snapshotUrl(now, back)),
   licence: "UK company data: Companies House, Open Government Licence v3.0",
   approxBytes: 493e6,
-  // One identifier per record and no officers, so the index is lighter than the
-  // German one despite a similar row count.
-  approxDiskBytes: 18e8,
+  // MEASURED on a full ingest: 5 695 465 records, 4138 MB. The first estimate here
+  // was 1.8 GB, reasoned from "one identifier per record and no officers" — and it
+  // was wrong by more than a factor of two, which made the sentence printed before
+  // the download a promise the command did not keep. Estimates in this file are
+  // measured or they are not written.
+  approxDiskBytes: 42e8,
   parse(row) {
     const number = row.CompanyNumber?.trim();
     const name = row.CompanyName?.trim();
     if (!number || !name) return void 0;
-    const { code, section: section2 } = sicOf(row["SICCode.SicText_1"]);
+    const { code, section: section2, administrative } = sicOf(row["SICCode.SicText_1"]);
     const previous = [1, 2, 3, 4, 5].map((n) => row[`PreviousName_${n}.CompanyName`]?.trim()).filter((x) => Boolean(x));
     const postTown = row["RegAddress.PostTown"]?.trim();
     const street = [row["RegAddress.AddressLine1"], row["RegAddress.AddressLine2"]].map((s) => s?.trim()).filter(Boolean).join(", ");
@@ -5540,7 +5560,15 @@ var companiesHouseSnapshot = {
       dateCreated: row.IncorporationDate?.trim() || void 0,
       dateClosed: row.DissolutionDate?.trim() || void 0,
       sourceUrl: `https://find-and-update.company-information.service.gov.uk/company/${number}`,
-      national: { companyNumber: number.toUpperCase(), companyStatus: row.CompanyStatus?.trim() || void 0, sicCodes: code ? [code] : void 0 }
+      national: {
+        companyNumber: number.toUpperCase(),
+        companyStatus: row.CompanyStatus?.trim() || void 0,
+        sicCodes: code ? [code] : void 0,
+        // "dormant company" is not an activity, and a prospect list is usually
+        // better without one. Recorded so it can be filtered rather than silently
+        // dropped or silently mistranslated.
+        administrativeSic: administrative
+      }
     };
     return { record, locality: postTown || void 0, ids: [number] };
   }
@@ -9260,6 +9288,8 @@ function activityLabel(place) {
     const scheme = vocabulary.scheme === "none" ? rec.connectorId : vocabulary.scheme.toUpperCase();
     return `${vocabulary.label(section2)} (${scheme} ${section2})`;
   }
+  const administrative = rec?.national?.administrativeSic;
+  if (typeof administrative === "string" && administrative) return `${administrative} (${rec.connectorId}, not an activity code)`;
   const key = place.category?.split("=")[0];
   return key ? `${key} (OSM tag)` : "unclassified";
 }
@@ -10547,8 +10577,14 @@ async function cmdIngest(values, bools) {
       return EXIT_OK;
     }
     for (const m of cached) {
+      const stale = m.toolVersion !== VERSION ? "  (old mapping)" : "";
       out(
-        `${m.connectorId.padEnd(22)} ${String(m.rows).padStart(9)} records  ${(m.bytesOnDisk / 1e6).toFixed(0).padStart(5)} MB  vintage ${m.lastModified ?? m.vintage ?? "unknown"}`
+        `${m.connectorId.padEnd(22)} ${String(m.rows).padStart(9)} records  ${(m.bytesOnDisk / 1e6).toFixed(0).padStart(5)} MB  vintage ${m.lastModified ?? m.vintage ?? "unknown"}${stale}`
+      );
+    }
+    for (const m of staleSnapshots()) {
+      say(
+        `  ${m.connectorId}: indexed by ultraprospect ${m.toolVersion || "(unstamped)"}, now ${VERSION}. Its records carry the OLD mapping \u2014 re-run \`ingest --country <cc>\` to pick up connector fixes.`
       );
     }
     say("");

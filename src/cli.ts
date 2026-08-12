@@ -40,7 +40,7 @@ import { loadFixture, recordFixture } from "./fixture.js";
 import { applyVerdicts, type MatchVerdict } from "./match.js";
 import { needsConfirming, persistConfirm, runConfirm } from "./confirm.js";
 import { CONNECTORS, servesCountry } from "./registry/index.js";
-import { forgetSnapshot, ingestSnapshot, listSnapshots, type SnapshotSource } from "./snapshot.js";
+import { forgetSnapshot, ingestSnapshot, listSnapshots, staleSnapshots, type SnapshotSource } from "./snapshot.js";
 import { buildResolveTodo, needsResolving, runResolve, type WebHit } from "./resolve.js";
 import { newPageStore } from "./pages.js";
 import { enrichable, persistEnrich, runEnrich } from "./enrich.js";
@@ -323,8 +323,17 @@ async function cmdIngest(values: Record<string, string>, bools: ReadonlySet<stri
       return EXIT_OK;
     }
     for (const m of cached) {
+      const stale = m.toolVersion !== VERSION ? "  (old mapping)" : "";
       out(
-        `${m.connectorId.padEnd(22)} ${String(m.rows).padStart(9)} records  ${(m.bytesOnDisk / 1e6).toFixed(0).padStart(5)} MB  vintage ${m.lastModified ?? m.vintage ?? "unknown"}`,
+        `${m.connectorId.padEnd(22)} ${String(m.rows).padStart(9)} records  ${(m.bytesOnDisk / 1e6).toFixed(0).padStart(5)} MB  vintage ${m.lastModified ?? m.vintage ?? "unknown"}${stale}`,
+      );
+    }
+    // Records are mapped at ingest time, so a connector fix never reaches a cache
+    // built before it. Named rather than rebuilt: half a gigabyte is the
+    // operator's call to spend, and saying nothing is the worse half of it.
+    for (const m of staleSnapshots()) {
+      say(
+        `  ${m.connectorId}: indexed by ultraprospect ${m.toolVersion || "(unstamped)"}, now ${VERSION}. Its records carry the OLD mapping — re-run \`ingest --country <cc>\` to pick up connector fixes.`,
       );
     }
     say("");

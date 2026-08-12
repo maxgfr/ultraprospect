@@ -106,23 +106,48 @@ function addressOf(raw: any): PostalAddress {
 }
 
 /**
- * UK SIC 2007 is NACE-derived, so its first two digits ARE the NACE division.
+ * UK SIC 2007 is NACE-derived, so its first two digits ARE the NACE division —
+ * EXCEPT at the top of the range, where the UK added codes of its own.
  *
- * The codes are five digits with no separator: "62012" is division 62,
- * NACE section J. That is why `--section J` means the same thing in Manchester
- * as in Lyon, while the full codes do not compare below the division.
+ * The codes are five digits with no separator: "62012" is division 62, NACE
+ * section J. That is why `--section J` means the same thing in Manchester as in
+ * Lyon, while the full codes do not compare below the division.
+ *
+ * The exception was found by sweeping a real town. `99999` is not an activity at
+ * all — it is "Dormant company", a UK administrative code — but division 99 DOES
+ * exist in NACE, so mapping it through produced section U, "activities of
+ * extraterritorial organisations and bodies". Fourteen dormant shells in Hebden
+ * Bridge were filed as extraterritorial organisations, and `--section U` would
+ * have returned them. `98000` ("residents property management") is the same kind
+ * of code.
+ *
+ * So they resolve to NO section. The code is kept — dormancy is a real and useful
+ * fact — but it is recorded as what it is rather than translated into a
+ * classification the UK never meant by it. An unclassified row is honest; a
+ * confidently wrong one is the failure this tool exists to refuse.
  */
-function sectionOf(sicCodes: unknown): { code?: string; section?: string } {
+const ADMINISTRATIVE_SIC: Record<string, string> = {
+  "99999": "dormant company",
+  "98000": "residents property management",
+};
+
+export function sectionOfSic(code: string | undefined): { code?: string; section?: string; administrative?: string } {
+  if (!code) return {};
+  const administrative = ADMINISTRATIVE_SIC[code];
+  if (administrative) return { code, administrative };
+  return { code, section: naceSection(code) };
+}
+
+function sectionOf(sicCodes: unknown): { code?: string; section?: string; administrative?: string } {
   const first = Array.isArray(sicCodes) ? sicCodes.find((c) => typeof c === "string") : undefined;
-  if (typeof first !== "string") return {};
-  return { code: first, section: naceSection(first) };
+  return typeof first === "string" ? sectionOfSic(first) : {};
 }
 
 export function toRecord(company: any): RegistryRecord | undefined {
   const number = company?.company_number;
   if (!number) return undefined;
   const previous: string[] = (company?.previous_company_names ?? []).map((p: any) => p?.name).filter(Boolean);
-  const { code, section } = sectionOf(company?.sic_codes);
+  const { code, section, administrative } = sectionOf(company?.sic_codes);
   const status = company?.company_status;
   return {
     connectorId: CONNECTOR_ID,
@@ -146,7 +171,12 @@ export function toRecord(company: any): RegistryRecord | undefined {
     // and "administration" are all not-active and must not be flattened to it.
     status: status === "active" ? "active" : status ? "ceased" : "unknown",
     sourceUrl: `https://find-and-update.company-information.service.gov.uk/company/${number}`,
-    national: { companyNumber: String(number).toUpperCase(), companyStatus: status ?? undefined, sicCodes: company?.sic_codes ?? undefined },
+    national: {
+      companyNumber: String(number).toUpperCase(),
+      companyStatus: status ?? undefined,
+      sicCodes: company?.sic_codes ?? undefined,
+      administrativeSic: administrative,
+    },
   };
 }
 
@@ -178,9 +208,8 @@ function snapshotUrl(now: Date, back: number): string {
  * `naceSection` needs the digits: handed the whole string it resolves nothing, and
  * every British row would arrive with no section while looking populated.
  */
-function sicOf(text: string | undefined): { code?: string; section?: string } {
-  const code = text?.trim().match(/^(\d{4,5})/)?.[1];
-  return code ? { code, section: naceSection(code) } : {};
+function sicOf(text: string | undefined): { code?: string; section?: string; administrative?: string } {
+  return sectionOfSic(text?.trim().match(/^(\d{4,5})/)?.[1]);
 }
 
 /** Companies House writes "Active", "Dissolved", "Liquidation"… in the CSV. */
@@ -197,16 +226,19 @@ export const companiesHouseSnapshot: SnapshotSource = {
   urls: (now) => [0, 1, 2].map((back) => snapshotUrl(now, back)),
   licence: "UK company data: Companies House, Open Government Licence v3.0",
   approxBytes: 493_000_000,
-  // One identifier per record and no officers, so the index is lighter than the
-  // German one despite a similar row count.
-  approxDiskBytes: 1_800_000_000,
+  // MEASURED on a full ingest: 5 695 465 records, 4138 MB. The first estimate here
+  // was 1.8 GB, reasoned from "one identifier per record and no officers" — and it
+  // was wrong by more than a factor of two, which made the sentence printed before
+  // the download a promise the command did not keep. Estimates in this file are
+  // measured or they are not written.
+  approxDiskBytes: 4_200_000_000,
 
   parse(row: Record<string, string>) {
     const number = row.CompanyNumber?.trim();
     const name = row.CompanyName?.trim();
     if (!number || !name) return undefined;
 
-    const { code, section } = sicOf(row["SICCode.SicText_1"]);
+    const { code, section, administrative } = sicOf(row["SICCode.SicText_1"]);
     const previous = [1, 2, 3, 4, 5].map((n) => row[`PreviousName_${n}.CompanyName`]?.trim()).filter((x): x is string => Boolean(x));
     const postTown = row["RegAddress.PostTown"]?.trim();
     const street = [row["RegAddress.AddressLine1"], row["RegAddress.AddressLine2"]]
@@ -238,7 +270,15 @@ export const companiesHouseSnapshot: SnapshotSource = {
       dateCreated: row.IncorporationDate?.trim() || undefined,
       dateClosed: row.DissolutionDate?.trim() || undefined,
       sourceUrl: `https://find-and-update.company-information.service.gov.uk/company/${number}`,
-      national: { companyNumber: number.toUpperCase(), companyStatus: row.CompanyStatus?.trim() || undefined, sicCodes: code ? [code] : undefined },
+      national: {
+        companyNumber: number.toUpperCase(),
+        companyStatus: row.CompanyStatus?.trim() || undefined,
+        sicCodes: code ? [code] : undefined,
+        // "dormant company" is not an activity, and a prospect list is usually
+        // better without one. Recorded so it can be filtered rather than silently
+        // dropped or silently mistranslated.
+        administrativeSic: administrative,
+      },
     };
     return { record, locality: postTown || undefined, ids: [number] };
   },
@@ -470,7 +510,9 @@ export const gbCompaniesHouse: RegistryConnector = {
     checks.push({
       name: "the Free Company Data Product is still published under a dated monthly URL",
       ok: Boolean(served),
-      detail: served ? `${served.url} (${Math.round(served.length / 1e6)} MB)` : `none of ${candidates.length} candidate months answered — the naming or the cadence changed`,
+      detail: served
+        ? `${served.url} (${Math.round(served.length / 1e6)} MB)`
+        : `none of ${candidates.length} candidate months answered — the naming or the cadence changed`,
     });
     if (served && served.length > 0) {
       // A snapshot that suddenly halves is a different product, not a smaller

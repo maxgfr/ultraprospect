@@ -22,7 +22,17 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { companiesHouseSnapshot, gbCompaniesHouse } from "../src/registry/gb-companies-house.js";
 import { deOffeneRegister, offeneRegisterSnapshot, parseGermanAddress, splitNativeNumber } from "../src/registry/de-offeneregister.js";
-import { forgetSnapshot, hasSnapshot, ingestSnapshot, listSnapshots, snapshotById, snapshotByLocality, snapshotKey, snapshotMeta } from "../src/snapshot.js";
+import {
+  forgetSnapshot,
+  hasSnapshot,
+  ingestSnapshot,
+  listSnapshots,
+  snapshotById,
+  snapshotByLocality,
+  snapshotKey,
+  snapshotMeta,
+  staleSnapshots,
+} from "../src/snapshot.js";
 
 const FIXTURES = join(import.meta.dirname, "fixtures", "snapshot");
 
@@ -56,6 +66,16 @@ describe("ingest — Companies House", () => {
     expect(meta.licence).toContain("Open Government Licence");
     expect(hasSnapshot("gb-companies-house")).toBe(true);
     expect(listSnapshots().map((m) => m.connectorId)).toContain("gb-companies-house");
+  });
+
+  it("stamps the tool version that indexed it, so a mapper fix is visible", () => {
+    // Records are mapped at ingest, so correcting a connector changes nothing for
+    // a cache built before it — the wrong mapping simply persists. Found the hard
+    // way: fixing the UK administrative-SIC bug left every existing snapshot still
+    // filing dormant companies as extraterritorial organisations.
+    const meta = snapshotMeta("gb-companies-house")!;
+    expect(meta.toolVersion).toBeTruthy();
+    expect(staleSnapshots().map((m) => m.connectorId)).not.toContain("gb-companies-house");
   });
 
   it("does not split a company name on the comma inside it", () => {

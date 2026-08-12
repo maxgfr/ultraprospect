@@ -310,6 +310,26 @@ describe("gb-companies-house", () => {
     expect(chRecord({ company_number: "01", company_name: "X", sic_codes: ["62012"] })!.section).toBe("J");
   });
 
+  it("refuses to translate a UK administrative SIC code into a NACE section", () => {
+    // Found by sweeping a real town, not by reading the spec. `99999` is
+    // "Dormant company" — not an activity — but division 99 DOES exist in NACE,
+    // so mapping it through filed fourteen dormant shells in Hebden Bridge as
+    // "activities of extraterritorial organisations", and `--section U` would
+    // have returned them.
+    const dormant = chRecord({ company_number: "01", company_name: "X", sic_codes: ["99999"] })!;
+    expect(dormant.section).toBeUndefined();
+    expect(dormant.activityCode).toBe("99999");
+    expect(dormant.national?.administrativeSic).toBe("dormant company");
+
+    const residents = chRecord({ company_number: "01", company_name: "X", sic_codes: ["98000"] })!;
+    expect(residents.section).toBeUndefined();
+    expect(residents.national?.administrativeSic).toBe("residents property management");
+
+    // And a real activity code is untouched: the exception is two codes, not a
+    // retreat from the NACE mapping that makes --section portable.
+    expect(chRecord({ company_number: "01", company_name: "X", sic_codes: ["86230"] })!.section).toBe("Q");
+  });
+
   it("reads the legal form under BOTH names Companies House gives it", () => {
     // The company profile resource calls it `type`; every search resource calls
     // it `company_type`. `lookup` goes through /advanced-search first, so reading

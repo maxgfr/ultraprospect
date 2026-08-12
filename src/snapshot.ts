@@ -46,6 +46,7 @@ import { cacheDir, fnv1a64, slugify } from "./engine.js";
 import { bunzip2Blocks } from "./bunzip2.js";
 import { openZipMember, zipEntries } from "./zip.js";
 import { politeUa } from "./net.js";
+import { VERSION } from "./version.js";
 import type { RegistryRecord } from "./registry/types.js";
 
 /** 256 shards: small enough that one scan is cheap, few enough to list at a glance. */
@@ -87,6 +88,17 @@ export interface SnapshotSource {
 
 export interface SnapshotMeta {
   connectorId: string;
+  /**
+   * The tool version that INDEXED this snapshot.
+   *
+   * Records are mapped at ingest time, so a fix to a connector's mapper does not
+   * reach a cache that was built before it — the cache keeps answering with the
+   * old mapping, silently and indefinitely. That is not hypothetical: a UK
+   * administrative SIC code was being filed as a NACE section, and correcting the
+   * mapper changed nothing for anyone who had already ingested. So the version is
+   * stamped and `staleSnapshots()` names the ones that need re-ingesting.
+   */
+  toolVersion: string;
   sourceUrl: string;
   /** The upstream's own Last-Modified, which is the closest thing to a real vintage. */
   lastModified?: string;
@@ -435,6 +447,7 @@ export async function ingestSnapshot(connectorId: string, source: SnapshotSource
 
   const meta: SnapshotMeta = {
     connectorId,
+    toolVersion: VERSION,
     sourceUrl: used.url,
     lastModified: used.lastModified,
     vintage: source.vintage,
@@ -546,6 +559,17 @@ export function snapshotIdsOf(rec: RegistryRecord): string[] {
         .filter(Boolean),
     ),
   ];
+}
+
+/**
+ * Snapshots indexed by an older version of this tool.
+ *
+ * Reported rather than auto-rebuilt: re-ingesting is a 500 MB download and
+ * several minutes, and deciding to spend that is the operator's call. Saying
+ * nothing would be the worse half of the choice.
+ */
+export function staleSnapshots(): SnapshotMeta[] {
+  return listSnapshots().filter((m) => m.toolVersion !== VERSION);
 }
 
 /** Drop a snapshot, for `ingest --forget`. */

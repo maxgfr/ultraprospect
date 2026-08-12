@@ -114,8 +114,8 @@ export const offeneRegisterSnapshot: SnapshotSource = {
   // over 2017-2019 and each says when. So no global vintage is declared: the
   // per-record `retrieved_at` below is more truthful than any single date.
   approxBytes: 260_455_433,
-  // Measured on a full ingest: 5 305 727 records.
-  approxDiskBytes: 2_800_000_000,
+  // Measured on a full ingest: 5 305 727 records, 3377 MB.
+  approxDiskBytes: 3_400_000_000,
 
   parse(row: any) {
     const attrs = row?.all_attributes ?? {};

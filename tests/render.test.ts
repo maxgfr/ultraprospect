@@ -139,6 +139,22 @@ describe("REPORT.md", () => {
     expect(report).toContain("Trade and vehicle repair (NACE G)");
   });
 
+  it("names an administrative register code rather than calling it unclassified", () => {
+    // The UK files dormant companies under SIC 99999, which is not an activity —
+    // so it resolves to no section on purpose. "Dormant company" is a finding
+    // about a town; "unclassified" throws it away.
+    const report = buildReport(
+      [
+        place({
+          registry: rec({ section: undefined, activityCode: "99999", connectorId: "gb-companies-house", national: { administrativeSic: "dormant company" } }),
+        }),
+      ],
+      manifest(),
+    );
+    expect(report).toContain("dormant company (gb-companies-house, not an activity code)");
+    expect(report).not.toContain("extraterritorial");
+  });
+
   it("carries the attributions", () => {
     expect(buildReport([place()], manifest())).toContain("OpenStreetMap contributors, ODbL");
   });

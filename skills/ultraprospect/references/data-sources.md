@@ -98,8 +98,8 @@ large for a per-run path, and `ingest` fetches and indexes each once:
 | File | `BasicCompanyDataAsOneFile-YYYY-MM-01.zip`, ~470 MB | `de_companies_ocdata.jsonl.bz2`, 260 MB |
 | Freshness | monthly, "within 5 working days of the previous month end" — so `ingest` tries this month and falls back to the previous two | **frozen: the file dates from 2019-02, its records from 2017-2019** |
 | Licence | Open Government Licence v3.0 | CC-BY 4.0, attribution to OpenCorporates |
-| Rows | ~5.5 million live companies | 5 305 727 (measured) |
-| Disk after indexing | ~1.8 GB | ~2.8 GB (measured) |
+| Rows | 5 695 465 (measured) | 5 305 727 (measured) |
+| Disk after indexing | **~4.2 GB** (measured) | **~3.4 GB** (measured) |
 | Gives | a real `sweep` by post town, plus keyless `lookup`/`verifyId` | `lookup`/`verifyId`, and **the holder of an HRB number** |
 
 `ingest --list` reports what is cached, its vintage and its size on disk. `ingest
@@ -140,6 +140,16 @@ nothing to remember elsewhere.
   A UK registered office is very often the company's accountant, so an address
   from here is the register's address and not necessarily the premises, and the
   postcode is deliberately never used to narrow a lookup.
+
+  **Two SIC codes are not activities.** UK SIC 2007 is NACE-derived, so its first
+  two digits are the NACE division — except at the top of the range, where the UK
+  added administrative codes: `99999` is "dormant company" and `98000` is
+  "residents property management". Division 99 exists in NACE, so mapping `99999`
+  through produced section U, "activities of extraterritorial organisations" —
+  fourteen dormant shells in one small town, and `--section U` would have returned
+  them. Both now resolve to NO section and are reported under the register's own
+  words. A dormant company in a prospect list is worth seeing; an extraterritorial
+  organisation in Hebden Bridge is a fabrication.
 - **de-offeneregister** — keyless, from the ingested export, and the only source
   here that will tell you WHO holds a German `HRB` number. Data stops in 2019, so
   every record carries `asOf` and it declares no `sweep`: a 2018 enumeration

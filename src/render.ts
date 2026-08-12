@@ -105,6 +105,14 @@ function activityLabel(place: Place): string {
     const scheme = vocabulary.scheme === "none" ? rec.connectorId : vocabulary.scheme.toUpperCase();
     return `${vocabulary.label(section)} (${scheme} ${section})`;
   }
+  // A register can file a company under a code that is NOT an activity — the UK's
+  // "dormant company" and "residents property management" are administrative. Those
+  // resolve to no section on purpose, and saying what the register actually said
+  // beats falling through to "unclassified": a row of dormant shells is a finding
+  // about a town, and one worth seeing before calling any of them.
+  const administrative = rec?.national?.administrativeSic;
+  if (typeof administrative === "string" && administrative) return `${administrative} (${rec!.connectorId}, not an activity code)`;
+
   const key = place.category?.split("=")[0];
   return key ? `${key} (OSM tag)` : "unclassified";
 }
