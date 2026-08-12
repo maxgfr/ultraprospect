@@ -3,7 +3,7 @@ name: ultraprospect
 description: "Use when the user wants every company in a PLACE — a town, a street, a radius — turned into a qualified, sourced prospect list. A zero-dep engine (node scripts/ultraprospect.mjs, no keys, no install) sweeps OpenStreetMap worldwide and attaches whichever company register a country has. France and the UK can be ENUMERATED keylessly — the UK from Companies House's monthly open data, after `ingest`. Germany's export names the HRB holder VIES will not. Elsewhere it CONFIRMS each company from the registration its own site must publish by law (Impressum, aviso legal), against VIES, GLEIF, Brreg, PRH, ARES or EDGAR. It hands YOU the judgment it refuses: which pairs are one business, what a company does, whether it fits the brief. It REFUSES an ambiguous place, REFUSES an uncertain merge, DATES every snapshot record, and DECLARES whether a territory was swept or confirmed. Triggers: 'every company in X', 'prospect list for <area>', 'quelles entreprises à <ville>', 'Firmen in <Stadt>'."
 license: MIT
 metadata:
-  version: 2.0.0
+  version: 3.0.0
 ---
 
 # ultraprospect — a territory, turned into prospects you can cite

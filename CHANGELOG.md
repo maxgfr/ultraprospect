@@ -2,6 +2,37 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [3.0.0](https://github.com/maxgfr/ultraprospect/compare/v2.0.0...v3.0.0) (2026-08-12)
+
+
+* feat(ingest,registry,mcp)!: keyless open registers for the UK and Germany ([501354d](https://github.com/maxgfr/ultraprospect/commit/501354d763f909bc9255fc609c3a0ec8a9c7d71c))
+
+
+### Bug Fixes
+
+* **doctor,confirm,registry:** a diagnostic that uses the key it was handed ([c58de60](https://github.com/maxgfr/ultraprospect/commit/c58de606b7c98540e7ffce42efb1a8525f8ea8bc))
+* **gb:** two SIC codes are not activities, and a cache can outlive its mapper ([9e77595](https://github.com/maxgfr/ultraprospect/commit/9e77595817c1efa993bc7044ab59091622c412a8))
+* **render,watch:** derive the coverage sentence, never claim a sweep ([8dd3103](https://github.com/maxgfr/ultraprospect/commit/8dd310382cd0dcd592892c18d925e201e7a1a9ba))
+* **run:** a confirm run owes every answering register's attribution ([9ff71d2](https://github.com/maxgfr/ultraprospect/commit/9ff71d2b05f545bf5ae1c2a0b30745171fa6f418))
+* **skill:** bring the description back under the frontmatter cap ([0964001](https://github.com/maxgfr/ultraprospect/commit/0964001fd681c6510379a400c63c0617b30ceaa3))
+* **snapshot:** stamp the on-disk layout, not only the tool version ([e9ab374](https://github.com/maxgfr/ultraprospect/commit/e9ab3745bb4999e1a733fc8f7f8738b75f1078db))
+
+
+### Features
+
+* **check,render,csv:** a dated record is a fact about its date ([115a9ae](https://github.com/maxgfr/ultraprospect/commit/115a9ae309d2f9d42094534d294dd1899c52233c))
+* **ci,ingest:** prove today's file still works, and say when a cache is behind ([b466e5f](https://github.com/maxgfr/ultraprospect/commit/b466e5ff558b205f33d39d9a5c186352ab8bcfb7))
+* **ee:** Estonia — the freshest register here, and the fussiest file ([78970ed](https://github.com/maxgfr/ultraprospect/commit/78970edb9aa58ee1f86a2254d135323837b80c1e))
+* **evals:** a canary on the route that actually runs ([a8e5b68](https://github.com/maxgfr/ultraprospect/commit/a8e5b68de75dbaea5fe23b70fca76ed511c295e9))
+
+
+### BREAKING CHANGES
+
+* `gb-companies-house` declares `sweep`, so a UK run's register
+lane reports `mode: "sweep"` where it previously reported none. Anything reading
+`mode` to decide whether a territory was enumerated must also read the lane's
+`reason`, which names the shape that was enumerated.
+
 # [2.0.0](https://github.com/maxgfr/ultraprospect/compare/v1.4.4...v2.0.0) (2026-08-10)
 
 
