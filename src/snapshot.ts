@@ -24,6 +24,14 @@
 // answering anything, and a seek per hit. Two flat passes over a small file beat
 // that, and the code is short enough to be obviously correct.
 //
+// EACH STORED RECORD CARRIES ITS OWN KEYS. The identifiers a record is findable
+// by are known at ingest time, so they are written beside it rather than
+// re-derived at read time from a guessed list of `national` field names. The
+// first version guessed, and the guess held for exactly as long as two connectors
+// happened to use the same field names: Estonia files a `vatNumber` and a
+// `registerCode`, neither of which was on the list, so its VAT numbers resolved to
+// nothing at all while every lookup looked healthy.
+//
 // ONLY THE LOCALITY INDEX HOLDS RECORDS. The identifier index holds pointers —
 // `{k: idKey, l: localityKey}` — and that asymmetry is not a micro-optimisation.
 // The first version stored the full record in both, and because the German export
@@ -57,8 +65,17 @@ export type SnapshotFormat = "jsonl.bz2" | "csv.zip";
 /** One ingested row: the mapped record, plus every key it must be findable under. */
 export interface SnapshotRow {
   record: RegistryRecord;
-  /** The town the register files it under. Absent means it is only findable by id. */
-  locality?: string;
+  /**
+   * Every locality this record should be findable under. Absent means it is only
+   * findable by id.
+   *
+   * A LIST because administrative geography is a hierarchy in some registers and
+   * a flat name in others. Estonia files a company under "Pirita linnaosa,
+   * Tallinn, Harju maakond" — district, city, county — so a sweep of "Tallinn"
+   * finds nothing unless every level is indexed. The UK's post town is one name
+   * and passes a single-element list.
+   */
+  localities?: string[];
   /** Identifiers a legal notice might publish. Normalised on the way in and out. */
   ids: string[];
 }
@@ -78,6 +95,19 @@ export interface SnapshotSource {
   licence: string;
   /** The data's own vintage, where the export has one. A per-record `asOf` wins. */
   vintage?: string;
+  /**
+   * Should records from this source be DATED?
+   *
+   * Default true, and off only for a source rebuilt often enough that its records
+   * are simply current. `asOf` makes the gate demand the date in every write-up and
+   * makes the report open on a banner — worth it for a German record from 2018,
+   * noise for an Estonian one rebuilt this morning. And noise is not harmless: a
+   * banner that fires on data one day old is a banner readers learn to skip, which
+   * is exactly what must not happen to the German one.
+   */
+  datesRecords?: boolean;
+  /** Field separator, for the registers that do not use a comma. Estonia uses ";". */
+  delimiter?: string;
   /** Roughly what a download costs, for the sentence printed before it starts. */
   approxBytes: number;
   /** Roughly what the INDEX costs on disk, which is the larger of the two numbers. */
@@ -182,14 +212,21 @@ async function* linesOf(stream: Readable): AsyncGenerator<string> {
  * invisible in a spot check. Embedded newlines mean a RECORD can span lines,
  * which is why this yields records rather than mapping lines.
  */
-export async function* csvRecords(stream: Readable): AsyncGenerator<string[]> {
+export async function* csvRecords(stream: Readable, delimiter = ","): AsyncGenerator<string[]> {
   let field = "";
   let row: string[] = [];
   let quoted = false;
   let pending = false;
+  let atStart = true;
 
   for await (const chunk of stream) {
-    const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    let text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    // A UTF-8 BOM would otherwise become part of the first column's NAME, so every
+    // lookup of that column silently returns undefined. Estonia's export has one.
+    if (atStart) {
+      text = text.replace(/^\uFEFF/, "");
+      atStart = false;
+    }
     for (let i = 0; i < text.length; i++) {
       const c = text[i]!;
       if (quoted) {
@@ -209,7 +246,7 @@ export async function* csvRecords(stream: Readable): AsyncGenerator<string[]> {
         pending = true;
         continue;
       }
-      if (c === ",") {
+      if (c === delimiter) {
         row.push(field);
         field = "";
         pending = true;
@@ -271,7 +308,7 @@ async function* rowsOf(source: SnapshotSource, path: string): AsyncGenerator<any
   const csv = entries.find((e) => e.name.toLowerCase().endsWith(".csv"));
   if (!csv) throw new Error(`no CSV member in ${path} (found: ${entries.map((e) => e.name).join(", ") || "nothing"})`);
   let header: string[] | undefined;
-  for await (const row of csvRecords(await openZipMember(path, csv))) {
+  for await (const row of csvRecords(await openZipMember(path, csv), source.delimiter)) {
     if (!header) {
       // Companies House pads its header with spaces after the commas.
       header = row.map((h) => h.trim());
@@ -391,7 +428,8 @@ export async function ingestSnapshot(connectorId: string, source: SnapshotSource
   // month's file it came out of; the ingest does. A per-record date the source
   // itself carries — OffeneRegister stamps `retrieved_at` on each entry — is left
   // alone, because it is more precise than the file's.
-  const fallbackAsOf = source.vintage ?? (used.lastModified ? new Date(used.lastModified).toISOString().slice(0, 10) : undefined);
+  const fallbackAsOf =
+    source.datesRecords === false ? undefined : (source.vintage ?? (used.lastModified ? new Date(used.lastModified).toISOString().slice(0, 10) : undefined));
 
   let rows = 0;
   let skipped = 0;
@@ -405,20 +443,29 @@ export async function ingestSnapshot(connectorId: string, source: SnapshotSource
       }
       if (!mapped.record.asOf && fallbackAsOf) mapped.record.asOf = fallbackAsOf;
       rows++;
-      const localityKey = mapped.locality ? snapshotKey(mapped.locality) : "";
+      const localityKeys = [...new Set((mapped.localities ?? []).map(snapshotKey).filter(Boolean))];
+
       // The locality key is stored WITH the record, not merely used to choose its
       // shard. A shard is a hash bucket, so it holds every town that collided:
-      // without this field a lookup in Berlin returned a bakery in Ulm, which is
-      // a plausible-looking company in a report about somewhere else. ~20 bytes a
+      // without this field a lookup in Berlin returned a bakery in Ulm — a
+      // plausible-looking company in a report about somewhere else. ~20 bytes a
       // row against a wrong answer nobody would catch.
-      const record = `${JSON.stringify({ l: localityKey, r: mapped.record })}\n`;
-      if (localityKey) await writeLine("loc", bucketOf(localityKey), record);
+      //
+      // One copy per locality it is findable under. For most registers that is
+      // one; where the register files a hierarchy it is its depth, so a sweep of
+      // "Tallinn" reaches a company filed under "Pirita linnaosa, Tallinn, Harju
+      // maakond" instead of returning nothing.
+      const idKeys = [...new Set(mapped.ids.map(snapshotKey).filter(Boolean))];
+      for (const key of localityKeys) {
+        await writeLine("loc", bucketOf(key), `${JSON.stringify({ l: key, k: idKeys, r: mapped.record })}\n`);
+      }
 
-      for (const id of new Set(mapped.ids.map(snapshotKey).filter(Boolean))) {
+      const reachable = localityKeys[0];
+      for (const id of idKeys) {
         // A pointer when the record is reachable through a locality, the record
         // itself when it is not — a row with no town would otherwise be findable
         // by nothing at all.
-        const line = localityKey ? `${JSON.stringify({ k: id, l: localityKey })}\n` : record;
+        const line = reachable ? `${JSON.stringify({ k: id, l: reachable })}\n` : `${JSON.stringify({ k: idKeys, r: mapped.record })}\n`;
         await writeLine("id", bucketOf(id), line);
       }
       if (rows % 250_000 === 0) opts.onProgress?.(rows);
@@ -463,13 +510,13 @@ export async function ingestSnapshot(connectorId: string, source: SnapshotSource
 }
 
 /** Read one locality shard, keeping records whose locality is EXACTLY the one asked for. */
-async function scanLocality(connectorId: string, key: string, keep: (r: RegistryRecord) => boolean, limit: number): Promise<RegistryRecord[]> {
+async function scanLocality(connectorId: string, key: string, keep: (r: RegistryRecord, ids: string[]) => boolean, limit: number): Promise<RegistryRecord[]> {
   const path = join(dir(connectorId), "loc", `${bucketOf(key)}.jsonl`);
   if (!existsSync(path)) return [];
   const out: RegistryRecord[] = [];
   for await (const line of linesOf(createReadStream(path, { encoding: "utf8" }))) {
     if (!line) continue;
-    let parsed: { l?: string; r?: RegistryRecord };
+    let parsed: { l?: string; k?: string[]; r?: RegistryRecord };
     try {
       parsed = JSON.parse(line);
     } catch {
@@ -480,7 +527,7 @@ async function scanLocality(connectorId: string, key: string, keep: (r: Registry
     // trusted the bucket: a lookup in Berlin came back holding a bakery in Ulm —
     // a real company, correctly transcribed, in a report about another city.
     if (parsed.l !== key || !parsed.r) continue;
-    if (!keep(parsed.r)) continue;
+    if (!keep(parsed.r, parsed.k ?? [])) continue;
     out.push(parsed.r);
     if (out.length >= limit) break;
   }
@@ -514,7 +561,7 @@ export async function snapshotById(connectorId: string, id: string, limit = 20):
   const inline: RegistryRecord[] = [];
   for await (const line of linesOf(createReadStream(path, { encoding: "utf8" }))) {
     if (!line) continue;
-    let parsed: { k?: string; l?: string } & Partial<RegistryRecord>;
+    let parsed: { k?: string | string[]; l?: string; r?: RegistryRecord };
     try {
       parsed = JSON.parse(line);
     } catch {
@@ -525,48 +572,25 @@ export async function snapshotById(connectorId: string, id: string, limit = 20):
       continue;
     }
     // A record stored inline: it had no locality to be reached through.
-    const rec = parsed as RegistryRecord;
-    if (rec.id && snapshotIdsOf(rec).includes(key)) inline.push(rec);
+    if (Array.isArray(parsed.k) && parsed.r && parsed.k.includes(key)) inline.push(parsed.r);
   }
 
   const out = [...inline];
   for (const locality of localities) {
     if (out.length >= limit) break;
-    const found = await scanLocality(connectorId, locality, (r) => snapshotIdsOf(r).includes(key), limit - out.length);
+    const found = await scanLocality(connectorId, locality, (_r, ids) => ids.includes(key), limit - out.length);
     out.push(...found);
   }
   return out.slice(0, limit);
 }
 
 /**
- * The keys a stored record is findable by.
- *
- * Derived from the record rather than stored beside it, so the shard stays one
- * JSON object per line and there is exactly one definition of what an identifier
- * for a record is.
- */
-export function snapshotIdsOf(rec: RegistryRecord): string[] {
-  // `national` is per-country by design, so the identifier names differ. These
-  // are the ones a legal notice actually prints: the register's own number, and
-  // Germany's court-qualified form ("Hamburg HRB 150148"), which is the only
-  // shape that distinguishes an HRB number from the same number at another court.
-  const raw = [rec.id, rec.national?.companyNumber, rec.national?.registerNumber];
-  return [
-    ...new Set(
-      raw
-        .filter((x): x is string => typeof x === "string" && x.length > 0)
-        .map(snapshotKey)
-        .filter(Boolean),
-    ),
-  ];
-}
-
-/**
  * Snapshots indexed by an older version of this tool.
  *
- * Reported rather than auto-rebuilt: re-ingesting is a 500 MB download and
- * several minutes, and deciding to spend that is the operator's call. Saying
- * nothing would be the worse half of the choice.
+ * Reported rather than auto-rebuilt: re-ingesting is a large download and several
+ * minutes, and deciding to spend that is the operator's call. Saying nothing would
+ * be the worse half of the choice — records are mapped at ingest, so a connector
+ * fix never reaches a cache built before it.
  */
 export function staleSnapshots(): SnapshotMeta[] {
   return listSnapshots().filter((m) => m.toolVersion !== VERSION);

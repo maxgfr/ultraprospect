@@ -160,7 +160,7 @@ export const offeneRegisterSnapshot: SnapshotSource = {
     // because that is what a Impressum often prints. A bare hit still has to
     // agree on the name — see `verifyId`.
     const ids = [native.trim(), kind && number ? `${kind} ${number}` : undefined].filter((x): x is string => Boolean(x));
-    return { record, locality: town, ids };
+    return { record, localities: town ? [town] : [], ids };
   },
 };
 

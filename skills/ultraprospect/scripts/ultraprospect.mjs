@@ -4951,13 +4951,18 @@ async function* linesOf(stream) {
   const rl = createInterface2({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
   for await (const line of rl) yield line;
 }
-async function* csvRecords(stream) {
+async function* csvRecords(stream, delimiter = ",") {
   let field = "";
   let row = [];
   let quoted = false;
   let pending = false;
+  let atStart = true;
   for await (const chunk of stream) {
-    const text2 = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    let text2 = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    if (atStart) {
+      text2 = text2.replace(/^\uFEFF/, "");
+      atStart = false;
+    }
     for (let i = 0; i < text2.length; i++) {
       const c = text2[i];
       if (quoted) {
@@ -4976,7 +4981,7 @@ async function* csvRecords(stream) {
         pending = true;
         continue;
       }
-      if (c === ",") {
+      if (c === delimiter) {
         row.push(field);
         field = "";
         pending = true;
@@ -5031,7 +5036,7 @@ async function* rowsOf(source, path) {
   const csv = entries.find((e) => e.name.toLowerCase().endsWith(".csv"));
   if (!csv) throw new Error(`no CSV member in ${path} (found: ${entries.map((e) => e.name).join(", ") || "nothing"})`);
   let header2;
-  for await (const row of csvRecords(await openZipMember(path, csv))) {
+  for await (const row of csvRecords(await openZipMember(path, csv), source.delimiter)) {
     if (!header2) {
       header2 = row.map((h) => h.trim());
       continue;
@@ -5095,7 +5100,7 @@ async function ingestSnapshot(connectorId, source, opts = {}) {
     const s = streamFor(index, bucket);
     if (!s.write(line)) await new Promise((resolve4) => s.once("drain", () => resolve4()));
   };
-  const fallbackAsOf = source.vintage ?? (used.lastModified ? new Date(used.lastModified).toISOString().slice(0, 10) : void 0);
+  const fallbackAsOf = source.datesRecords === false ? void 0 : source.vintage ?? (used.lastModified ? new Date(used.lastModified).toISOString().slice(0, 10) : void 0);
   let rows = 0;
   let skipped = 0;
   try {
@@ -5108,13 +5113,17 @@ async function ingestSnapshot(connectorId, source, opts = {}) {
       }
       if (!mapped.record.asOf && fallbackAsOf) mapped.record.asOf = fallbackAsOf;
       rows++;
-      const localityKey = mapped.locality ? snapshotKey(mapped.locality) : "";
-      const record = `${JSON.stringify({ l: localityKey, r: mapped.record })}
+      const localityKeys = [...new Set((mapped.localities ?? []).map(snapshotKey).filter(Boolean))];
+      const idKeys = [...new Set(mapped.ids.map(snapshotKey).filter(Boolean))];
+      for (const key of localityKeys) {
+        await writeLine("loc", bucketOf(key), `${JSON.stringify({ l: key, k: idKeys, r: mapped.record })}
+`);
+      }
+      const reachable = localityKeys[0];
+      for (const id of idKeys) {
+        const line = reachable ? `${JSON.stringify({ k: id, l: reachable })}
+` : `${JSON.stringify({ k: idKeys, r: mapped.record })}
 `;
-      if (localityKey) await writeLine("loc", bucketOf(localityKey), record);
-      for (const id of new Set(mapped.ids.map(snapshotKey).filter(Boolean))) {
-        const line = localityKey ? `${JSON.stringify({ k: id, l: localityKey })}
-` : record;
         await writeLine("id", bucketOf(id), line);
       }
       if (rows % 25e4 === 0) opts.onProgress?.(rows);
@@ -5163,7 +5172,7 @@ async function scanLocality(connectorId, key, keep2, limit) {
       continue;
     }
     if (parsed.l !== key || !parsed.r) continue;
-    if (!keep2(parsed.r)) continue;
+    if (!keep2(parsed.r, parsed.k ?? [])) continue;
     out2.push(parsed.r);
     if (out2.length >= limit) break;
   }
@@ -5193,24 +5202,15 @@ async function snapshotById(connectorId, id, limit = 20) {
       if (parsed.k === key) localities.add(parsed.l);
       continue;
     }
-    const rec = parsed;
-    if (rec.id && snapshotIdsOf(rec).includes(key)) inline.push(rec);
+    if (Array.isArray(parsed.k) && parsed.r && parsed.k.includes(key)) inline.push(parsed.r);
   }
   const out2 = [...inline];
   for (const locality of localities) {
     if (out2.length >= limit) break;
-    const found = await scanLocality(connectorId, locality, (r) => snapshotIdsOf(r).includes(key), limit - out2.length);
+    const found = await scanLocality(connectorId, locality, (_r, ids) => ids.includes(key), limit - out2.length);
     out2.push(...found);
   }
   return out2.slice(0, limit);
-}
-function snapshotIdsOf(rec) {
-  const raw = [rec.id, rec.national?.companyNumber, rec.national?.registerNumber];
-  return [
-    ...new Set(
-      raw.filter((x) => typeof x === "string" && x.length > 0).map(snapshotKey).filter(Boolean)
-    )
-  ];
 }
 function staleSnapshots() {
   return listSnapshots().filter((m) => m.toolVersion !== VERSION);
@@ -5299,7 +5299,7 @@ var offeneRegisterSnapshot = {
       }
     };
     const ids = [native.trim(), kind && number ? `${kind} ${number}` : void 0].filter((x) => Boolean(x));
-    return { record, locality: town, ids };
+    return { record, localities: town ? [town] : [], ids };
   }
 };
 var deOffeneRegister = {
@@ -5414,16 +5414,210 @@ var deOffeneRegister = {
   }
 };
 
+// src/registry/ee-ariregister.ts
+var CONNECTOR_ID6 = "ee-ariregister";
+var DUMP_URL2 = "https://avaandmed.ariregister.rik.ee/sites/default/files/avaandmed/ettevotja_rekvisiidid__lihtandmed.csv.zip";
+var HOW_TO_INGEST2 = "run `ultraprospect ingest --country ee` once (18 MB, keyless, rebuilt daily) to index the Estonian register.";
+function statusOf3(code) {
+  const c = code?.trim().toUpperCase();
+  if (c === "R") return "active";
+  if (c === "L" || c === "N") return "ceased";
+  return "unknown";
+}
+function estonianLocalities(ehakText) {
+  return [
+    ...new Set(
+      (ehakText ?? "").split(",").map((s) => s.trim()).filter((s) => s.length > 1)
+    )
+  ];
+}
+var ariregisterSnapshot = {
+  format: "csv.zip",
+  urls: () => [DUMP_URL2],
+  licence: "Estonian company data: \xC4riregister / Registrite ja Infos\xFCsteemide Keskus, open data",
+  // Estonian addresses are full of commas, so the file is semicolon-separated.
+  delimiter: ";",
+  approxBytes: 18429199,
+  // Records are NOT dated. The file is rebuilt daily, so they are current — and a
+  // date on them would make the gate demand it in every Estonian write-up and the
+  // report open on a staleness banner, for data a few hours old. A banner that
+  // fires on everything is one nobody reads, and the German one has to be read.
+  datesRecords: false,
+  // Measured on a full ingest: 376 025 records.
+  approxDiskBytes: 26e7,
+  parse(row) {
+    const name = row.nimi?.trim();
+    const code = row.ariregistri_kood?.trim();
+    if (!name || !code) return void 0;
+    const town = row.asukoha_ehak_tekstina?.trim();
+    const localities = estonianLocalities(town);
+    const address = {
+      raw: row.ads_normaliseeritud_taisaadress?.trim() || row.ettevotja_aadress?.trim() || void 0,
+      libelleVoie: row.asukoht_ettevotja_aadressis?.trim() || void 0,
+      codePostal: row.indeks_ettevotja_aadressis?.trim() || void 0,
+      // The narrowest level is the one a person would write on an envelope.
+      commune: localities[0],
+      pays: "Estonia"
+    };
+    const vat = row.kmkr_nr?.trim();
+    const record = {
+      connectorId: CONNECTOR_ID6,
+      id: code,
+      names: [name],
+      legalName: name,
+      officers: [],
+      address,
+      countryCode: "ee",
+      status: statusOf3(row.ettevotja_staatus),
+      legalForm: row.ettevotja_oiguslik_vorm?.trim() || void 0,
+      // dd.mm.yyyy in the file; ISO everywhere in this tool.
+      dateCreated: row.ettevotja_esmakande_kpv?.trim().split(".").reverse().join("-") || void 0,
+      // No activity code: EMTAK is a separate export, and inventing a section
+      // would claim a classification this file does not contain.
+      sourceUrl: row.teabesysteemi_link?.trim() || `https://ariregister.rik.ee/est/company/${code}`,
+      // No `asOf`: the file is rebuilt daily, so these records ARE current. The
+      // ingest stamps one only when the source has a vintage to stamp.
+      national: {
+        registerCode: code,
+        statusText: row.ettevotja_staatus_tekstina?.trim() || void 0,
+        vatNumber: vat || void 0,
+        ehakCode: row.asukoha_ehak_kood?.trim() || void 0
+      }
+    };
+    return { record, localities, ids: [code, vat].filter((x) => Boolean(x)) };
+  }
+};
+function passesFilters(rec, filters) {
+  return Boolean(filters.includeCeased) || rec.status !== "ceased";
+}
+var eeAriregister = {
+  id: CONNECTOR_ID6,
+  countries: ["ee"],
+  label: "Estonia \u2014 \xC4riregister (open data, rebuilt daily, keyless)",
+  licence: ariregisterSnapshot.licence,
+  // The simple-data export carries no EMTAK code, so there is no vocabulary to
+  // declare. Claiming NACE here would imply codes this file does not contain.
+  activityScheme: "none",
+  activityPrefix: CONNECTOR_ID6,
+  docsUrl: "https://avaandmed.ariregister.rik.ee/en/downloading-open-data",
+  snapshot: ariregisterSnapshot,
+  availability() {
+    if (hasSnapshot(CONNECTOR_ID6)) return { available: true };
+    return { available: false, reason: "no Estonian register snapshot has been ingested", how: HOW_TO_INGEST2 };
+  },
+  /**
+   * Enumerate the companies filed under a territory.
+   *
+   * A real sweep, and — like the British one — by ADMINISTRATIVE UNIT rather than
+   * by bounding box. The unit here is finer than a UK post town (Estonia files
+   * Tallinn's companies by district) and every level is indexed, so both
+   * "Kesklinna linnaosa" and "Tallinn" resolve. The coverage says which was asked
+   * for, because "Tallinn" and "Pirita" are very different territories.
+   */
+  async sweep(target, filters, ctx) {
+    const town = shortLabel(target.label || target.query);
+    const meta = snapshotMeta(CONNECTOR_ID6);
+    if (!meta) {
+      return {
+        records: [],
+        notes: [`ee-ariregister: no snapshot ingested, so the register lane could not be swept. ${HOW_TO_INGEST2}`],
+        coverage: {
+          lane: "registry",
+          connectorId: CONNECTOR_ID6,
+          requested: 0,
+          returned: 0,
+          truncated: true,
+          reason: `no Estonian register snapshot in the cache; ${HOW_TO_INGEST2}`
+        }
+      };
+    }
+    const max = filters.maxResults ?? 3e3;
+    const all = await snapshotByLocality(CONNECTOR_ID6, town, (r) => passesFilters(r, filters), max + 1);
+    const truncated = all.length > max;
+    const records = truncated ? all.slice(0, max) : all;
+    ctx.onProgress?.(records.length, town);
+    return {
+      records,
+      notes: [],
+      coverage: {
+        lane: "registry",
+        mode: "sweep",
+        connectorId: CONNECTOR_ID6,
+        requested: max,
+        returned: records.length,
+        truncated,
+        reason: truncated ? `enumerated from the \xC4riregister open-data export by ADMINISTRATIVE UNIT "${town}", and stopped at --max-results ${max}. An administrative unit is not a bounding box, so this lane's shape does not coincide with the OSM lane's.` : `enumerated from the \xC4riregister open-data export by ADMINISTRATIVE UNIT "${town}" \u2014 every company the register files there, from a file rebuilt daily. An administrative unit is not a bounding box, so this lane's shape does not coincide with the OSM lane's.`
+      }
+    };
+  },
+  async lookup(query) {
+    const name = query.names.find((n) => n?.trim());
+    if (!name || !query.locality || !hasSnapshot(CONNECTOR_ID6)) return [];
+    const needle = normalizeName(name);
+    if (needle.length < 3) return [];
+    return snapshotByLocality(
+      CONNECTOR_ID6,
+      query.locality,
+      (r) => r.status !== "ceased" && r.names.some((n) => nameSimilarity(n, name) >= 0.6 || normalizeName(n).includes(needle)),
+      Math.min(20, query.limit ?? 5)
+    );
+  },
+  /**
+   * Confirm a register code or a VAT number read off a company's own site.
+   *
+   * Both are primary keys here, so there is nothing to score: an Estonian
+   * `registrikood` is eight digits and unique nationally, unlike a German register
+   * number, which repeats across courts.
+   */
+  async verifyId(id) {
+    if (!hasSnapshot(CONNECTOR_ID6)) return void 0;
+    const value = id.value.trim().toUpperCase().replace(/\s+/g, "");
+    if (id.kind === "vat") {
+      if (!/^EE\d{9}$/.test(value)) return void 0;
+      return (await snapshotById(CONNECTOR_ID6, value))[0];
+    }
+    if (!/^\d{8}$/.test(value)) return void 0;
+    return (await snapshotById(CONNECTOR_ID6, value))[0];
+  },
+  async canary() {
+    const res = await fetch(DUMP_URL2, { method: "HEAD" });
+    const lastModified = res.headers.get("last-modified");
+    const ageDays = lastModified ? (Date.now() - new Date(lastModified).getTime()) / 864e5 : void 0;
+    return [
+      { name: "the \xC4riregister open-data export is still served", ok: res.ok, detail: `HTTP ${res.status}` },
+      {
+        name: "the export is still around 18 MB",
+        ok: Math.abs(Number(res.headers.get("content-length") ?? 0) - ariregisterSnapshot.approxBytes) < 3e7,
+        detail: `${res.headers.get("content-length")} bytes`
+      },
+      {
+        // The whole reason this connector needs no `asOf`. If it stops being
+        // daily it becomes a different kind of source and the records should say
+        // so, which is a code change rather than a transient failure.
+        name: "the export is still rebuilt daily",
+        ok: ageDays === void 0 || ageDays < 7,
+        detail: lastModified ? `last modified ${lastModified}` : "no Last-Modified header"
+      }
+    ];
+  },
+  async probe() {
+    const meta = snapshotMeta(CONNECTOR_ID6);
+    if (meta) return { ok: true, detail: `${meta.rows} records in cache, from ${meta.lastModified ?? "an unknown date"}` };
+    const res = await fetch(DUMP_URL2, { method: "HEAD" });
+    return { ok: res.ok, detail: res.ok ? `export reachable, not yet ingested \u2014 ${HOW_TO_INGEST2}` : `HTTP ${res.status}` };
+  }
+};
+
 // src/registry/gb-companies-house.ts
 var BASE5 = "https://api.company-information.service.gov.uk";
-var CONNECTOR_ID6 = "gb-companies-house";
+var CONNECTOR_ID7 = "gb-companies-house";
 var REQUEST_DELAY_MS5 = 600;
 var RATE_LIMIT_BACKOFF_MS = 3e4;
 var RateLimited = class extends Error {
 };
 var HOW_TO_GET_A_KEY = "Register at https://developer.company-information.service.gov.uk (email only, free, no payment), create an application, then pass --companies-house-key or set ULTRAPROSPECT_COMPANIES_HOUSE_KEY.";
 function keyFrom(ctx) {
-  const key = ctx.keys?.[CONNECTOR_ID6] ?? process.env.ULTRAPROSPECT_COMPANIES_HOUSE_KEY;
+  const key = ctx.keys?.[CONNECTOR_ID7] ?? process.env.ULTRAPROSPECT_COMPANIES_HOUSE_KEY;
   return key?.trim() || void 0;
 }
 async function get3(path, key) {
@@ -5473,7 +5667,7 @@ function toRecord3(company) {
   const { code, section: section2, administrative } = sectionOf(company?.sic_codes);
   const status = company?.company_status;
   return {
-    connectorId: CONNECTOR_ID6,
+    connectorId: CONNECTOR_ID7,
     id: String(number).toUpperCase(),
     names: [company?.company_name, ...previous].filter(Boolean),
     legalName: company?.company_name ?? void 0,
@@ -5511,7 +5705,7 @@ function snapshotUrl(now, back) {
 function sicOf(text2) {
   return sectionOfSic(text2?.trim().match(/^(\d{4,5})/)?.[1]);
 }
-function statusOf3(raw) {
+function statusOf4(raw) {
   const s = raw?.trim().toLowerCase();
   if (!s) return "unknown";
   return s === "active" ? "active" : "ceased";
@@ -5545,7 +5739,7 @@ var companiesHouseSnapshot = {
       pays: row["RegAddress.Country"]?.trim() || "United Kingdom"
     };
     const record = {
-      connectorId: CONNECTOR_ID6,
+      connectorId: CONNECTOR_ID7,
       id: number.toUpperCase(),
       names: [name, ...previous],
       legalName: name,
@@ -5556,7 +5750,7 @@ var companiesHouseSnapshot = {
       section: section2,
       activityScheme: "nace",
       legalForm: row.CompanyCategory?.trim() || void 0,
-      status: statusOf3(row.CompanyStatus),
+      status: statusOf4(row.CompanyStatus),
       dateCreated: row.IncorporationDate?.trim() || void 0,
       dateClosed: row.DissolutionDate?.trim() || void 0,
       sourceUrl: `https://find-and-update.company-information.service.gov.uk/company/${number}`,
@@ -5570,17 +5764,17 @@ var companiesHouseSnapshot = {
         administrativeSic: administrative
       }
     };
-    return { record, locality: postTown || void 0, ids: [number] };
+    return { record, localities: postTown ? [postTown] : [], ids: [number] };
   }
 };
-function passesFilters(rec, filters) {
+function passesFilters2(rec, filters) {
   if (!filters.includeCeased && rec.status === "ceased") return false;
   if (filters.sections?.length && (!rec.section || !filters.sections.includes(rec.section))) return false;
   if (filters.activityCodes?.length && (!rec.activityCode || !filters.activityCodes.some((c) => rec.activityCode?.startsWith(c)))) return false;
   return true;
 }
 var gbCompaniesHouse = {
-  id: CONNECTOR_ID6,
+  id: CONNECTOR_ID7,
   countries: ["gb"],
   label: "United Kingdom \u2014 Companies House (keyless monthly snapshot; a free key adds a live API)",
   licence: "UK company data: Companies House, Open Government Licence v3.0",
@@ -5600,7 +5794,7 @@ var gbCompaniesHouse = {
   },
   snapshot: companiesHouseSnapshot,
   availability(ctx) {
-    if (hasSnapshot(CONNECTOR_ID6)) return { available: true };
+    if (hasSnapshot(CONNECTOR_ID7)) return { available: true };
     if (keyFrom(ctx)) return { available: true };
     return {
       available: false,
@@ -5621,14 +5815,14 @@ var gbCompaniesHouse = {
   async sweep(target, filters, ctx) {
     const notes = [];
     const town = shortLabel(target.label || target.query);
-    const meta = snapshotMeta(CONNECTOR_ID6);
+    const meta = snapshotMeta(CONNECTOR_ID7);
     if (!meta) {
       return {
         records: [],
         notes: ["companies-house: no snapshot ingested, so the register lane could not be swept. Run `ultraprospect ingest --country gb`."],
         coverage: {
           lane: "registry",
-          connectorId: CONNECTOR_ID6,
+          connectorId: CONNECTOR_ID7,
           requested: 0,
           returned: 0,
           truncated: true,
@@ -5637,7 +5831,7 @@ var gbCompaniesHouse = {
       };
     }
     const max = filters.maxResults ?? 3e3;
-    const all = await snapshotByLocality(CONNECTOR_ID6, town, (r) => passesFilters(r, filters), max + 1);
+    const all = await snapshotByLocality(CONNECTOR_ID7, town, (r) => passesFilters2(r, filters), max + 1);
     const truncated = all.length > max;
     const records = truncated ? all.slice(0, max) : all;
     ctx.onProgress?.(records.length, town);
@@ -5647,7 +5841,7 @@ var gbCompaniesHouse = {
       coverage: {
         lane: "registry",
         mode: "sweep",
-        connectorId: CONNECTOR_ID6,
+        connectorId: CONNECTOR_ID7,
         requested: max,
         returned: records.length,
         truncated,
@@ -5660,10 +5854,10 @@ var gbCompaniesHouse = {
     const name = query.names.find((n) => n?.trim());
     if (!name) return [];
     const limit = Math.min(20, query.limit ?? 5);
-    if (hasSnapshot(CONNECTOR_ID6) && query.locality) {
+    if (hasSnapshot(CONNECTOR_ID7) && query.locality) {
       const needle = normalizeName(name);
       const hits = await snapshotByLocality(
-        CONNECTOR_ID6,
+        CONNECTOR_ID7,
         query.locality,
         (r) => r.status !== "ceased" && r.names.some((n) => nameSimilarity(n, name) >= 0.6 || normalizeName(n).includes(needle)),
         limit
@@ -5704,8 +5898,8 @@ var gbCompaniesHouse = {
     const number = id.value.replace(/\s+/g, "").toUpperCase();
     if (!/^(\d{6,8}|[A-Z]{2}\d{6})$/.test(number)) return void 0;
     const padded = /^\d+$/.test(number) ? number.padStart(8, "0") : number;
-    if (hasSnapshot(CONNECTOR_ID6)) {
-      const hit = (await snapshotById(CONNECTOR_ID6, padded))[0];
+    if (hasSnapshot(CONNECTOR_ID7)) {
+      const hit = (await snapshotById(CONNECTOR_ID7, padded))[0];
       if (hit) return hit;
     }
     const key = keyFrom(ctx);
@@ -5770,7 +5964,7 @@ var gbCompaniesHouse = {
 
 // src/registry/gleif.ts
 var BASE6 = "https://api.gleif.org/api/v1";
-var CONNECTOR_ID7 = "gleif";
+var CONNECTOR_ID8 = "gleif";
 var REQUEST_DELAY_MS6 = 400;
 async function get4(path) {
   const url = `${BASE6}${path}`;
@@ -5802,7 +5996,7 @@ function toRecord4(entry) {
   const otherNames = (a?.entity?.otherNames ?? []).map((n) => n?.name).filter(Boolean);
   const country = (a?.entity?.legalAddress?.country ?? "").toLowerCase() || void 0;
   return {
-    connectorId: CONNECTOR_ID7,
+    connectorId: CONNECTOR_ID8,
     id: lei,
     names: [...otherNames, legalName].filter(Boolean),
     legalName,
@@ -5838,7 +6032,7 @@ async function queryRecords(params, limit) {
   return (data?.data ?? []).map(toRecord4).filter((r) => Boolean(r));
 }
 var gleif = {
-  id: CONNECTOR_ID7,
+  id: CONNECTOR_ID8,
   countries: ["*"],
   label: "Worldwide \u2014 Global LEI Index (GLEIF). Covers entities that hold an LEI, not every company.",
   licence: "Legal entity data: Global LEI Index, GLEIF, CC0 1.0",
@@ -5896,7 +6090,7 @@ var gleif = {
 
 // src/registry/no-brreg.ts
 var BASE7 = "https://data.brreg.no/enhetsregisteret/api";
-var CONNECTOR_ID8 = "no-brreg";
+var CONNECTOR_ID9 = "no-brreg";
 var REQUEST_DELAY_MS7 = 300;
 async function get5(path) {
   const url = `${BASE7}${path}`;
@@ -5925,7 +6119,7 @@ function toRecord5(unit) {
   const activityCode = unit?.naeringskode1?.kode ?? void 0;
   const address = addressOf5(unit?.beliggenhetsadresse ?? unit?.postadresse);
   return {
-    connectorId: CONNECTOR_ID8,
+    connectorId: CONNECTOR_ID9,
     id: String(id),
     names: [name, ...historic].filter(Boolean),
     legalName: name,
@@ -5953,7 +6147,7 @@ function toRecord5(unit) {
   };
 }
 var noBrreg = {
-  id: CONNECTOR_ID8,
+  id: CONNECTOR_ID9,
   countries: ["no"],
   label: "Norway \u2014 Enhetsregisteret via data.brreg.no",
   licence: "Norwegian company data: Enhetsregisteret, Br\xF8nn\xF8ysundregistrene, NLOD 2.0",
@@ -6005,7 +6199,7 @@ var noBrreg = {
 
 // src/registry/pl-krs.ts
 var BASE8 = "https://api-krs.ms.gov.pl/api/krs";
-var CONNECTOR_ID9 = "pl-krs";
+var CONNECTOR_ID10 = "pl-krs";
 var REQUEST_DELAY_MS8 = 500;
 async function get6(krs, rejestr) {
   const url = `${BASE8}/OdpisAktualny/${krs}?rejestr=${rejestr}&format=json`;
@@ -6036,7 +6230,7 @@ function toRecord6(payload) {
   const pkd = dzial1?.przedmiotDzialalnosci?.przedmiotPrzewazajacejDzialalnosci?.[0];
   const activityCode = pkd ? [pkd?.dzial, pkd?.grupa, pkd?.podklasa].filter(Boolean).join(".") || void 0 : void 0;
   return {
-    connectorId: CONNECTOR_ID9,
+    connectorId: CONNECTOR_ID10,
     id: String(krs),
     names: [name],
     legalName: name,
@@ -6062,7 +6256,7 @@ function toRecord6(payload) {
   };
 }
 var plKrs = {
-  id: CONNECTOR_ID9,
+  id: CONNECTOR_ID10,
   countries: ["pl"],
   label: "Poland \u2014 KRS (National Court Register). Lookup by KRS number only; the public API has no name search.",
   licence: "Polish company data: Krajowy Rejestr S\u0105dowy, Ministerstwo Sprawiedliwo\u015Bci, open data",
@@ -6131,7 +6325,7 @@ function usSicDivision(code) {
 // src/registry/us-edgar.ts
 var DATA = "https://data.sec.gov";
 var WWW = "https://www.sec.gov";
-var CONNECTOR_ID10 = "us-edgar";
+var CONNECTOR_ID11 = "us-edgar";
 var REQUEST_DELAY_MS9 = 500;
 function secUa() {
   return process.env.ULTRAPROSPECT_SEC_CONTACT ? `ultraprospect ${process.env.ULTRAPROSPECT_SEC_CONTACT}` : "ultraprospect contact@ultraprospect.invalid";
@@ -6175,7 +6369,7 @@ function toRecord7(submissions) {
   const formerNames = (submissions?.formerNames ?? []).map((f) => f?.name).filter(Boolean);
   const address = addressOf7(submissions?.addresses?.business ?? submissions?.addresses?.mailing);
   return {
-    connectorId: CONNECTOR_ID10,
+    connectorId: CONNECTOR_ID11,
     id: String(cik).padStart(10, "0"),
     names: [submissions?.name, ...formerNames].filter(Boolean),
     legalName: submissions?.name ?? void 0,
@@ -6203,7 +6397,7 @@ function usEdgarCoverageNote() {
   return "us-edgar: the United States has no national company register. This connector reaches EDGAR's listed companies only \u2014 about 10 400 with a traded ticker. A company absent from it is not absent from the economy, and nothing here says it is.";
 }
 var usEdgar = {
-  id: CONNECTOR_ID10,
+  id: CONNECTOR_ID11,
   countries: ["us"],
   label: "United States \u2014 SEC EDGAR, listed companies only (~10 400). There is no national US company register.",
   licence: "US filer data: SEC EDGAR, public domain",
@@ -6276,6 +6470,7 @@ var CONNECTORS = [
   // refuses to name its holder, while this names who filed under an HRB number in
   // 2017-2019. An identity, even a dated one, beats an anonymous confirmation.
   deOffeneRegister,
+  eeAriregister,
   noBrreg,
   fiPrh,
   czAres,

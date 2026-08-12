@@ -25,8 +25,9 @@ is a guess dressed as a fact, and every count it reports is one it measured.
 > 2. **A truncated run is a truncated run, and a confirmed one is not a sweep.**
 >    When `manifest.truncated` is true, say so in the first sentence of whatever
 >    you write, and name the lane. Read the register lane's `mode`, which the
->    Coverage table prints as its own column, and which only France and the
->    United Kingdom can answer `"sweep"` to. When it says `"confirm"` say so: the
+>    Coverage table prints as its own column, and which France, the United
+>    Kingdom and Estonia can answer `"sweep"` to — each by a DIFFERENT shape,
+>    named in the lane's `reason`. When it says `"confirm"` say so: the
 >    list is what OpenStreetMap holds for that territory, checked against the
 >    register, not what the register holds. A company nobody has mapped is not in
 >    it. And the UK's sweep is by POST TOWN, not by the bounding box the OSM lane
@@ -71,7 +72,7 @@ gate. Read it rather than guessing a flag.
 | You want to… | Run |
 |---|---|
 | Check a place name resolves, before spending a sweep | `where "<place>"` |
-| Get a keyless register for the UK or Germany, once | `ingest --country gb` · `ingest --country de` |
+| Get a keyless register for the UK, Germany or Estonia, once | `ingest --country gb` · `de` · `ee` |
 | List every company in a town, street or radius | `scan --where "<place>"` |
 | Same, narrowed to an industry or a company size | `scan --where "<place>" --section J,M --min-employees 10` |
 | Answer the pairs the matcher would not decide | `match --run <dir> --apply verdicts.json` |

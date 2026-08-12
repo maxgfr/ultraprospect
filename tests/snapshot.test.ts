@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { companiesHouseSnapshot, gbCompaniesHouse } from "../src/registry/gb-companies-house.js";
 import { deOffeneRegister, offeneRegisterSnapshot, parseGermanAddress, splitNativeNumber } from "../src/registry/de-offeneregister.js";
+import { ariregisterSnapshot, eeAriregister, estonianLocalities } from "../src/registry/ee-ariregister.js";
 import {
   forgetSnapshot,
   hasSnapshot,
@@ -41,11 +42,13 @@ beforeAll(async () => {
   process.env.ULTRAPROSPECT_CACHE_DIR = mkdtempSync(join(tmpdir(), "ultraprospect-snapshot-"));
   await ingestSnapshot("gb-companies-house", companiesHouseSnapshot, { fromFile: join(FIXTURES, "companies-house-sample.zip") });
   await ingestSnapshot("de-offeneregister", offeneRegisterSnapshot, { fromFile: join(FIXTURES, "offeneregister-sample.jsonl.bz2") });
+  await ingestSnapshot("ee-ariregister", ariregisterSnapshot, { fromFile: join(FIXTURES, "ariregister-sample.zip") });
 });
 
 afterAll(() => {
   forgetSnapshot("gb-companies-house");
   forgetSnapshot("de-offeneregister");
+  forgetSnapshot("ee-ariregister");
 });
 
 describe("snapshotKey", () => {
@@ -319,5 +322,90 @@ describe("de-offeneregister — the shape measured off the real export", () => {
     // The struck-off Immertreu is in Berlin too and must not come back.
     const all = await deOffeneRegister.lookup!({ names: ["Immertreu"], countryCode: "de", locality: "Berlin" }, {});
     expect(all).toEqual([]);
+  });
+});
+
+describe("ee-ariregister — the freshest register, and the fussiest file", () => {
+  // Every case here is a trap the real 376 025-row export actually contains.
+
+  it("splits the administrative hierarchy so a sweep of the CITY finds its districts", () => {
+    // Tallinn's companies are filed under its eight districts, never under
+    // "Tallinn" alone — 61 357 of them in Kesklinn. Indexing only the whole
+    // string makes a sweep of Estonia's capital return nothing at all.
+    expect(estonianLocalities("Pirita linnaosa, Tallinn, Harju maakond")).toEqual(["Pirita linnaosa", "Tallinn", "Harju maakond"]);
+    expect(estonianLocalities("Tartu linn, Tartu linn, Tartu maakond")).toEqual(["Tartu linn", "Tartu maakond"]);
+    expect(estonianLocalities("")).toEqual([]);
+  });
+
+  it("parses a semicolon-separated file with a BOM, and gets the name right", async () => {
+    // Two failures that look like nothing: a comma-split shreds every Estonian
+    // address (they are full of commas), and a BOM turns the first column's NAME
+    // into "\uFEFFnimi" so every company arrives nameless.
+    const [rec] = await snapshotById("ee-ariregister", "16752073");
+    expect(rec!.legalName).toBe("007 Agent & Partners OÜ");
+    expect(rec!.address.codePostal).toBe("11911");
+    expect(rec!.address.commune).toBe("Pirita linnaosa");
+    expect(rec!.legalForm).toBe("Osaühing");
+  });
+
+  it("finds a Tallinn company by the CITY, not only by its district", async () => {
+    const city = await snapshotByLocality("ee-ariregister", "Tallinn", () => true);
+    expect(city.map((r) => r.legalName)).toContain("007 Agent & Partners OÜ");
+    const district = await snapshotByLocality("ee-ariregister", "Pirita linnaosa", () => true);
+    expect(district.map((r) => r.legalName)).toContain("007 Agent & Partners OÜ");
+    // And the county, which is the coarsest level the register files.
+    expect((await snapshotByLocality("ee-ariregister", "Harju maakond", () => true)).length).toBeGreaterThan(0);
+  });
+
+  it("turns the register's date into ISO rather than leaving it Estonian", async () => {
+    const [rec] = await snapshotById("ee-ariregister", "16752073");
+    expect(rec!.dateCreated).toBe("2023-06-05");
+  });
+
+  it("carries NO asOf, because the file is rebuilt daily", async () => {
+    // The distinction that makes Germany's export usable is the same one that
+    // makes stamping this one wrong: these records ARE current. Asserted through
+    // the SOURCE's declaration rather than only through the ingested record —
+    // the fixture is a local file with no Last-Modified, so a record from it
+    // would be undated whatever the rule was, and this test would have passed
+    // while the real ingest stamped every Estonian company. It did.
+    expect(ariregisterSnapshot.datesRecords).toBe(false);
+    const [rec] = await snapshotById("ee-ariregister", "16752073");
+    expect(rec!.asOf).toBeUndefined();
+    // And the sources that ARE stale say nothing, so the default stays "date it".
+    expect(offeneRegisterSnapshot.datesRecords).toBeUndefined();
+    expect(companiesHouseSnapshot.datesRecords).toBeUndefined();
+  });
+
+  it("confirms a VAT number, which is what an Estonian legal notice prints", async () => {
+    const rec = await eeAriregister.verifyId!({ kind: "vat", value: "EE101335276", countryCode: "ee" }, {});
+    expect(rec?.legalName).toBe("007 Autohaus osaühing");
+    // And the register code, which is the other primary key.
+    expect((await eeAriregister.verifyId!({ kind: "company-number", value: "11694365", countryCode: "ee" }, {}))?.legalName).toBe("007 Autohaus osaühing");
+    // A malformed identifier is refused rather than asked about.
+    expect(await eeAriregister.verifyId!({ kind: "vat", value: "EE123", countryCode: "ee" }, {})).toBeUndefined();
+  });
+
+  it("treats liquidation as ceased while keeping the register's own word", async () => {
+    // `L` is 9 052 companies and `N` is 666. Neither is a going concern to
+    // cold-call, and neither is simply "struck off" — the difference is kept.
+    const swept = await eeAriregister.sweep!(
+      { query: "x", label: "Harju maakond", lat: 0, lon: 0, bbox: [0, 0, 0, 0], countryCode: "ee", source: "nominatim" },
+      { includeCeased: true },
+      {},
+    );
+    const ceased = swept.records.filter((r) => r.status === "ceased");
+    if (ceased.length) expect(typeof ceased[0]!.national?.statusText).toBe("string");
+  });
+
+  it("says its sweep is by administrative unit, not by bounding box", async () => {
+    const swept = await eeAriregister.sweep!(
+      { query: "x", label: "Tallinn", lat: 0, lon: 0, bbox: [0, 0, 0, 0], countryCode: "ee", source: "nominatim" },
+      {},
+      {},
+    );
+    expect(swept.coverage.mode).toBe("sweep");
+    expect(swept.coverage.reason).toContain("ADMINISTRATIVE UNIT");
+    expect(swept.coverage.reason).toContain("not a bounding box");
   });
 });

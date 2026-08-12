@@ -280,7 +280,7 @@ export const companiesHouseSnapshot: SnapshotSource = {
         administrativeSic: administrative,
       },
     };
-    return { record, locality: postTown || undefined, ids: [number] };
+    return { record, localities: postTown ? [postTown] : [], ids: [number] };
   },
 };
 

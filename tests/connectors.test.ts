@@ -350,7 +350,7 @@ describe("the connector table", () => {
     }
   });
 
-  it("names every sweepable register, and there are now two of them", () => {
+  it("names every sweepable register, and there are now three of them", () => {
     // This assertion used to read "exactly one, and it is France's", and its own
     // comment anticipated the day it would change: "If a second connector ever
     // gains `sweep`, the report's wording about coverage has to be revisited."
@@ -360,7 +360,10 @@ describe("the connector table", () => {
     // mode, and the UK lane's reason says in words that a post town is not a
     // bounding box. Anything else gaining `sweep` needs the same treatment.
     const sweepers = CONNECTORS.filter((c) => c.sweep);
-    expect(sweepers.map((c) => c.id).sort()).toEqual(["fr-sirene", "gb-companies-house"]);
+    expect(sweepers.map((c) => c.id).sort()).toEqual(["ee-ariregister", "fr-sirene", "gb-companies-house"]);
+    // And they do NOT sweep the same shape, which is why each one's `reason` has
+    // to name its own: France a bounding box, the UK a post town, Estonia an
+    // administrative unit finer than either.
   });
 
   it("carries EVERY answering connector's attribution, not just the first", () => {
@@ -386,7 +389,7 @@ describe("the connector table", () => {
       CONNECTORS.filter((c) => c.snapshot)
         .map((c) => c.id)
         .sort(),
-    ).toEqual(["de-offeneregister", "gb-companies-house"]);
+    ).toEqual(["de-offeneregister", "ee-ariregister", "gb-companies-house"]);
   });
 
   it("gives a country with no sweepable register its confirm connectors", () => {

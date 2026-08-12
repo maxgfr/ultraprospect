@@ -18,6 +18,7 @@ import { euVies } from "./eu-vies.js";
 import { fiPrh } from "./fi-prh.js";
 import { frSirene } from "./fr-sirene.js";
 import { deOffeneRegister } from "./de-offeneregister.js";
+import { eeAriregister } from "./ee-ariregister.js";
 import { gbCompaniesHouse } from "./gb-companies-house.js";
 import { gleif } from "./gleif.js";
 import { noBrreg } from "./no-brreg.js";
@@ -49,6 +50,7 @@ export const CONNECTORS: readonly RegistryConnector[] = [
   // refuses to name its holder, while this names who filed under an HRB number in
   // 2017-2019. An identity, even a dated one, beats an anonymous confirmation.
   deOffeneRegister,
+  eeAriregister,
   noBrreg,
   fiPrh,
   czAres,
@@ -179,6 +181,7 @@ export { euVies } from "./eu-vies.js";
 export { fiPrh } from "./fi-prh.js";
 export { frSirene } from "./fr-sirene.js";
 export { deOffeneRegister } from "./de-offeneregister.js";
+export { eeAriregister } from "./ee-ariregister.js";
 export { gbCompaniesHouse } from "./gb-companies-house.js";
 export { gleif } from "./gleif.js";
 export { noBrreg } from "./no-brreg.js";

@@ -77,8 +77,8 @@ A connector DECLARES what it can do, and the pipeline reads the declaration:
 
 | Capability | What it means | Who has it |
 |---|---|---|
-| `sweep` | Enumerate every company in a territory. **The SHAPE of the territory differs and the lane's `reason` names it**: France answers a bounding box, the UK a post town. | France, United Kingdom |
-| `snapshot` | The register publishes everything as one bulk file and offers no queryable API. `ingest` reads this. | United Kingdom, Germany |
+| `sweep` | Enumerate every company in a territory. **The SHAPE of the territory differs and the lane's `reason` names it**: France answers a bounding box, the UK a post town, Estonia an administrative unit. | France, United Kingdom, Estonia |
+| `snapshot` | The register publishes everything as one bulk file and offers no queryable API. `ingest` reads this. | United Kingdom, Germany, Estonia |
 | `lookup` | Find a company by name and locality. | most connectors |
 | `verifyId` | Confirm an identifier read off the company's own site, and return what the register filed under it. | most connectors |
 
@@ -93,20 +93,21 @@ is not a degraded sweep connector — it answers a different question, and
 Two registers publish a file instead of an API. Both are keyless, both are too
 large for a per-run path, and `ingest` fetches and indexes each once:
 
-| | Companies House | OffeneRegister (Germany) |
-|---|---|---|
-| File | `BasicCompanyDataAsOneFile-YYYY-MM-01.zip`, ~470 MB | `de_companies_ocdata.jsonl.bz2`, 260 MB |
-| Freshness | monthly, "within 5 working days of the previous month end" — so `ingest` tries this month and falls back to the previous two | **frozen: the file dates from 2019-02, its records from 2017-2019** |
-| Licence | Open Government Licence v3.0 | CC-BY 4.0, attribution to OpenCorporates |
-| Rows | 5 695 465 (measured) | 5 305 727 (measured) |
-| Disk after indexing | **~4.2 GB** (measured) | **~3.4 GB** (measured) |
-| Gives | a real `sweep` by post town, plus keyless `lookup`/`verifyId` | `lookup`/`verifyId`, and **the holder of an HRB number** |
+| | Companies House | OffeneRegister (Germany) | Äriregister (Estonia) |
+|---|---|---|---|
+| File | `BasicCompanyDataAsOneFile-YYYY-MM-01.zip`, ~470 MB | `de_companies_ocdata.jsonl.bz2`, 260 MB | `ettevotja_rekvisiidid__lihtandmed.csv.zip`, 18 MB |
+| Freshness | monthly, "within 5 working days of the previous month end" — so `ingest` tries this month and falls back to the previous two | **frozen: the file dates from 2019-02, its records from 2017-2019** | **rebuilt daily** |
+| Licence | Open Government Licence v3.0 | CC-BY 4.0, attribution to OpenCorporates | Estonian open data |
+| Rows | 5 695 465 (measured) | 5 305 727 (measured) | 376 025 (measured) |
+| Disk after indexing | **~4.2 GB** (measured) | **~3.4 GB** (measured) | **~640 MB** (measured) |
+| Gives | a real `sweep` by post town, plus keyless `lookup`/`verifyId` | `lookup`/`verifyId`, and **the holder of an HRB number** | a real `sweep` by administrative unit, plus `lookup`/`verifyId` by register code OR VAT number |
 
 `ingest --list` reports what is cached, its vintage and its size on disk. `ingest
 --country <cc> --forget` deletes one.
 
-Every record from a snapshot carries **`asOf`** — the date it was true. Absent
-means live. It travels into the CSV, the dossier fact sheet and the report, and
+Records from a snapshot carry **`asOf`** — the date they were true — UNLESS the
+source is rebuilt often enough that they are simply current, which Estonia's daily
+file is. Absent means live. It travels into the CSV, the dossier fact sheet and the report, and
 `check` will not let a dated record found a present-tense claim. That single field
 is what makes a seven-year-old German export usable rather than misleading: "was
 registered at, as of 2018-07" is a fact; "is registered at" is not one this run
@@ -150,6 +151,18 @@ nothing to remember elsewhere.
   them. Both now resolve to NO section and are reported under the register's own
   words. A dormant company in a prospect list is worth seeing; an extraterritorial
   organisation in Hebden Bridge is a fabrication.
+- **ee-ariregister** — keyless, 18 MB, and the FRESHEST register here: the export
+  is rebuilt daily, so its records carry no `asOf`. It sweeps by administrative
+  unit, and every level of the hierarchy is indexed — Estonia files Tallinn's
+  companies under its eight districts, never under "Tallinn", so indexing only the
+  full string would make a sweep of the capital return nothing while 59 000
+  companies sit in Kesklinn alone. Three traps in the file itself: it is
+  SEMICOLON-separated (every Estonian address contains commas), it carries a UTF-8
+  BOM (which turns the first column's name into `\uFEFFnimi` and every company
+  arrives nameless), and status is a letter where `L` (in liquidation, 9 052
+  companies) and `N` (bankrupt, 666) are neither active nor struck off — the
+  register's own word is kept in `national.statusText`. No activity code: EMTAK
+  lives in a separate export, so no scheme is declared rather than one invented.
 - **de-offeneregister** — keyless, from the ingested export, and the only source
   here that will tell you WHO holds a German `HRB` number. Data stops in 2019, so
   every record carries `asOf` and it declares no `sweep`: a 2018 enumeration

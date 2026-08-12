@@ -2,8 +2,9 @@
 
 **Turn a place into a prospect list you can defend.** Give it a town, a street
 or a radius; it sweeps OpenStreetMap worldwide, attaches whatever company
-register the country actually has — France and the UK can be enumerated outright,
-both without a key — and refuses to guess where guessing would be invisible.
+register the country actually has — France, the UK and Estonia can be enumerated
+outright, none of them needing a key — and refuses to guess where guessing would
+be invisible.
 
 Zero dependencies, no API keys, no install. One vendorable `engine.mjs`, a CLI,
 and a [skills.sh](https://skills.sh) agent skill. The web-retrieval half is
@@ -53,7 +54,7 @@ starts lying, so it is where most of the care went.
 Measured against the live services, and the single most important thing to
 understand about a run:
 
-**Two public registers can be enumerated without an API key, and they are not
+**Three public registers can be enumerated without an API key, and no two are
 enumerated the same way.** France's answers a bounding box over an API. The United
 Kingdom's publishes a monthly open-data snapshot of every live company — 470 MB of
 zipped CSV, no key, no registration — which `ingest` fetches once and which files
@@ -67,6 +68,7 @@ you got — `mode` is a column in the report's Coverage table:
 |---|---|---|
 | **sweep**, by area | The register was asked for every company inside the bounding box. The answer is a territory. | France |
 | **sweep**, by post town | The monthly snapshot holds every company the register files under that post town. A real enumeration, and **a post town is not a bounding box** — so it does not coincide with the OSM lane's geometry, and a company registered at its accountant's address in the next town is absent. | United Kingdom, after `ingest --country gb` |
+| **sweep**, by administrative unit | Estonia files companies by district, city and county, and every level is indexed — so both "Kesklinna linnaosa" and "Tallinn" resolve. Rebuilt **daily**, so its records need no date. | Estonia, after `ingest --country ee` |
 | **confirm** | OSM covered the ground; each company was then checked against the register one at a time. **A company absent from OpenStreetMap is absent from the run.** | everywhere else |
 
 ```bash
@@ -88,6 +90,7 @@ ultraprospect confirm --run <dir>              # reads it, asks the authority
 | United Kingdom | Companies House — monthly open-data snapshot | none | **sweep** by post town, lookup, verify — after `ingest --country gb` |
 | United Kingdom | Companies House REST API | free, email only | lookup, verify — a day fresher than the snapshot, and never required |
 | Germany | Handelsregister via the OffeneRegister export | none | lookup, verify — **and it names the HRB holder VIES will not**. Data stops in 2019; every record carries `asOf`. After `ingest --country de` |
+| Estonia | Äriregister open data | none | **sweep** by administrative unit, lookup, verify — 18 MB, **rebuilt daily**, 376 025 companies. After `ingest --country ee` |
 | Norway | Enhetsregisteret (Brønnøysund) | none | lookup, verify — exact headcount and the company's own website |
 | Finland | PRH / YTJ | none | lookup, verify |
 | Czechia | ARES | none | lookup, verify |
@@ -281,6 +284,8 @@ ultraprospect render  --run "$RUN"
 ultraprospect scan --where "Lyon" --section M --min-employees 20
 ultraprospect ingest --country gb                         # once: 470 MB, no key
 ultraprospect scan --where "Hebden Bridge" --country gb   # the UK register, enumerated
+ultraprospect ingest --country ee                         # 18 MB, rebuilt daily
+ultraprospect scan --where "Tartu" --country ee            # Estonia, enumerated
 ultraprospect scan --lat 52.5389 --long 13.4244 --radius 350m --country de
 ultraprospect scan --where "Nantes" --no-people          # organisation data only
 ultraprospect scan --record ./fixtures/x                 # record a replayable sweep
