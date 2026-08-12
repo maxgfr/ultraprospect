@@ -6909,8 +6909,10 @@ function licencesFor(lanes) {
   const out2 = [...LICENCES];
   for (const lane of lanes) {
     if (lane.lane !== "registry" || !lane.connectorId || lane.returned <= 0) continue;
-    const licence = connectorById(lane.connectorId)?.licence;
-    if (licence && !out2.includes(licence)) out2.push(licence);
+    for (const id of lane.connectorId.split(",")) {
+      const licence = connectorById(id.trim())?.licence;
+      if (licence && !out2.includes(licence)) out2.push(licence);
+    }
   }
   return out2;
 }

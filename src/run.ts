@@ -132,13 +132,28 @@ export const LICENCES = [
   "Geocoding: Nominatim (ODbL) and Base Adresse Nationale (Licence Ouverte 2.0)",
 ];
 
-/** The attributions this run actually owes, given which connectors returned data. */
+/**
+ * The attributions this run actually owes, given which connectors returned data.
+ *
+ * `connectorId` ON A CONFIRM LANE IS A LIST. `confirm` asks several authorities
+ * about each company and records every one that answered, joined with commas
+ * ("eu-vies,gleif"). Reading that as a single id resolved nothing, so a confirm
+ * run that used more than one connector shipped with NO register attribution at
+ * all — silently, and precisely on the runs where it matters: a German confirm
+ * always uses more than one, and OffeneRegister is CC-BY 4.0, where attribution
+ * is a licence CONDITION rather than a courtesy.
+ *
+ * A single-connector lane resolved fine, which is why this survived: the broken
+ * case and the working case look identical in the manifest apart from a comma.
+ */
 export function licencesFor(lanes: readonly LaneCoverage[]): string[] {
   const out = [...LICENCES];
   for (const lane of lanes) {
     if (lane.lane !== "registry" || !lane.connectorId || lane.returned <= 0) continue;
-    const licence = connectorById(lane.connectorId)?.licence;
-    if (licence && !out.includes(licence)) out.push(licence);
+    for (const id of lane.connectorId.split(",")) {
+      const licence = connectorById(id.trim())?.licence;
+      if (licence && !out.includes(licence)) out.push(licence);
+    }
   }
   return out;
 }

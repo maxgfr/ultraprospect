@@ -34,6 +34,7 @@ import { toRecord as prhRecord } from "../src/registry/fi-prh.js";
 import { expandRecord } from "../src/registry/fr-sirene.js";
 import { gbCompaniesHouse } from "../src/registry/gb-companies-house.js";
 import { CONNECTORS, connectorsFor } from "../src/registry/index.js";
+import { licencesFor } from "../src/run.js";
 
 describe("fi-prh", () => {
   // Trimmed from the live answer for businessId 0112038-9 (Nokia Oyj).
@@ -340,6 +341,22 @@ describe("the connector table", () => {
     // bounding box. Anything else gaining `sweep` needs the same treatment.
     const sweepers = CONNECTORS.filter((c) => c.sweep);
     expect(sweepers.map((c) => c.id).sort()).toEqual(["fr-sirene", "gb-companies-house"]);
+  });
+
+  it("carries EVERY answering connector's attribution, not just the first", () => {
+    // `confirm` records every authority that answered, joined with commas
+    // ("eu-vies,gleif"). Reading that as ONE id resolved nothing, so a confirm run
+    // using more than one connector shipped with no register attribution at all —
+    // and a German confirm always uses more than one, against a CC-BY source where
+    // attribution is a licence CONDITION rather than a courtesy. The broken case
+    // and the working case differed by a comma, which is why it survived.
+    const both = licencesFor([{ lane: "registry", mode: "confirm", connectorId: "eu-vies,gleif", requested: 5, returned: 5, truncated: false }]);
+    expect(both.some((l) => l.includes("VIES"))).toBe(true);
+    expect(both.some((l) => l.includes("GLEIF"))).toBe(true);
+    // A lane that returned nothing owes nothing: attributing a connector whose
+    // data is not in the run would be a false claim about provenance.
+    const empty = licencesFor([{ lane: "registry", connectorId: "eu-vies,gleif", requested: 5, returned: 0, truncated: false }]);
+    expect(empty.some((l) => l.includes("VIES"))).toBe(false);
   });
 
   it("declares a bulk snapshot only where the register publishes one", () => {

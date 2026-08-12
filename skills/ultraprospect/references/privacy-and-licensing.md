@@ -12,15 +12,25 @@ in the footer of whatever you produce — the CSV's companion README, the report
 the HTML page. Stripping them is a licence breach, not a formatting choice.
 
 **Register data carries its own licence, per connector** — France's is Licence
-Ouverte 2.0, Norway's is NLOD 2.0, the UK's is OGL v3.0, GLEIF's is CC0. The
-manifest lists ONLY the ones that actually answered, so a German run does not
-claim France's. Each requires attributing
-the source and the date of the extract. `manifest.builtAt` is that date.
+Ouverte 2.0, Norway's is NLOD 2.0, the UK's is OGL v3.0, GLEIF's is CC0, and
+Germany's is **CC-BY 4.0, where attribution is a CONDITION of the licence rather
+than a courtesy**: reuse without crediting OpenCorporates is simply not licensed.
+The manifest lists ONLY the connectors that actually answered, so a German run
+does not claim France's. Each requires attributing the source and the date of the
+extract. `manifest.builtAt` is that date — except for a snapshot record, where the
+date that matters is the record's own `asOf`.
 
 ```
 Places and tags: © OpenStreetMap contributors, ODbL
 French company data: base Sirene / RNE via recherche-entreprises.api.gouv.fr, Licence Ouverte 2.0
+UK company data: Companies House, Open Government Licence v3.0
+German company data: OffeneRegister.de / OpenCorporates, CC-BY 4.0
 ```
+
+**A confirm run owes SEVERAL register attributions, not one.** It asks every
+applicable authority about each company, so a German run typically owes VIES,
+GLEIF and OffeneRegister at once. `manifest.licences` already assembles them; take
+the list rather than the first entry.
 
 ## Company data and personal data are not the same thing
 
@@ -51,6 +61,22 @@ What that leaves you responsible for, if the file contains people:
 time, before anything is written. Not at render time: a run that never held the
 names cannot leak them through a cached page, a stray artifact, or someone
 reading `places.json` directly. Reaching for it is usually the cheaper choice.
+
+### The German export is the largest single source of personal data here
+
+`de-offeneregister` carries **officers** — directors, Geschäftsführer, Prokuristen
+— for a large share of its 5.3 million records. That is the connector's whole
+value (VIES answers `"---"` for a German holder and this names one) and it is also
+several million living people's names, so two things follow that do not follow for
+the other registers:
+
+- **`--no-people` matters more here than anywhere else.** It strips officers
+  wholesale, and a deliverable that is going to be shared, stored or sent to a
+  CRM should usually be produced with it.
+- **Every one of those names is dated.** The export stopped in 2019, so a person
+  named as a director is a person who was one THEN. Writing it in the present
+  tense is a claim about someone's current role that this run cannot support —
+  `check` fails a write-up that omits the date, and `PRIVACY.md` names the source.
 
 ## The rule the engine will not bend
 
