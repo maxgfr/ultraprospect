@@ -585,6 +585,51 @@ export async function snapshotById(connectorId: string, id: string, limit = 20):
 }
 
 /**
+ * Is an ingested snapshot still the newest the register publishes?
+ *
+ * One HEAD per source, comparing the upstream `Last-Modified` with the one recorded
+ * at ingest. The other half of keeping a cache honest: `staleSnapshots()` catches a
+ * cache older than the MAPPER, this catches one older than the DATA.
+ *
+ * Both matter and neither implies the other. A monthly product means a cache is out
+ * of date within weeks of being built, and nothing about querying it locally would
+ * ever say so — the answers just quietly describe last month.
+ */
+export async function snapshotFreshness(
+  connectorId: string,
+  source: SnapshotSource,
+): Promise<{ connectorId: string; ingested?: string; upstream?: string; behind: boolean; detail: string }> {
+  const meta = snapshotMeta(connectorId);
+  if (!meta) return { connectorId, behind: false, detail: "not ingested" };
+
+  for (const url of source.urls(new Date())) {
+    const res = await fetch(url, { method: "HEAD", headers: { "user-agent": politeUa() } }).catch(() => undefined);
+    if (!res?.ok) continue;
+    const upstream = res.headers.get("last-modified") ?? undefined;
+    // No Last-Modified either side means there is nothing to compare, which is not
+    // the same as being current — said as unknown rather than as fresh.
+    if (!upstream || !meta.lastModified) {
+      return {
+        connectorId,
+        ingested: meta.lastModified,
+        upstream,
+        behind: false,
+        detail: "the source publishes no Last-Modified, so freshness cannot be compared",
+      };
+    }
+    const behind = new Date(upstream).getTime() > new Date(meta.lastModified).getTime();
+    return {
+      connectorId,
+      ingested: meta.lastModified,
+      upstream,
+      behind,
+      detail: behind ? `the register published ${upstream}; this cache holds ${meta.lastModified}` : `current as of ${upstream}`,
+    };
+  }
+  return { connectorId, ingested: meta.lastModified, behind: false, detail: "no candidate URL answered — cannot tell" };
+}
+
+/**
  * Snapshots indexed by an older version of this tool.
  *
  * Reported rather than auto-rebuilt: re-ingesting is a large download and several

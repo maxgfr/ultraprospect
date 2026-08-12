@@ -1,0 +1,202 @@
+name: Bulk registers (real ingest)
+
+# Does the whole thing, for real, against today's files.
+#
+# The weekly canary in evals.yml asks the cheap question — is the URL still
+# served, is it still roughly the right size — with a HEAD request. That cannot
+# catch what actually breaks an ingest: a renamed CSV column, a changed field
+# separator, a BOM appearing or vanishing, a zip written by a different tool, an
+# export whose rows stopped carrying the identifier the connector indexes by. Every
+# one of those returns HTTP 200 and then produces zero usable records.
+#
+# So this job DOWNLOADS AND INDEXES all three bulk registers end to end and
+# asserts the result is usable. It is the only gate in this repository that
+# exercises the code path a user actually runs for the United Kingdom, Germany and
+# Estonia, and it exists because the alternative was finding out from a user.
+#
+# WHY NOTHING IS PUBLISHED. The obvious next step — commit or release the built
+# index so `ingest` becomes a fast download — was measured and rejected. The index
+# is EXPANDED for query speed, so it is larger than the file it came from: 493 MB
+# in, 4145 MB out for the UK; 260 MB in, 3377 MB out for Germany; 18 MB in, 627 MB
+# out for Estonia. Redistributing it would hand every user 8 to 35 times more bytes
+# than fetching from the register itself, and the UK index does not even fit in a
+# 2 GB release asset. It would also make this repository a CDN for other people's
+# open data, which both licences permit and neither invites. The registers are
+# already up to date at their origin; what was missing was proof that today's file
+# still works, and that is what this job is.
+#
+# Report-only, like the canaries: a register's bad afternoon is not a defect here.
+# But unlike a HEAD probe, a red run here means the ingest is genuinely broken for
+# everyone, so it opens an issue rather than only colouring a tab.
+on:
+  schedule:
+    # Monthly, on the 8th at 04:00 UTC. Companies House publishes "within 5 working
+    # days of the previous month end", so the 8th is the first date the current
+    # month's file is reliably there — running on the 1st would test the fallback
+    # path every single month and never the primary one.
+    - cron: "0 4 8 * *"
+  workflow_dispatch:
+    inputs:
+      country:
+        description: "Only this country (gb, de, ee). Empty means all three."
+        required: false
+        default: ""
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    # A full ingest is minutes of download plus minutes of indexing, three times.
+    timeout-minutes: 90
+    strategy:
+      # Never fail-fast: if the German export has moved, the British result is
+      # still worth knowing in the same run.
+      fail-fast: false
+      matrix:
+        country: [gb, de, ee]
+    name: ingest --country ${{ matrix.country }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Skip when a single country was requested and this is not it
+        id: gate
+        run: |
+          WANT="${{ github.event.inputs.country }}"
+          if [ -n "$WANT" ] && [ "$WANT" != "${{ matrix.country }}" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the bundle
+        if: steps.gate.outputs.run == 'true'
+        # The COMMITTED bundle is what a user runs, so that is what gets tested.
+        run: pnpm run build
+
+      - name: Disk before
+        if: steps.gate.outputs.run == 'true'
+        run: df -h /  | tail -1
+
+      - name: Ingest for real
+        if: steps.gate.outputs.run == 'true'
+        id: ingest
+        env:
+          # Out of the workspace: a 4 GB index inside the checkout would be picked
+          # up by anything that walks the repo, including the next step's globs.
+          ULTRAPROSPECT_CACHE_DIR: ${{ runner.temp }}/cache
+        run: |
+          set -o pipefail
+          node scripts/ultraprospect.mjs ingest --country ${{ matrix.country }} --json \
+            | tee "$RUNNER_TEMP/ingest.json"
+
+      - name: The result has to be USABLE, not merely present
+        if: steps.gate.outputs.run == 'true'
+        env:
+          ULTRAPROSPECT_CACHE_DIR: ${{ runner.temp }}/cache
+        # This is the part a HEAD request cannot do. A renamed column or a changed
+        # separator yields an ingest that "succeeds" with a handful of rows, or with
+        # rows carrying no identifier and no locality — findable by nothing. So the
+        # assertions are about whether the index can actually answer.
+        run: |
+          node --input-type=module -e '
+            const { readFileSync } = await import("node:fs");
+            const meta = JSON.parse(readFileSync(process.env.RUNNER_TEMP + "/ingest.json", "utf8"));
+            const country = "${{ matrix.country }}";
+            const bundle = await import(process.cwd() + "/scripts/ultraprospect.mjs");
+
+            const fail = (m) => { console.error("::error::" + m); process.exitCode = 1; };
+            const ok = (m) => console.log("  ok   " + m);
+
+            // FLOORS, not exact counts. A register grows and shrinks, and pinning a
+            // number here would go red every month for no reason. These are set well
+            // under the measured size, so only a collapse trips them.
+            const floors = { gb: 4_000_000, de: 4_000_000, ee: 250_000 };
+            if (meta.rows >= floors[country]) ok(`${meta.rows} records indexed`);
+            else fail(`only ${meta.rows} records indexed, floor is ${floors[country]} — the export shape has probably moved`);
+
+            // A mapper rejecting most of its input is drift, not data.
+            if (meta.skipped <= meta.rows) ok(`${meta.skipped} rows skipped, fewer than kept`);
+            else fail(`${meta.skipped} rows skipped against ${meta.rows} kept — the parser and the file disagree`);
+
+            if (meta.licence) ok(`attribution recorded: ${meta.licence}`);
+            else fail("no licence recorded — the attribution would not travel with the data");
+
+            // And the index has to ANSWER. One real place per country, chosen to be
+            // large enough that zero can only mean broken.
+            const towns = { gb: "Manchester", de: "Berlin", ee: "Tallinn" };
+            const connector = bundle.CONNECTORS.find((c) => c.id === meta.connectorId);
+            const swept = await connector.sweep
+              ? await connector.sweep({ query: towns[country], label: towns[country], lat: 0, lon: 0, bbox: [0,0,0,0], countryCode: country, source: "nominatim" }, { maxResults: 5000 }, {})
+              : undefined;
+            if (!connector.sweep) {
+              // Germany declares no sweep on purpose; prove `lookup` answers instead.
+              const hits = await connector.lookup({ names: ["GmbH"], countryCode: "de", locality: towns[country], limit: 3 }, {});
+              if (hits.length) ok(`lookup in ${towns[country]} returned ${hits.length}`);
+              else fail(`lookup in ${towns[country]} returned nothing — the locality index is not answering`);
+            } else if (swept.records.length > 0) {
+              ok(`sweep of ${towns[country]} returned ${swept.records.length}, mode=${swept.coverage.mode}`);
+              if (!swept.coverage.reason) fail("the lane returned records with no reason — coverage must say what shape it swept");
+            } else {
+              fail(`sweep of ${towns[country]} returned nothing — the locality index is not answering`);
+            }
+          '
+
+      - name: Disk after, and what it cost
+        if: always() && steps.gate.outputs.run == 'true'
+        env:
+          ULTRAPROSPECT_CACHE_DIR: ${{ runner.temp }}/cache
+        run: |
+          du -sh "$RUNNER_TEMP/cache/snapshots"/* 2>/dev/null || true
+          df -h / | tail -1
+
+      - name: Publish to the run summary
+        if: always() && steps.gate.outputs.run == 'true'
+        run: |
+          {
+            echo "## ingest --country ${{ matrix.country }}"
+            echo '```json'
+            cat "$RUNNER_TEMP/ingest.json" 2>/dev/null || echo "no output — the ingest did not get that far"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open an issue when a real ingest breaks
+        if: failure() && steps.gate.outputs.run == 'true' && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Unlike an upstream canary, this failing means the command is broken for
+        # every user of that country right now — not that somebody had a bad
+        # afternoon. One issue per country, reused rather than duplicated.
+        run: |
+          set -euo pipefail
+          RUN="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          LABEL="ingest-broken"
+          gh label create "$LABEL" --color B60205 --description "A bulk register ingest no longer works end to end" --force >/dev/null 2>&1 || true
+          TITLE="ingest --country ${{ matrix.country }} no longer works"
+          NUM=$(gh issue list --state open --label "$LABEL" --search "${{ matrix.country }} in:title" --limit 1 --json number --jq '.[0].number // empty')
+          BODY=$(printf '%s\n\n%s\n\n%s\n' \
+            "The monthly real ingest failed: ${RUN}" \
+            "This is not a transient upstream outage — the canary checks for those separately. It means downloading and indexing the current file no longer produces a usable index, so \`ingest --country ${{ matrix.country }}\` is broken for everyone until the connector is updated." \
+            "Most likely: a renamed column, a changed separator, a BOM added or removed, or rows that stopped carrying the identifier the connector indexes by.")
+          if [ -n "$NUM" ]; then gh issue comment "$NUM" --body "$BODY"; else gh issue create --title "$TITLE" --label "$LABEL" --body "$BODY"; fi
+
+      - name: Close the issue once the ingest works again
+        if: success() && steps.gate.outputs.run == 'true' && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          NUM=$(gh issue list --state open --label ingest-broken --search "${{ matrix.country }} in:title" --limit 1 --json number --jq '.[0].number // empty')
+          if [ -z "$NUM" ]; then exit 0; fi
+          gh issue close "$NUM" --comment "Working again: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+permissions:
+  contents: read
+  issues: write

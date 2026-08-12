@@ -30,6 +30,7 @@ import {
   listSnapshots,
   snapshotById,
   snapshotByLocality,
+  snapshotFreshness,
   snapshotKey,
   snapshotMeta,
   staleSnapshots,
@@ -79,6 +80,20 @@ describe("ingest — Companies House", () => {
     const meta = snapshotMeta("gb-companies-house")!;
     expect(meta.toolVersion).toBeTruthy();
     expect(staleSnapshots().map((m) => m.connectorId)).not.toContain("gb-companies-house");
+  });
+
+  it("does not reach the network to answer about a snapshot it has not got", async () => {
+    // `snapshotFreshness` is the half of cache honesty that needs the register:
+    // `staleSnapshots()` catches a cache older than the MAPPER, this catches one
+    // older than the DATA. Neither implies the other, and a monthly product means a
+    // local cache silently describes last month within weeks.
+    //
+    // Only the no-request branch is exercised here — tests/setup.ts forbids the
+    // network outright, and a mocked HEAD would prove the mock. The live path was
+    // measured against all three registers instead.
+    const absent = await snapshotFreshness("fr-sirene", companiesHouseSnapshot);
+    expect(absent.behind).toBe(false);
+    expect(absent.detail).toBe("not ingested");
   });
 
   it("does not split a company name on the comma inside it", () => {

@@ -40,7 +40,7 @@ import { loadFixture, recordFixture } from "./fixture.js";
 import { applyVerdicts, type MatchVerdict } from "./match.js";
 import { needsConfirming, persistConfirm, runConfirm } from "./confirm.js";
 import { CONNECTORS, servesCountry } from "./registry/index.js";
-import { forgetSnapshot, ingestSnapshot, listSnapshots, staleSnapshots, type SnapshotSource } from "./snapshot.js";
+import { forgetSnapshot, hasSnapshot, ingestSnapshot, listSnapshots, snapshotFreshness, staleSnapshots, type SnapshotSource } from "./snapshot.js";
 import { buildResolveTodo, needsResolving, runResolve, type WebHit } from "./resolve.js";
 import { newPageStore } from "./pages.js";
 import { enrichable, persistEnrich, runEnrich } from "./enrich.js";
@@ -145,6 +145,7 @@ export const BOOL_FLAGS = [
   "eco",
   "list",
   "forget",
+  "check",
   "stdout",
   "help",
   "version",
@@ -223,6 +224,8 @@ BULK OPEN DATA (ingest)
   --country <cc>         Which country's export to ingest: gb (Companies House, 470 MB),
                          de (Handelsregister via OffeneRegister, 260 MB). Both keyless.
   --list                 What is already in the cache: rows, vintage, size on disk.
+  --check                Ask each register whether it has published something newer.
+                         Exits 1 when a cache is behind, so a cron can act on it.
   --forget               Delete a country's ingested snapshot.
   --from-file <path>     Index a file already on disk instead of downloading one.
   --limit <n>            Stop after this many rows. For a first look at a new source.
@@ -338,6 +341,33 @@ async function cmdIngest(values: Record<string, string>, bools: ReadonlySet<stri
     }
     say("");
     say(`  cache: ${cacheDir()}`);
+    return EXIT_OK;
+  }
+
+  if (bools.has("check")) {
+    // One HEAD per ingested source. The other half of `--list`: that says what the
+    // cache HOLDS, this says whether the register has moved on since.
+    const results = [];
+    for (const connector of withSnapshots) {
+      if (!hasSnapshot(connector.id)) continue;
+      results.push(await snapshotFreshness(connector.id, connector.snapshot as SnapshotSource));
+    }
+    if (bools.has("json")) {
+      out(jsonLine({ snapshots: results }));
+      return results.some((r) => r.behind) ? EXIT_FAILURE : EXIT_OK;
+    }
+    if (results.length === 0) {
+      say("ingest --check: nothing ingested yet, so there is nothing to compare.");
+      return EXIT_OK;
+    }
+    for (const r of results) out(`${r.behind ? "STALE" : "ok   "}  ${r.connectorId.padEnd(22)} ${r.detail}`);
+    const behind = results.filter((r) => r.behind);
+    if (behind.length) {
+      say("");
+      for (const r of behind) say(`  re-run: ultraprospect ingest --country <cc>   # ${r.connectorId}`);
+      // Non-zero so a cron or a script can act on it, which is the point of asking.
+      return EXIT_FAILURE;
+    }
     return EXIT_OK;
   }
 

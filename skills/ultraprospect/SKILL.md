@@ -99,6 +99,7 @@ ultraprospect scan --where "Lyon" --section M --min-employees 20 --out ./runs
 ultraprospect ingest --country gb                             # Companies House monthly snapshot, 470 MB, keyless
 ultraprospect ingest --country de                             # the German register export, 260 MB, keyless
 ultraprospect ingest --list                                   # what is cached, which vintage, how much disk
+ultraprospect ingest --check                                  # has a register published something newer? exit 1 if so
 ultraprospect scan --where "Hebden Bridge" --country gb        # after ingest: the UK register IS enumerated
 ultraprospect scan --where "Berlin" --country de              # OSM sweeps the ground; the register comes later
 ultraprospect confirm --run <dir>                             # Impressum -> HRB/USt-IdNr -> the authority confirms

@@ -250,7 +250,7 @@ node scripts/ultraprospect.mjs --help
 | Command | What it does |
 |---|---|
 | `where <query>` | Resolve a place to a search area. Exits 2 with candidates when ambiguous. |
-| `ingest --country` | Fetch and index a register's bulk open-data export. Once; then every query is local. `--list` says what is cached. |
+| `ingest --country` | Fetch and index a register's bulk open-data export. Once; then every query is local. `--list` says what is cached, `--check` asks each register whether it has published something newer. |
 | `scan` | Sweep OSM over the area, and the register too where one can be swept. |
 | `match --apply` | Fold an adjudication of `MATCH.todo.json` back into the run. |
 | `confirm` | Attach a register identity company by company, where no sweep exists. |

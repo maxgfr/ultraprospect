@@ -5212,6 +5212,33 @@ async function snapshotById(connectorId, id, limit = 20) {
   }
   return out2.slice(0, limit);
 }
+async function snapshotFreshness(connectorId, source) {
+  const meta = snapshotMeta(connectorId);
+  if (!meta) return { connectorId, behind: false, detail: "not ingested" };
+  for (const url of source.urls(/* @__PURE__ */ new Date())) {
+    const res = await fetch(url, { method: "HEAD", headers: { "user-agent": politeUa() } }).catch(() => void 0);
+    if (!res?.ok) continue;
+    const upstream = res.headers.get("last-modified") ?? void 0;
+    if (!upstream || !meta.lastModified) {
+      return {
+        connectorId,
+        ingested: meta.lastModified,
+        upstream,
+        behind: false,
+        detail: "the source publishes no Last-Modified, so freshness cannot be compared"
+      };
+    }
+    const behind = new Date(upstream).getTime() > new Date(meta.lastModified).getTime();
+    return {
+      connectorId,
+      ingested: meta.lastModified,
+      upstream,
+      behind,
+      detail: behind ? `the register published ${upstream}; this cache holds ${meta.lastModified}` : `current as of ${upstream}`
+    };
+  }
+  return { connectorId, ingested: meta.lastModified, behind: false, detail: "no candidate URL answered \u2014 cannot tell" };
+}
 function staleSnapshots() {
   return listSnapshots().filter((m) => m.toolVersion !== VERSION);
 }
@@ -10624,6 +10651,7 @@ var BOOL_FLAGS = [
   "eco",
   "list",
   "forget",
+  "check",
   "stdout",
   "help",
   "version"
@@ -10701,6 +10729,8 @@ BULK OPEN DATA (ingest)
   --country <cc>         Which country's export to ingest: gb (Companies House, 470 MB),
                          de (Handelsregister via OffeneRegister, 260 MB). Both keyless.
   --list                 What is already in the cache: rows, vintage, size on disk.
+  --check                Ask each register whether it has published something newer.
+                         Exits 1 when a cache is behind, so a cron can act on it.
   --forget               Delete a country's ingested snapshot.
   --from-file <path>     Index a file already on disk instead of downloading one.
   --limit <n>            Stop after this many rows. For a first look at a new source.
@@ -10784,6 +10814,29 @@ async function cmdIngest(values, bools) {
     }
     say("");
     say(`  cache: ${cacheDir()}`);
+    return EXIT_OK;
+  }
+  if (bools.has("check")) {
+    const results = [];
+    for (const connector of withSnapshots) {
+      if (!hasSnapshot(connector.id)) continue;
+      results.push(await snapshotFreshness(connector.id, connector.snapshot));
+    }
+    if (bools.has("json")) {
+      out(jsonLine({ snapshots: results }));
+      return results.some((r) => r.behind) ? EXIT_FAILURE : EXIT_OK;
+    }
+    if (results.length === 0) {
+      say("ingest --check: nothing ingested yet, so there is nothing to compare.");
+      return EXIT_OK;
+    }
+    for (const r of results) out(`${r.behind ? "STALE" : "ok   "}  ${r.connectorId.padEnd(22)} ${r.detail}`);
+    const behind = results.filter((r) => r.behind);
+    if (behind.length) {
+      say("");
+      for (const r of behind) say(`  re-run: ultraprospect ingest --country <cc>   # ${r.connectorId}`);
+      return EXIT_FAILURE;
+    }
     return EXIT_OK;
   }
   const country = values.country?.trim().toLowerCase();
