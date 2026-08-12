@@ -60,6 +60,26 @@ import type { RegistryRecord } from "./registry/types.js";
 /** 256 shards: small enough that one scan is cheap, few enough to list at a glance. */
 const BUCKETS = 256;
 
+/**
+ * The version of the ON-DISK LAYOUT, bumped whenever a stored line changes shape.
+ *
+ * Separate from the package version, and that separation is the whole point. A
+ * cache is stale the moment the code that would have written it differs — but the
+ * package version does not move between commits, so two mapper changes inside one
+ * unreleased version left caches that a `toolVersion` comparison called current.
+ * Found by verifying the real indexes: two of three held lines written before
+ * identifier keys were stored beside each record, so `verifyId` could not have
+ * found anything in them, and nothing said so.
+ *
+ * Bump this when the stored line changes: a new field, a renamed one, a different
+ * nesting. Not for a mapper that only changes a VALUE — that is what re-ingesting
+ * on a fresh source handles.
+ *
+ *   1  { l, r }            the first layout
+ *   2  { l, k[], r }       identifier keys stored beside the record
+ */
+const LAYOUT_VERSION = 2;
+
 export type SnapshotFormat = "jsonl.bz2" | "csv.zip";
 
 /** One ingested row: the mapped record, plus every key it must be findable under. */
@@ -129,6 +149,15 @@ export interface SnapshotMeta {
    * stamped and `staleSnapshots()` names the ones that need re-ingesting.
    */
   toolVersion: string;
+  /**
+   * The on-disk layout the shards were written in.
+   *
+   * Compared rather than the tool version, because a cache written by a different
+   * LAYOUT cannot be read correctly at all, while one written by a different
+   * mapper is merely out of date. Absent means layout 1, from before this was
+   * recorded.
+   */
+  layoutVersion?: number;
   sourceUrl: string;
   /** The upstream's own Last-Modified, which is the closest thing to a real vintage. */
   lastModified?: string;
@@ -495,6 +524,7 @@ export async function ingestSnapshot(connectorId: string, source: SnapshotSource
   const meta: SnapshotMeta = {
     connectorId,
     toolVersion: VERSION,
+    layoutVersion: LAYOUT_VERSION,
     sourceUrl: used.url,
     lastModified: used.lastModified,
     vintage: source.vintage,
@@ -638,7 +668,19 @@ export async function snapshotFreshness(
  * fix never reaches a cache built before it.
  */
 export function staleSnapshots(): SnapshotMeta[] {
-  return listSnapshots().filter((m) => m.toolVersion !== VERSION);
+  return listSnapshots().filter((m) => m.toolVersion !== VERSION || (m.layoutVersion ?? 1) !== LAYOUT_VERSION);
+}
+
+/**
+ * Snapshots whose shards cannot be read correctly by this code at all.
+ *
+ * A stricter class than `staleSnapshots()`: a different MAPPER means the answers
+ * are out of date, a different LAYOUT means they are wrong. A layout-1 cache holds
+ * no identifier keys beside its records, so `verifyId` finds nothing in it and the
+ * only symptom is silence.
+ */
+export function unreadableSnapshots(): SnapshotMeta[] {
+  return listSnapshots().filter((m) => (m.layoutVersion ?? 1) !== LAYOUT_VERSION);
 }
 
 /** Drop a snapshot, for `ingest --forget`. */

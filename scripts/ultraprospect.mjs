@@ -4910,6 +4910,7 @@ async function openZipMember(path, entry) {
 
 // src/snapshot.ts
 var BUCKETS = 256;
+var LAYOUT_VERSION = 2;
 var root = () => join2(cacheDir(), "snapshots");
 var dir = (connectorId) => join2(root(), connectorId);
 function snapshotKey(raw) {
@@ -5145,6 +5146,7 @@ async function ingestSnapshot(connectorId, source, opts = {}) {
   const meta = {
     connectorId,
     toolVersion: VERSION,
+    layoutVersion: LAYOUT_VERSION,
     sourceUrl: used.url,
     lastModified: used.lastModified,
     vintage: source.vintage,
@@ -5240,7 +5242,10 @@ async function snapshotFreshness(connectorId, source) {
   return { connectorId, ingested: meta.lastModified, behind: false, detail: "no candidate URL answered \u2014 cannot tell" };
 }
 function staleSnapshots() {
-  return listSnapshots().filter((m) => m.toolVersion !== VERSION);
+  return listSnapshots().filter((m) => m.toolVersion !== VERSION || (m.layoutVersion ?? 1) !== LAYOUT_VERSION);
+}
+function unreadableSnapshots() {
+  return listSnapshots().filter((m) => (m.layoutVersion ?? 1) !== LAYOUT_VERSION);
 }
 function forgetSnapshot(connectorId) {
   const target = dir(connectorId);
@@ -10807,7 +10812,12 @@ async function cmdIngest(values, bools) {
         `${m.connectorId.padEnd(22)} ${String(m.rows).padStart(9)} records  ${(m.bytesOnDisk / 1e6).toFixed(0).padStart(5)} MB  vintage ${m.lastModified ?? m.vintage ?? "unknown"}${stale}`
       );
     }
-    for (const m of staleSnapshots()) {
+    for (const m of unreadableSnapshots()) {
+      say(
+        `  ${m.connectorId}: written in on-disk layout ${m.layoutVersion ?? 1}, which THIS build cannot read correctly \u2014 verifyId will find nothing in it. Re-run \`ingest --country <cc>\`.`
+      );
+    }
+    for (const m of staleSnapshots().filter((m2) => (m2.layoutVersion ?? 1) === 2)) {
       say(
         `  ${m.connectorId}: indexed by ultraprospect ${m.toolVersion || "(unstamped)"}, now ${VERSION}. Its records carry the OLD mapping \u2014 re-run \`ingest --country <cc>\` to pick up connector fixes.`
       );

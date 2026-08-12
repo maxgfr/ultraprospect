@@ -40,7 +40,16 @@ import { loadFixture, recordFixture } from "./fixture.js";
 import { applyVerdicts, type MatchVerdict } from "./match.js";
 import { needsConfirming, persistConfirm, runConfirm } from "./confirm.js";
 import { CONNECTORS, servesCountry } from "./registry/index.js";
-import { forgetSnapshot, hasSnapshot, ingestSnapshot, listSnapshots, snapshotFreshness, staleSnapshots, type SnapshotSource } from "./snapshot.js";
+import {
+  forgetSnapshot,
+  hasSnapshot,
+  ingestSnapshot,
+  listSnapshots,
+  snapshotFreshness,
+  staleSnapshots,
+  unreadableSnapshots,
+  type SnapshotSource,
+} from "./snapshot.js";
 import { buildResolveTodo, needsResolving, runResolve, type WebHit } from "./resolve.js";
 import { newPageStore } from "./pages.js";
 import { enrichable, persistEnrich, runEnrich } from "./enrich.js";
@@ -334,7 +343,14 @@ async function cmdIngest(values: Record<string, string>, bools: ReadonlySet<stri
     // Records are mapped at ingest time, so a connector fix never reaches a cache
     // built before it. Named rather than rebuilt: half a gigabyte is the
     // operator's call to spend, and saying nothing is the worse half of it.
-    for (const m of staleSnapshots()) {
+    // A wrong LAYOUT is worse than an old mapper: the shards cannot be read
+    // correctly at all, and the only symptom is a lookup that finds nothing.
+    for (const m of unreadableSnapshots()) {
+      say(
+        `  ${m.connectorId}: written in on-disk layout ${m.layoutVersion ?? 1}, which THIS build cannot read correctly — verifyId will find nothing in it. Re-run \`ingest --country <cc>\`.`,
+      );
+    }
+    for (const m of staleSnapshots().filter((m) => (m.layoutVersion ?? 1) === 2)) {
       say(
         `  ${m.connectorId}: indexed by ultraprospect ${m.toolVersion || "(unstamped)"}, now ${VERSION}. Its records carry the OLD mapping — re-run \`ingest --country <cc>\` to pick up connector fixes.`,
       );

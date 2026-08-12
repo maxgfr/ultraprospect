@@ -34,6 +34,7 @@ import {
   snapshotKey,
   snapshotMeta,
   staleSnapshots,
+  unreadableSnapshots,
 } from "../src/snapshot.js";
 
 const FIXTURES = join(import.meta.dirname, "fixtures", "snapshot");
@@ -70,6 +71,21 @@ describe("ingest — Companies House", () => {
     expect(meta.licence).toContain("Open Government Licence");
     expect(hasSnapshot("gb-companies-house")).toBe(true);
     expect(listSnapshots().map((m) => m.connectorId)).toContain("gb-companies-house");
+  });
+
+  it("stamps the ON-DISK LAYOUT apart from the tool version", () => {
+    // The two answer different questions and the difference is not academic. A
+    // different MAPPER means the answers are out of date; a different LAYOUT means
+    // they are wrong. Found by verifying the real indexes: two of three held lines
+    // written before identifier keys were stored beside each record, so `verifyId`
+    // could not have found anything in them — and `toolVersion` called them current,
+    // because the package version does not move between commits.
+    const meta = snapshotMeta("ee-ariregister")!;
+    expect(meta.layoutVersion).toBe(2);
+    expect(unreadableSnapshots().map((m) => m.connectorId)).not.toContain("ee-ariregister");
+    // An unstamped cache is layout 1 by assumption — conservative on purpose, since
+    // guessing it current is the failure that hides itself.
+    expect(staleSnapshots().map((m) => m.connectorId)).not.toContain("ee-ariregister");
   });
 
   it("stamps the tool version that indexed it, so a mapper fix is visible", () => {
