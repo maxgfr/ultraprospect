@@ -30,11 +30,20 @@ name: Bulk registers (real ingest)
 # everyone, so it opens an issue rather than only colouring a tab.
 on:
   schedule:
-    # Monthly, on the 8th at 04:00 UTC. Companies House publishes "within 5 working
-    # days of the previous month end", so the 8th is the first date the current
-    # month's file is reliably there — running on the 1st would test the fallback
-    # path every single month and never the primary one.
-    - cron: "0 4 8 * *"
+    # Weekly, Sundays at 04:00 UTC. Monthly was the wrong trade: a register can
+    # move its export on any day, and finding out up to four weeks later is barely
+    # better than finding out from a user. Sunday because the runners are quiet and
+    # nothing else in this repository fires then — engine-repin is daily at 06:09,
+    # the canary is Mondays at 06:00.
+    #
+    # A weekly cadence means some runs land in the first days of a month, when
+    # Companies House has not yet published the current file — it publishes "within
+    # 5 working days of the previous month end". That is deliberate now rather than
+    # avoided: `companiesHouseSnapshot.urls` offers three candidates (this month and
+    # the two before it) and `ingest` takes the first that answers, so those runs
+    # exercise the fallback path and the rest exercise the primary one. Both get
+    # tested every month instead of one of them never being tested at all.
+    - cron: "0 4 * * 0"
   workflow_dispatch:
     inputs:
       country:
@@ -182,7 +191,7 @@ jobs:
           TITLE="ingest --country ${{ matrix.country }} no longer works"
           NUM=$(gh issue list --state open --label "$LABEL" --search "${{ matrix.country }} in:title" --limit 1 --json number --jq '.[0].number // empty')
           BODY=$(printf '%s\n\n%s\n\n%s\n' \
-            "The monthly real ingest failed: ${RUN}" \
+            "The weekly real ingest failed: ${RUN}" \
             "This is not a transient upstream outage — the canary checks for those separately. It means downloading and indexing the current file no longer produces a usable index, so \`ingest --country ${{ matrix.country }}\` is broken for everyone until the connector is updated." \
             "Most likely: a renamed column, a changed separator, a BOM added or removed, or rows that stopped carrying the identifier the connector indexes by.")
           if [ -n "$NUM" ]; then gh issue comment "$NUM" --body "$BODY"; else gh issue create --title "$TITLE" --label "$LABEL" --body "$BODY"; fi
