@@ -120,6 +120,11 @@ jobs:
             const meta = JSON.parse(readFileSync(process.env.RUNNER_TEMP + "/ingest.json", "utf8"));
             const country = "${{ matrix.country }}";
             const bundle = await import(process.cwd() + "/scripts/ultraprospect.mjs");
+            // BEFORE touching a connector. `main()` does this on every CLI path;
+            // an importer has to do it itself, and until it does, `cacheDir()`
+            // reads the wrong env prefix and every connector reports that no
+            // snapshot was ingested — pointing at the register, from a bug here.
+            bundle.brandEngine();
 
             const fail = (m) => { console.error("::error::" + m); process.exitCode = 1; };
             const ok = (m) => console.log("  ok   " + m);
@@ -141,20 +146,32 @@ jobs:
             // And the index has to ANSWER. One real place per country, chosen to be
             // large enough that zero can only mean broken.
             const towns = { gb: "Manchester", de: "Berlin", ee: "Tallinn" };
+            const town = towns[country];
             const connector = bundle.CONNECTORS.find((c) => c.id === meta.connectorId);
-            const swept = await connector.sweep
-              ? await connector.sweep({ query: towns[country], label: towns[country], lat: 0, lon: 0, bbox: [0,0,0,0], countryCode: country, source: "nominatim" }, { maxResults: 5000 }, {})
-              : undefined;
+            if (!connector) fail(`no connector declares id ${meta.connectorId}`);
+
+            // ASKED FIRST, and separately, because the two failures look identical
+            // from the outside and have nothing to do with each other. A connector
+            // that cannot see the index reports zero records for every town, which
+            // reads as "the register changed its export" and sends the next reader
+            // to the upstream file — where there is nothing wrong.
+            const availability = connector.availability({});
+            if (availability.available) ok("the connector can see the index this run just wrote");
+            else fail(`the connector cannot see the index: ${availability.reason} — ingest wrote ${meta.bytesOnDisk} bytes, so this is the harness losing the cache directory, not the register`);
+
             if (!connector.sweep) {
               // Germany declares no sweep on purpose; prove `lookup` answers instead.
-              const hits = await connector.lookup({ names: ["GmbH"], countryCode: "de", locality: towns[country], limit: 3 }, {});
-              if (hits.length) ok(`lookup in ${towns[country]} returned ${hits.length}`);
-              else fail(`lookup in ${towns[country]} returned nothing — the locality index is not answering`);
-            } else if (swept.records.length > 0) {
-              ok(`sweep of ${towns[country]} returned ${swept.records.length}, mode=${swept.coverage.mode}`);
-              if (!swept.coverage.reason) fail("the lane returned records with no reason — coverage must say what shape it swept");
+              const hits = await connector.lookup({ names: ["GmbH"], countryCode: country, locality: town, limit: 3 }, {});
+              if (hits.length) ok(`lookup in ${town} returned ${hits.length}`);
+              else fail(`lookup in ${town} returned nothing — the locality index is not answering`);
             } else {
-              fail(`sweep of ${towns[country]} returned nothing — the locality index is not answering`);
+              const swept = await connector.sweep({ query: town, label: town, lat: 0, lon: 0, bbox: [0,0,0,0], countryCode: country, source: "nominatim" }, { maxResults: 5000 }, {});
+              if (swept.records.length > 0) {
+                ok(`sweep of ${town} returned ${swept.records.length}, mode=${swept.coverage.mode}`);
+                if (!swept.coverage.reason) fail("the lane returned records with no reason — coverage must say what shape it swept");
+              } else {
+                fail(`sweep of ${town} returned nothing — the locality index is not answering`);
+              }
             }
           '
 

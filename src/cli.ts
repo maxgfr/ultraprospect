@@ -82,6 +82,22 @@ import { VERSION } from "./version.js";
  */
 export { CONNECTORS } from "./registry/index.js";
 export { politeUa } from "./net.js";
+/**
+ * Exported because a connector reached through `CONNECTORS` cannot find the
+ * cache until somebody brands the engine.
+ *
+ * `main()` calls this first thing, so every CLI path is branded before it looks
+ * at anything. An importer of the bundle is not: `cacheDir()` resolves through
+ * the engine's env prefix, and until `configure()` has set that prefix to
+ * `ULTRAPROSPECT` the variable the user exported is simply not the variable
+ * being read. The snapshot then sits on disk where `ingest` put it while
+ * `hasSnapshot` reports there is none — which reads exactly like a broken
+ * ingest, and was diagnosed as one.
+ *
+ * Same failure as `politeUa` above, one layer down: what the bundle withholds,
+ * its consumers reimplement wrongly or do without.
+ */
+export { brandEngine } from "./engine.js";
 
 export const COMMANDS = [
   "where",
