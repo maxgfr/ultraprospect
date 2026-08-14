@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [3.0.1](https://github.com/maxgfr/ultraprospect/compare/v3.0.0...v3.0.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **ingest:** the gate could not see the index it had just written ([296af48](https://github.com/maxgfr/ultraprospect/commit/296af489cde4ed9c561ac01f26c5df9b13ed4ff0))
+
 # [3.0.0](https://github.com/maxgfr/ultraprospect/compare/v2.0.0...v3.0.0) (2026-08-12)
 
 
