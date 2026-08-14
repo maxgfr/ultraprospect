@@ -161,9 +161,19 @@ jobs:
 
             if (!connector.sweep) {
               // Germany declares no sweep on purpose; prove `lookup` answers instead.
-              const hits = await connector.lookup({ names: ["GmbH"], countryCode: country, locality: town, limit: 3 }, {});
-              if (hits.length) ok(`lookup in ${town} returned ${hits.length}`);
-              else fail(`lookup in ${town} returned nothing — the locality index is not answering`);
+              //
+              // NOT "GmbH", which this probe used to ask for and which returns zero
+              // however healthy the index is: `normalizeName` strips legal forms,
+              // so the needle normalises to "" and `lookup` refuses it — correctly,
+              // since every third German company is a GmbH and matching on it would
+              // match everything. The probe has to be a word the register does not
+              // treat as boilerplate. Measured on the real export: "Immobilien"
+              // answers in Berlin, "GmbH" cannot.
+              const needles = { de: "Immobilien" };
+              const needle = needles[country] ?? town;
+              const hits = await connector.lookup({ names: [needle], countryCode: country, locality: town, limit: 3 }, {});
+              if (hits.length) ok(`lookup of "${needle}" in ${town} returned ${hits.length}`);
+              else fail(`lookup of "${needle}" in ${town} returned nothing — the locality index is not answering`);
             } else {
               const swept = await connector.sweep({ query: town, label: town, lat: 0, lon: 0, bbox: [0,0,0,0], countryCode: country, source: "nominatim" }, { maxResults: 5000 }, {});
               if (swept.records.length > 0) {
