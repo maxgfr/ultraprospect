@@ -196,7 +196,7 @@ const TOOLS: ToolDecl[] = [
     name: "ultraprospect_render",
     title: "Write the deliverables",
     description:
-      "Writes PROSPECTS.csv (flat, CRM-shaped, score and fit in separate columns, each contact's source page beside it), prospects.json, REPORT.md and a self-contained index.html that makes no network requests. The report's opening sentence is DERIVED from the lanes, so it cannot claim a sweep the run did not perform, and a truncated run leads with that. If PRIVACY.md appears in the file list, the run holds named individuals.",
+      "Writes PROSPECTS.csv (flat, CRM-shaped, score and fit in separate columns, each contact's source page beside it), prospects.json, REPORT.md and a self-contained index.html that makes no network requests. Both documents carry what the run knows rather than a summary of it: which connector answered and what attached each record, what the run was narrowed to, the score broken into its terms, every fit verdict verbatim, each contact with the page id it was read from. The report's opening sentence is DERIVED from the lanes, so it cannot claim a sweep the run did not perform; a truncated run and a dated register record each lead with that. If PRIVACY.md appears in the file list, the run holds named individuals.",
     inputSchema: {
       type: "object",
       properties: {

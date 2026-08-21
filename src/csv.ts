@@ -13,7 +13,7 @@
 import { sizeBandLabel } from "./registry/index.js";
 import { ranked } from "./score.js";
 import type { Place } from "./types.js";
-import { csvRow } from "./util.js";
+import { csvRow, streetLine } from "./util.js";
 
 export interface CsvOptions {
   /** Drop every named individual and personal address. */
@@ -93,17 +93,6 @@ function keep(place: Place, opts: CsvOptions): boolean {
   return true;
 }
 
-function streetOf(place: Place): string {
-  const a = place.address;
-  const type = a.typeVoie?.trim();
-  const name = a.libelleVoie?.trim();
-  // A house number with no street is not an address — OSM nodes often carry
-  // `addr:housenumber` alone, and rendering it produces the line "address: 20".
-  if (!name) return type ? [a.numero, type].filter(Boolean).join(" ") : "";
-  const prefixed = type ? new RegExp(`^${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name) : false;
-  return [a.numero, prefixed ? undefined : type, name].filter(Boolean).join(" ");
-}
-
 export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
   const rows: string[] = [csvRow(HEADER)];
 
@@ -150,7 +139,7 @@ export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
         place.registry?.asOf ?? "",
         s?.isHeadOffice ? "yes" : s ? "no" : "",
         s?.dateCreated ?? "",
-        streetOf(place),
+        streetLine(place.address),
         place.address.codePostal ?? "",
         place.address.commune ?? "",
         place.address.codeCommune ?? "",

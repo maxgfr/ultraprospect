@@ -13,29 +13,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { vocabularyOf } from "./classification/index.js";
 import { sizeBandLabel } from "./registry/index.js";
-import type { Place, PostalAddress, RunManifest } from "./types.js";
+import type { Place, RunManifest } from "./types.js";
+import { streetLine } from "./util.js";
 
 /** Where a place's write-up goes, relative to the run. */
 export function dossierPathFor(place: Place): string {
   return join("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
-}
-
-/**
- * The street line, without saying the street type twice.
- *
- * The register keeps `type_voie` and `libelle_voie` apart ("AVENUE" / "DE
- * NOGENT"); OSM's `addr:street` is the whole thing ("Avenue de Nogent"). A
- * merged place can hold one of each, and joining them blindly produces
- * "3 AVENUE Avenue de Nogent".
- */
-function streetLine(a: PostalAddress): string {
-  const type = a.typeVoie?.trim();
-  const name = a.libelleVoie?.trim();
-  // A house number with no street is not an address — OSM nodes often carry
-  // `addr:housenumber` alone, and rendering it produces the line "address: 20".
-  if (!name) return type ? [a.numero, type].filter(Boolean).join(" ") : "";
-  const alreadyPrefixed = type ? new RegExp(`^${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name) : false;
-  return [a.numero, alreadyPrefixed ? undefined : type, name].filter(Boolean).join(" ");
 }
 
 /**

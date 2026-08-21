@@ -70,6 +70,37 @@ export const DEFAULT_WEIGHTS: ScoreWeights = {
   staleRole: 8,
 };
 
+/**
+ * What each term of `score.parts` measured, in words.
+ *
+ * Lives beside the weights because the two drift together: a term added to
+ * `scoreOf` without a label here shows up in the page as a bare camelCase key,
+ * which is the tell that the breakdown is being rendered from data nobody
+ * described. A missing key renders as the key itself rather than as nothing —
+ * an unlabelled term is still a term the reader is entitled to argue with.
+ */
+export const SCORE_PART_LABELS: Record<string, string> = {
+  hasSite: "website corroborated",
+  siteWorks: "site responds",
+  fresh: "recently updated",
+  // NOT "pages read": the panel also prints how many extracts are stored for
+  // the place, which is a different number (the store accumulates across enrich
+  // passes; this term is what the last pass could reach). One label over two
+  // quantities in one panel reads as a rendering fault.
+  depth: "pages we could read",
+  hiring: "hiring",
+  openRoles: "open roles",
+  size: "headcount",
+  revenue: "revenue filed",
+  registered: "register identity",
+  contactable: "contactable",
+  ecommerce: "sells online",
+  pricing: "pricing published",
+  matchedRoles: "roles matching the brief",
+  termMatches: "your terms, on their site",
+  staleRole: "a role open 90+ days",
+};
+
 function daysSince(iso: string | undefined): number | undefined {
   if (!iso) return undefined;
   const t = Date.parse(iso);

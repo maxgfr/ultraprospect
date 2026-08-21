@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CSV_COLUMNS, toCsv } from "../src/csv.js";
-import { buildHtml, buildPrivacyNote, buildReport } from "../src/render.js";
+import { buildHtml, buildPrivacyNote, buildReport, HTML_ROW_CAP } from "../src/render.js";
 import { buildDelta, diffRuns, identityOf } from "../src/watch.js";
 import type { Place, RunManifest } from "../src/types.js";
 import { rec } from "./factories.js";
@@ -17,6 +17,21 @@ function place(over: Partial<Place> = {}): Place {
     ...over,
   };
 }
+
+/** A signals block with every list present and nothing claimed. */
+const signals = {
+  hasWebsite: true,
+  pageCount: 1,
+  openRoles: 0,
+  termMentions: [],
+  atsProviders: [],
+  analytics: [],
+  techStack: [],
+  hasPricingPage: false,
+  hasEcommerce: false,
+  languages: [],
+  socialProfiles: [],
+};
 
 function manifest(over: Partial<RunManifest> = {}): RunManifest {
   return {
@@ -244,6 +259,112 @@ describe("REPORT.md", () => {
     expect(buildReport([place({ registry: rec({}) })], manifest())).not.toContain("Some register records are dated");
   });
 
+  // A pipe inside a company name silently splits a markdown row into two
+  // columns. The Hamburg run shipped `| 5 | Schäfer | Group | 56 | strong |` —
+  // a real company, and a table that read a score of "strong" from then on.
+  it("escapes a pipe in a company name rather than splitting the row", () => {
+    const p = place({ name: "Schäfer | Group", score: { total: 56, parts: {} } });
+    const report = buildReport([p], manifest());
+    const rankedRow = report.split("\n").find((line) => line.includes("Schäfer"))!;
+    expect(rankedRow).toContain("Schäfer \\| Group");
+    // Nine columns of content, so ten cells once split on the delimiters.
+    expect(rankedRow.split(/(?<!\\)\|/)).toHaveLength(11);
+  });
+
+  it("escapes a pipe in the hiring table too", () => {
+    const p = place({
+      name: "A | B",
+      signals: { ...signals, isHiring: true, openRoles: 2, atsProviders: ["personio"] },
+    });
+    const hiring = buildReport([p], manifest()).split("## Who is hiring")[1]!.split("##")[0]!;
+    expect(hiring).toContain("A \\| B");
+  });
+
+  it("quotes the verdict somebody wrote, verbatim", () => {
+    // `why` and `angle` are the most expensive fields in a run — a person read a
+    // dossier and decided — and they reached no deliverable at all. Verbatim,
+    // because a judgement paraphrased by the tool carrying it is no longer that
+    // person's judgement.
+    const why = "A DevOps role has been open 305 days on their Personio board.";
+    const angle = "Write to the opening directly.";
+    const report = buildReport([place({ score: { total: 81, parts: {}, fit: "strong", why, angle } })], manifest());
+    expect(report).toContain("## Judged (1 of 1)");
+    expect(report).toContain(`**Why.** ${why}`);
+    expect(report).toContain(`**Angle.** ${angle}`);
+  });
+
+  it("says an empty Fit column means unread, not rejected", () => {
+    const judged = place({ id: "a", score: { total: 80, parts: {}, fit: "strong", why: "yes" } });
+    const report = buildReport([judged, place({ id: "b" }), place({ id: "c" })], manifest());
+    expect(report).toContain("2 companies carry a measured score and no verdict");
+    expect(report).toContain("not because they were rejected");
+    // And no section at all when nobody has judged anything: a "Judged (0)"
+    // heading is a heading that trains a reader to skip the section.
+    expect(buildReport([place()], manifest())).not.toContain("## Judged");
+  });
+
+  it("names what the run was narrowed to, and stays quiet when it was not", () => {
+    // A run filtered to `office` tags produces an activity table that is 99%
+    // "office", which reads as a broken taxonomy rather than as the answer to
+    // the question that was actually asked.
+    const narrowed = buildReport([place()], manifest({ filters: { osmGroups: ["office"], includeCeased: false } }));
+    expect(narrowed).toContain("What this run looked for: OSM `office` tags only");
+    // Excluding ceased companies is the default; a default reported as a finding
+    // trains a reader to skip the section that matters.
+    expect(narrowed).not.toContain("ceased companies");
+    expect(buildReport([place()], manifest({ filters: { osmGroups: "all", includeCeased: false } }))).not.toContain("What this run looked for");
+  });
+
+  it("counts repeated run notes instead of drowning in them", () => {
+    // The report printed `notes.slice(-25)` — the last 25 of 1 447 on a real run
+    // — so twenty-five near-identical VIES lines pushed every lane summary out
+    // of the window. Repetition is information; it is counted, not reprinted.
+    const notes = ["confirm: 144 verified, 810 matched by name", ...Array.from({ length: 40 }, () => "vies: DE032000000 is not registered")];
+    const report = buildReport([place()], manifest({ notes }));
+    expect(report).toContain("## Run notes (2 distinct of 41)");
+    expect(report).toContain("- ×40 vies: DE032000000 is not registered");
+    // The lane summary is what describes the run, so it survives and it leads.
+    expect(report).toContain("- confirm: 144 verified, 810 matched by name");
+    const lines = report
+      .split("## Run notes")[1]!
+      .split("\n")
+      .filter((l) => l.startsWith("- "));
+    expect(lines[0]).toContain("confirm:");
+  });
+
+  it("does not report zero hiring on a run that never read a site", () => {
+    // Straight off the Vincennes fixture: `scan` alone produced
+    // "0 hiring right now · 0 not hiring", which reads as "we looked and found
+    // nobody". Nobody had looked. Same rule as the three-valued `isHiring`,
+    // applied one level up.
+    const report = buildReport([place(), place({ id: "b" })], manifest());
+    expect(report).not.toContain("0 hiring right now");
+    expect(report).toContain("no site in this run has been read yet");
+    expect(report).toContain("unknown rather than absent");
+    // And on a run that did enrich, the counts come back.
+    expect(buildReport([place({ signals: { ...signals, isHiring: false } })], manifest())).toContain("0 hiring right now");
+  });
+
+  it("counts the companies whose site was never read apart from the ones not hiring", () => {
+    const report = buildReport([place({ id: "a", signals: { ...signals, isHiring: false } }), place({ id: "b" })], manifest());
+    expect(report).toContain("1 whose site was never read at all");
+  });
+
+  it("says which register answered, and how it was persuaded", () => {
+    // A run backed by confirmed registration numbers and one backed by name
+    // lookups are not the same run, and neither fact reached a reader.
+    const report = buildReport(
+      [
+        place({ id: "a", registry: rec({ connectorId: "gleif" }), registryEvidence: { mode: "confirm", how: "verified-id" } }),
+        place({ id: "b", registry: rec({ connectorId: "de-offeneregister" }), registryEvidence: { mode: "confirm", how: "name-lookup" } }),
+      ],
+      manifest(),
+    );
+    expect(report).toContain("Register records by connector: gleif 1 · de-offeneregister 1");
+    expect(report).toContain("1 by a published registration number");
+    expect(report).toContain("1 by a name lookup");
+  });
+
   it("reports unreadable job boards separately from companies that are not hiring", () => {
     const base = {
       hasWebsite: true,
@@ -301,6 +422,125 @@ describe("index.html", () => {
 
   it("shows the truncation banner when the run is partial", () => {
     expect(buildHtml([place()], manifest({ truncated: true }))).toContain("does not cover the whole territory");
+  });
+
+  // Everything below is what the page was missing: the run reads contacts, roles,
+  // register identities and a thirteen-term score, and rendered a seven-column
+  // table. A run that had read 1 116 pages looked exactly like one that read none.
+  const rich = place({
+    name: "WPS",
+    lat: 53.58,
+    lon: 10.01,
+    score: {
+      total: 81,
+      parts: { hasSite: 10, hiring: 15, staleRole: 8 },
+      fit: "strong",
+      why: "A DevOps role has been open 305 days.",
+      angle: "Write to the opening directly.",
+    },
+    website: { url: "https://www.wps.de/", confidence: "corroborated", evidence: ["P340"] },
+    contacts: {
+      emails: [{ value: "info@wps.de", from: "P1587", lane: "web" }],
+      phones: [{ value: "+49402294990", from: "P1587", lane: "web" }],
+      socials: [],
+      people: [],
+    },
+    jobs: [{ title: "DevOps Engineer", location: "Hamburg", via: "personio", url: "https://example.invalid/job" }],
+    registry: rec({ connectorId: "gleif", id: "9676009W8TU4WAOPEI88", legalName: "WPS - Workplace Solutions GmbH" }),
+    legalIds: [{ kind: "vat", value: "DE118593050", status: "attested", authority: "eu-vies", note: "DE discloses no name" }],
+    signals: { ...signals, isHiring: true, openRoles: 1, cms: "TYPO3", pageCount: 4 },
+    pages: ["P340", "P1587"],
+  });
+  const detailed = buildHtml([rich], manifest());
+
+  it("renders the verdict a person wrote", () => {
+    expect(detailed).toContain("A DevOps role has been open 305 days.");
+    expect(detailed).toContain("Write to the opening directly.");
+  });
+
+  it("renders each contact with the page it was read from", () => {
+    // The page id is the whole basis of the citation gate. A contact rendered
+    // without it cannot be audited by whoever ends up emailing it.
+    expect(detailed).toContain("info@wps.de");
+    expect(detailed).toContain("[P1587]");
+    expect(detailed).toContain("mailto:info@wps.de");
+  });
+
+  it("renders the open roles, the register identity and the score breakdown", () => {
+    expect(detailed).toContain("DevOps Engineer");
+    expect(detailed).toContain("9676009W8TU4WAOPEI88");
+    expect(detailed).toContain("WPS - Workplace Solutions GmbH");
+    // The parts are what make a ranking arguable rather than believed.
+    expect(detailed).toContain("website corroborated");
+    expect(detailed).toContain("a role open 90+ days");
+  });
+
+  it("does not let an attested identifier read as a verified one", () => {
+    // VIES will confirm a German VAT number is live and refuse to say whose it
+    // is. That is a real, citable fact and it is NOT an identity.
+    expect(detailed).toContain("DE118593050");
+    expect(detailed).toContain(">attested<");
+  });
+
+  it("escapes markup inside a verdict, not only inside a name", () => {
+    const nasty = buildHtml([place({ score: { total: 1, parts: {}, fit: "strong", why: "<script>alert(1)</script>", angle: "<b>x</b>" } })], manifest());
+    expect(nasty).not.toContain("<script>alert(1)</script>");
+    expect(nasty).toContain("&lt;script&gt;");
+  });
+
+  it("still makes no network request once it carries contacts and links", () => {
+    // mailto: and tel: are handoffs to another application, not requests, and
+    // an external link is only followed if a reader clicks it. The promise is
+    // that OPENING the page reaches nobody.
+    expect(detailed).not.toMatch(/<script[^>]+src=/i);
+    expect(detailed).not.toMatch(/<link[^>]+stylesheet/i);
+    expect(detailed).not.toMatch(/<img/i);
+    expect(detailed).not.toMatch(/@import|url\(https?:/i);
+    expect(detailed).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|sendBeacon|new WebSocket|EventSource|\bimport\s*\(/i);
+  });
+
+  it("does not put a zero under 'hiring now' when no site was read", () => {
+    const html = buildHtml([place()], manifest());
+    expect(html).toContain("hiring: no site read yet, so unknown rather than none");
+    expect(html).not.toContain("open roles</span>");
+    expect(buildHtml([place({ signals: { ...signals, isHiring: false } })], manifest())).toContain("open roles</span>");
+  });
+
+  it("carries the dated-register warning the report has always carried", () => {
+    // The page was the safer-looking of the two documents about exactly the fact
+    // that makes it less safe.
+    const html = buildHtml([place({ registry: rec({ asOf: "2018-11-01" }) })], manifest());
+    expect(html).toContain("Some register records are dated");
+    expect(html).toContain("2018");
+    expect(buildHtml([place({ registry: rec({}) })], manifest())).not.toContain("Some register records are dated");
+  });
+
+  it("says on the page what the run was narrowed to", () => {
+    const html = buildHtml([place()], manifest({ filters: { osmGroups: ["office"] } }));
+    expect(html).toContain("What this run looked for:");
+    expect(html).toContain("OSM `office` tags only");
+    expect(buildHtml([place()], manifest())).not.toContain("What this run looked for");
+  });
+
+  it("puts the coverage table on the page, not only in the report", () => {
+    const html = buildHtml(
+      [place()],
+      manifest({
+        lanes: [
+          { lane: "osm", requested: 0, returned: 40, truncated: false },
+          { lane: "registry", mode: "confirm", connectorId: "eu-vies", requested: 40, returned: 12, truncated: false },
+        ],
+      }),
+    );
+    expect(html).toContain("Coverage — what this run actually asked");
+    expect(html).toContain("<td>confirm</td>");
+  });
+
+  it("shows every panel when JavaScript is switched off", () => {
+    // The panel is markup rather than something the script builds, so a browser
+    // with scripting off shows everything rather than nothing.
+    expect(detailed).toContain("<noscript>");
+    expect(detailed).toMatch(/<noscript><style>[^<]*tr\.d\{display:table-row\}/);
   });
 
   it("does not call a confirmed territory swept in the subtitle either", () => {
@@ -417,9 +657,13 @@ describe("buildHtml is usable at the size a real run produces", () => {
   it("says so when the table shows fewer rows than the run holds", () => {
     // The page caps the table so a browser can open it. Capping is fine;
     // capping SILENTLY is the one thing this tool refuses everywhere else —
-    // a reader counting rows would conclude the territory holds 500 companies.
-    const html = buildHtml(many(854), manifest());
-    expect(html).toMatch(/showing .*500.* of .*854/i);
+    // a reader counting rows would conclude the territory stops at the cap.
+    //
+    // Asserted against the exported constant rather than against a number typed
+    // here: this test used to hardcode 500 and started failing the day the cap
+    // moved, which tested the number instead of the disclosure.
+    const html = buildHtml(many(HTML_ROW_CAP + 354), manifest());
+    expect(html).toMatch(new RegExp(`showing .*${HTML_ROW_CAP}.* of .*${HTML_ROW_CAP + 354}`, "i"));
   });
 
   it("says nothing about a cap when there was none", () => {

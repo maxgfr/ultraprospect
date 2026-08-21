@@ -1392,9 +1392,9 @@ function extractJsonLd(html) {
   }
   return out2;
 }
-function tagText(block, ...names) {
+function tagText(block2, ...names) {
   for (const name of names) {
-    const m = new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)<\\/${name}>`, "i").exec(block);
+    const m = new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)<\\/${name}>`, "i").exec(block2);
     if (!m) continue;
     const raw = m[1];
     const inner = /<!\[CDATA\[([\s\S]*?)\]\]>/.exec(raw)?.[1] ?? raw;
@@ -1407,13 +1407,13 @@ function parseSitemap(xml) {
   const out2 = { urls: [], sitemaps: [] };
   const isIndex = /<sitemapindex\b/i.test(xml);
   for (const m of xml.matchAll(/<(sitemap|url)\b[\s\S]*?<\/\1>/gi)) {
-    const block = m[0];
-    const loc = tagText(block, "loc");
+    const block2 = m[0];
+    const loc = tagText(block2, "loc");
     if (!loc) continue;
     if (isIndex || m[1].toLowerCase() === "sitemap") {
       out2.sitemaps.push(loc);
     } else {
-      const lastmod = tagText(block, "lastmod");
+      const lastmod = tagText(block2, "lastmod");
       out2.urls.push({ loc, ...lastmod ? { lastmod } : {} });
     }
   }
@@ -2366,8 +2366,8 @@ function firstProse(file) {
     return void 0;
   }
   const body = text2.startsWith("---\n") ? text2.slice(text2.indexOf("\n---", 3) + 4) : text2;
-  for (const block of body.split(/\n\s*\n/)) {
-    const line = block.trim();
+  for (const block2 of body.split(/\n\s*\n/)) {
+    const line = block2.trim();
     if (!line || line.startsWith("#") || line.startsWith(">") || line.startsWith("|") || line.startsWith("```")) continue;
     const flat = line.replace(/\s+/g, " ").replace(/[*`]/g, "");
     return flat.length > 300 ? `${flat.slice(0, 297)}\u2026` : flat;
@@ -4131,6 +4131,13 @@ function bboxAround(lat, lon, radiusM) {
   const dLon = radiusM / (111320 * Math.max(0.01, Math.cos(lat * Math.PI / 180)));
   return [lat - dLat, lat + dLat, lon - dLon, lon + dLon];
 }
+function streetLine(a) {
+  const type = a.typeVoie?.trim();
+  const name = a.libelleVoie?.trim();
+  if (!name) return type ? [a.numero, type].filter(Boolean).join(" ") : "";
+  const prefixed = type ? new RegExp(`^${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name) : false;
+  return [a.numero, prefixed ? void 0 : type, name].filter(Boolean).join(" ");
+}
 function csvField(value) {
   const s = value === void 0 || value === null ? "" : String(value);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -4995,7 +5002,7 @@ async function* linesOf(stream) {
 }
 async function* csvRecords(stream, delimiter = ",") {
   let field = "";
-  let row = [];
+  let row2 = [];
   let quoted = false;
   let pending = false;
   let atStart = true;
@@ -5024,16 +5031,16 @@ async function* csvRecords(stream, delimiter = ",") {
         continue;
       }
       if (c === delimiter) {
-        row.push(field);
+        row2.push(field);
         field = "";
         pending = true;
         continue;
       }
       if (c === "\n" || c === "\r") {
-        if (field.length || row.length || pending) {
-          row.push(field);
-          yield row;
-          row = [];
+        if (field.length || row2.length || pending) {
+          row2.push(field);
+          yield row2;
+          row2 = [];
           field = "";
           pending = false;
         }
@@ -5043,17 +5050,17 @@ async function* csvRecords(stream, delimiter = ",") {
       pending = true;
     }
   }
-  if (field.length || row.length) {
-    row.push(field);
-    yield row;
+  if (field.length || row2.length) {
+    row2.push(field);
+    yield row2;
   }
 }
 async function* rowsOf(source, path) {
   if (source.format === "jsonl.bz2") {
     const compressed = readFileSync2(path);
     let tail = "";
-    for (const block of bunzip2Blocks(compressed)) {
-      const text2 = tail + Buffer.from(block).toString("utf8");
+    for (const block2 of bunzip2Blocks(compressed)) {
+      const text2 = tail + Buffer.from(block2).toString("utf8");
       const parts = text2.split("\n");
       tail = parts.pop() ?? "";
       for (const line of parts) {
@@ -5078,13 +5085,13 @@ async function* rowsOf(source, path) {
   const csv = entries.find((e) => e.name.toLowerCase().endsWith(".csv"));
   if (!csv) throw new Error(`no CSV member in ${path} (found: ${entries.map((e) => e.name).join(", ") || "nothing"})`);
   let header2;
-  for await (const row of csvRecords(await openZipMember(path, csv), source.delimiter)) {
+  for await (const row2 of csvRecords(await openZipMember(path, csv), source.delimiter)) {
     if (!header2) {
-      header2 = row.map((h) => h.trim());
+      header2 = row2.map((h) => h.trim());
       continue;
     }
     const obj = {};
-    for (const [i, key] of header2.entries()) obj[key] = (row[i] ?? "").trim();
+    for (const [i, key] of header2.entries()) obj[key] = (row2[i] ?? "").trim();
     yield obj;
   }
 }
@@ -5335,14 +5342,14 @@ var offeneRegisterSnapshot = {
   approxBytes: 260455433,
   // Measured on a full ingest: 5 305 727 records, 3377 MB.
   approxDiskBytes: 34e8,
-  parse(row) {
-    const attrs = row?.all_attributes ?? {};
-    const name = row?.name?.trim();
+  parse(row2) {
+    const attrs = row2?.all_attributes ?? {};
+    const name = row2?.name?.trim();
     const native = attrs.native_company_number;
     if (!name || !native) return void 0;
     const { court, kind, number } = splitNativeNumber(native);
     const town = attrs.registered_office?.trim();
-    const asOf = typeof row.retrieved_at === "string" ? row.retrieved_at.slice(0, 10) : void 0;
+    const asOf = typeof row2.retrieved_at === "string" ? row2.retrieved_at.slice(0, 10) : void 0;
     const record = {
       connectorId: CONNECTOR_ID5,
       // The court-qualified number IS the identity. `company_number` in this
@@ -5352,10 +5359,10 @@ var offeneRegisterSnapshot = {
       id: native.trim(),
       names: [name],
       legalName: name,
-      officers: officersOf(row.officers),
-      address: parseGermanAddress(row.registered_address, town),
+      officers: officersOf(row2.officers),
+      address: parseGermanAddress(row2.registered_address, town),
       countryCode: "de",
-      status: statusOf2(row.current_status),
+      status: statusOf2(row2.current_status),
       // No activity code: the Handelsregister files none. Declaring a section
       // would invent a classification the register does not publish.
       sourceUrl: "https://offeneregister.de/",
@@ -5518,21 +5525,21 @@ var ariregisterSnapshot = {
   datesRecords: false,
   // Measured on a full ingest: 376 025 records.
   approxDiskBytes: 26e7,
-  parse(row) {
-    const name = row.nimi?.trim();
-    const code = row.ariregistri_kood?.trim();
+  parse(row2) {
+    const name = row2.nimi?.trim();
+    const code = row2.ariregistri_kood?.trim();
     if (!name || !code) return void 0;
-    const town = row.asukoha_ehak_tekstina?.trim();
+    const town = row2.asukoha_ehak_tekstina?.trim();
     const localities = estonianLocalities(town);
     const address = {
-      raw: row.ads_normaliseeritud_taisaadress?.trim() || row.ettevotja_aadress?.trim() || void 0,
-      libelleVoie: row.asukoht_ettevotja_aadressis?.trim() || void 0,
-      codePostal: row.indeks_ettevotja_aadressis?.trim() || void 0,
+      raw: row2.ads_normaliseeritud_taisaadress?.trim() || row2.ettevotja_aadress?.trim() || void 0,
+      libelleVoie: row2.asukoht_ettevotja_aadressis?.trim() || void 0,
+      codePostal: row2.indeks_ettevotja_aadressis?.trim() || void 0,
       // The narrowest level is the one a person would write on an envelope.
       commune: localities[0],
       pays: "Estonia"
     };
-    const vat = row.kmkr_nr?.trim();
+    const vat = row2.kmkr_nr?.trim();
     const record = {
       connectorId: CONNECTOR_ID6,
       id: code,
@@ -5541,20 +5548,20 @@ var ariregisterSnapshot = {
       officers: [],
       address,
       countryCode: "ee",
-      status: statusOf3(row.ettevotja_staatus),
-      legalForm: row.ettevotja_oiguslik_vorm?.trim() || void 0,
+      status: statusOf3(row2.ettevotja_staatus),
+      legalForm: row2.ettevotja_oiguslik_vorm?.trim() || void 0,
       // dd.mm.yyyy in the file; ISO everywhere in this tool.
-      dateCreated: row.ettevotja_esmakande_kpv?.trim().split(".").reverse().join("-") || void 0,
+      dateCreated: row2.ettevotja_esmakande_kpv?.trim().split(".").reverse().join("-") || void 0,
       // No activity code: EMTAK is a separate export, and inventing a section
       // would claim a classification this file does not contain.
-      sourceUrl: row.teabesysteemi_link?.trim() || `https://ariregister.rik.ee/est/company/${code}`,
+      sourceUrl: row2.teabesysteemi_link?.trim() || `https://ariregister.rik.ee/est/company/${code}`,
       // No `asOf`: the file is rebuilt daily, so these records ARE current. The
       // ingest stamps one only when the source has a vintage to stamp.
       national: {
         registerCode: code,
-        statusText: row.ettevotja_staatus_tekstina?.trim() || void 0,
+        statusText: row2.ettevotja_staatus_tekstina?.trim() || void 0,
         vatNumber: vat || void 0,
-        ehakCode: row.asukoha_ehak_kood?.trim() || void 0
+        ehakCode: row2.asukoha_ehak_kood?.trim() || void 0
       }
     };
     return { record, localities, ids: [code, vat].filter((x) => Boolean(x)) };
@@ -5796,20 +5803,20 @@ var companiesHouseSnapshot = {
   // the download a promise the command did not keep. Estimates in this file are
   // measured or they are not written.
   approxDiskBytes: 42e8,
-  parse(row) {
-    const number = row.CompanyNumber?.trim();
-    const name = row.CompanyName?.trim();
+  parse(row2) {
+    const number = row2.CompanyNumber?.trim();
+    const name = row2.CompanyName?.trim();
     if (!number || !name) return void 0;
-    const { code, section: section2, administrative } = sicOf(row["SICCode.SicText_1"]);
-    const previous = [1, 2, 3, 4, 5].map((n) => row[`PreviousName_${n}.CompanyName`]?.trim()).filter((x) => Boolean(x));
-    const postTown = row["RegAddress.PostTown"]?.trim();
-    const street = [row["RegAddress.AddressLine1"], row["RegAddress.AddressLine2"]].map((s) => s?.trim()).filter(Boolean).join(", ");
+    const { code, section: section2, administrative } = sicOf(row2["SICCode.SicText_1"]);
+    const previous = [1, 2, 3, 4, 5].map((n) => row2[`PreviousName_${n}.CompanyName`]?.trim()).filter((x) => Boolean(x));
+    const postTown = row2["RegAddress.PostTown"]?.trim();
+    const street = [row2["RegAddress.AddressLine1"], row2["RegAddress.AddressLine2"]].map((s) => s?.trim()).filter(Boolean).join(", ");
     const address = {
-      raw: [street, postTown, row["RegAddress.PostCode"]?.trim()].filter(Boolean).join(", ") || void 0,
-      libelleVoie: row["RegAddress.AddressLine1"]?.trim() || void 0,
-      codePostal: row["RegAddress.PostCode"]?.trim() || void 0,
+      raw: [street, postTown, row2["RegAddress.PostCode"]?.trim()].filter(Boolean).join(", ") || void 0,
+      libelleVoie: row2["RegAddress.AddressLine1"]?.trim() || void 0,
+      codePostal: row2["RegAddress.PostCode"]?.trim() || void 0,
       commune: postTown || void 0,
-      pays: row["RegAddress.Country"]?.trim() || "United Kingdom"
+      pays: row2["RegAddress.Country"]?.trim() || "United Kingdom"
     };
     const record = {
       connectorId: CONNECTOR_ID7,
@@ -5822,14 +5829,14 @@ var companiesHouseSnapshot = {
       activityCode: code,
       section: section2,
       activityScheme: "nace",
-      legalForm: row.CompanyCategory?.trim() || void 0,
-      status: statusOf4(row.CompanyStatus),
-      dateCreated: row.IncorporationDate?.trim() || void 0,
-      dateClosed: row.DissolutionDate?.trim() || void 0,
+      legalForm: row2.CompanyCategory?.trim() || void 0,
+      status: statusOf4(row2.CompanyStatus),
+      dateCreated: row2.IncorporationDate?.trim() || void 0,
+      dateClosed: row2.DissolutionDate?.trim() || void 0,
       sourceUrl: `https://find-and-update.company-information.service.gov.uk/company/${number}`,
       national: {
         companyNumber: number.toUpperCase(),
-        companyStatus: row.CompanyStatus?.trim() || void 0,
+        companyStatus: row2.CompanyStatus?.trim() || void 0,
         sicCodes: code ? [code] : void 0,
         // "dormant company" is not an activity, and a prospect list is usually
         // better without one. Recorded so it can be filtered rather than silently
@@ -9072,6 +9079,27 @@ var DEFAULT_WEIGHTS = {
   termMatches: 12,
   staleRole: 8
 };
+var SCORE_PART_LABELS = {
+  hasSite: "website corroborated",
+  siteWorks: "site responds",
+  fresh: "recently updated",
+  // NOT "pages read": the panel also prints how many extracts are stored for
+  // the place, which is a different number (the store accumulates across enrich
+  // passes; this term is what the last pass could reach). One label over two
+  // quantities in one panel reads as a rendering fault.
+  depth: "pages we could read",
+  hiring: "hiring",
+  openRoles: "open roles",
+  size: "headcount",
+  revenue: "revenue filed",
+  registered: "register identity",
+  contactable: "contactable",
+  ecommerce: "sells online",
+  pricing: "pricing published",
+  matchedRoles: "roles matching the brief",
+  termMatches: "your terms, on their site",
+  staleRole: "a role open 90+ days"
+};
 function daysSince(iso) {
   if (!iso) return void 0;
   const t = Date.parse(iso);
@@ -9174,13 +9202,6 @@ function vocabularyOf(scheme) {
 // src/dossier.ts
 function dossierPathFor(place) {
   return join12("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
-}
-function streetLine(a) {
-  const type = a.typeVoie?.trim();
-  const name = a.libelleVoie?.trim();
-  if (!name) return type ? [a.numero, type].filter(Boolean).join(" ") : "";
-  const alreadyPrefixed = type ? new RegExp(`^${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name) : false;
-  return [a.numero, alreadyPrefixed ? void 0 : type, name].filter(Boolean).join(" ");
 }
 function fmtMoney(n, currency) {
   if (typeof n !== "number") return void 0;
@@ -9661,14 +9682,6 @@ function keep(place, opts) {
   }
   return true;
 }
-function streetOf(place) {
-  const a = place.address;
-  const type = a.typeVoie?.trim();
-  const name = a.libelleVoie?.trim();
-  if (!name) return type ? [a.numero, type].filter(Boolean).join(" ") : "";
-  const prefixed = type ? new RegExp(`^${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name) : false;
-  return [a.numero, prefixed ? void 0 : type, name].filter(Boolean).join(" ");
-}
 function toCsv(places, opts = {}) {
   const rows = [csvRow(HEADER)];
   for (const place of ranked(places).filter((p) => keep(p, opts))) {
@@ -9711,7 +9724,7 @@ function toCsv(places, opts = {}) {
         place.registry?.asOf ?? "",
         s?.isHeadOffice ? "yes" : s ? "no" : "",
         s?.dateCreated ?? "",
-        streetOf(place),
+        streetLine(place.address),
         place.address.codePostal ?? "",
         place.address.commune ?? "",
         place.address.codeCommune ?? "",
@@ -9749,43 +9762,7 @@ function toCsv(places, opts = {}) {
   return rows.join("\n") + "\n";
 }
 
-// src/render.ts
-var esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-function truncationBanner(manifest) {
-  if (!manifest.truncated) return [];
-  const lanes = manifest.lanes.filter((l) => l.truncated);
-  return [
-    "> \u26A0 **This run does not cover the whole territory.**",
-    ">",
-    ...lanes.map((l) => `> - **${l.lane}**: ${l.reason ?? "capped"} (${l.returned} returned)`),
-    ">",
-    "> Treat every count below as a floor, not a total.",
-    ""
-  ];
-}
-function coverage(manifest) {
-  const date = manifest.builtAt.slice(0, 10);
-  const version = `ultraprospect ${manifest.toolVersion}`;
-  const registry = manifest.lanes.filter((l) => l.lane === "registry");
-  const osm = manifest.lanes.find((l) => l.lane === "osm");
-  const osmRan = Boolean(osm) && osm?.reason !== "skipped (--no-osm)";
-  if (registry.some((l) => l.mode === "sweep")) {
-    return { sentence: `Swept ${date} with ${version}.`, short: `swept ${date}` };
-  }
-  if (registry.some((l) => l.mode === "confirm")) {
-    return {
-      sentence: `OpenStreetMap swept ${date}; the register confirmed company by company, so a company nobody has mapped is not in this list. ${version}.`,
-      short: `OSM swept ${date}, register confirmed company by company`
-    };
-  }
-  if (osmRan) {
-    return {
-      sentence: `OpenStreetMap swept ${date}; no register lane covered this territory. ${version}.`,
-      short: `OSM swept ${date}, no register lane`
-    };
-  }
-  return { sentence: `Built ${date} with ${version}.`, short: `built ${date}` };
-}
+// src/summary.ts
 function activityLabel(place) {
   const rec = place.registry;
   const section2 = rec?.section;
@@ -9818,93 +9795,174 @@ function distribution(places) {
   }
   return { bySection: [...bySection.entries()].sort((a, b) => b[1] - a[1]), byBand };
 }
-function buildReport(places, manifest) {
-  const l = [];
-  const order = ranked(places);
-  const withSite = places.filter((p) => p.website?.confidence === "corroborated");
-  const hiring = places.filter((p) => p.signals?.isHiring === true);
-  const unknownHiring = places.filter((p) => p.signals && p.signals.isHiring === void 0);
-  const { bySection, byBand } = distribution(places);
-  l.push(`# ${shortLabel(manifest.target.label || manifest.slug)}`);
-  l.push("");
-  l.push(...truncationBanner(manifest));
-  l.push(`${manifest.target.label}`);
-  l.push("");
-  l.push(coverage(manifest).sentence);
-  l.push("");
-  l.push("## Coverage");
-  l.push("");
-  l.push("| Lane | Mode | Returned | Complete | Note |");
-  l.push("|---|---|---:|---|---|");
-  for (const lane of manifest.lanes) {
-    const mode2 = lane.mode ?? (lane.lane === "registry" ? "not swept" : "\u2014");
-    l.push(`| ${lane.lane} | ${mode2} | ${lane.returned} | ${lane.truncated ? "**no**" : "yes"} | ${lane.reason ?? ""} |`);
+function coverage(manifest) {
+  const date = manifest.builtAt.slice(0, 10);
+  const version = `ultraprospect ${manifest.toolVersion}`;
+  const registry = manifest.lanes.filter((l) => l.lane === "registry");
+  const osm = manifest.lanes.find((l) => l.lane === "osm");
+  const osmRan = Boolean(osm) && osm?.reason !== "skipped (--no-osm)";
+  if (registry.some((l) => l.mode === "sweep")) {
+    return { sentence: `Swept ${date} with ${version}.`, short: `swept ${date}` };
   }
-  l.push("");
-  l.push(
-    `${places.length} companies after fusion (${manifest.counts.merged} matched across both lanes, ${manifest.counts.undecided} pairs left for adjudication).`
-  );
-  l.push("");
-  const dated = places.filter((p) => p.registry?.asOf);
-  if (dated.length) {
-    const years = [...new Set(dated.map((p) => p.registry.asOf.slice(0, 4)))].sort();
-    l.push("> \u26A0 **Some register records are dated.**");
-    l.push(">");
-    l.push(
-      `> ${dated.length} of ${places.length} companies carry a register record from a bulk open-data snapshot rather than from asking the register: ${years.join(", ")}. Those identities were true then. They are not evidence about today, and the \`registry_as_of\` column in the CSV carries the date for each one.`
-    );
-    l.push("");
+  if (registry.some((l) => l.mode === "confirm")) {
+    return {
+      sentence: `OpenStreetMap swept ${date}; the register confirmed company by company, so a company nobody has mapped is not in this list. ${version}.`,
+      short: `OSM swept ${date}, register confirmed company by company`
+    };
   }
-  l.push("## What is there");
-  l.push("");
-  l.push(`- ${withSite.length} with a website we corroborated \xB7 ${places.length - withSite.length} without one`);
-  l.push(`- ${hiring.length} hiring right now (${hiring.reduce((n, p) => n + (p.signals?.openRoles ?? 0), 0)} open roles read from ATS APIs)`);
-  if (unknownHiring.length) l.push(`- ${unknownHiring.length} run a job board we could not read \u2014 their hiring is unknown, not absent`);
-  l.push(`- ${places.filter((p) => p.contacts.emails.length || p.contacts.phones.length).length} contactable from a published address or number`);
-  l.push("");
-  if (bySection.length) {
-    l.push("### By activity");
-    l.push("");
-    l.push("| Activity | Companies |");
-    l.push("|---|---:|");
-    for (const [key, n] of bySection.slice(0, 12)) l.push(`| ${key} | ${n} |`);
-    l.push("");
+  if (osmRan) {
+    return {
+      sentence: `OpenStreetMap swept ${date}; no register lane covered this territory. ${version}.`,
+      short: `OSM swept ${date}, no register lane`
+    };
   }
-  if (byBand.length) {
-    l.push("### By size");
-    l.push("");
-    l.push("| Headcount | Companies |");
-    l.push("|---|---:|");
-    for (const [label, n] of byBand) l.push(`| ${label} | ${n} |`);
-    l.push("");
-  }
-  l.push("## Ranked");
-  l.push("");
-  l.push("| # | Company | Score | Fit | Hiring | Website |");
-  l.push("|---:|---|---:|---|---|---|");
-  for (const [i, p] of order.slice(0, 50).entries()) {
-    const h = p.signals?.isHiring === true ? `${p.signals.openRoles}` : p.signals?.isHiring === false ? "\u2014" : "?";
-    l.push(`| ${i + 1} | ${p.name} | ${p.score?.total ?? 0} | ${p.score?.fit ?? ""} | ${h} | ${p.website?.url ?? ""} |`);
-  }
-  l.push("");
-  if (manifest.notes.length) {
-    l.push("## Run notes");
-    l.push("");
-    for (const n of manifest.notes.slice(-25)) l.push(`- ${n}`);
-    l.push("");
-  }
-  l.push("## Sources");
-  l.push("");
-  for (const licence of manifest.licences) l.push(`- ${licence}`);
-  l.push("");
-  l.push(`Extracted ${manifest.builtAt.slice(0, 10)}.`);
-  return l.join("\n") + "\n";
+  return { sentence: `Built ${date} with ${version}.`, short: `built ${date}` };
 }
-function mapSvg(places, manifest) {
-  const pts = places.filter((p) => typeof p.lat === "number" && typeof p.lon === "number");
+var SCORE_BANDS = [
+  { label: "70+", min: 70, max: Number.POSITIVE_INFINITY },
+  { label: "50\u201369", min: 50, max: 69 },
+  { label: "30\u201349", min: 30, max: 49 },
+  { label: "1\u201329", min: 1, max: 29 },
+  { label: "0", min: 0, max: 0 }
+];
+var EVIDENCE_LABELS = {
+  "verified-id": "by a published registration number",
+  "name-lookup": "by a name lookup",
+  "sweep-match": "by enumerating the territory"
+};
+function tally(items, key) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const item of items) {
+    const k = key(item);
+    if (!k) continue;
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+}
+function describeFilters(filters) {
+  const out2 = [];
+  const list2 = (v) => Array.isArray(v) && v.length ? v.map(String) : void 0;
+  const groups = list2(filters.osmGroups);
+  if (groups) out2.push(`OSM \`${groups.join("`, `")}\` tags only`);
+  const codes = list2(filters.activityCodes);
+  if (codes) out2.push(`register activity codes ${codes.join(", ")}`);
+  const sections = list2(filters.sections);
+  if (sections) out2.push(`register sections ${sections.join(", ")}`);
+  const bands = list2(filters.sizeBands);
+  if (bands) out2.push(`headcount bands ${bands.join(", ")}`);
+  const ids = list2(filters.registryIds);
+  if (ids) out2.push(`${ids.length} explicit register identifier(s)`);
+  if (typeof filters.maxResults === "number" && filters.maxResults > 0) out2.push(`capped at ${filters.maxResults} results`);
+  if (filters.includeCeased === true) out2.push("ceased companies included");
+  return out2;
+}
+function foldNotes(notes, cap = 25) {
+  const order = [];
+  const counts = /* @__PURE__ */ new Map();
+  for (const note of notes) {
+    if (!counts.has(note)) order.push(note);
+    counts.set(note, (counts.get(note) ?? 0) + 1);
+  }
+  const isSummary = (t) => /^(scan|confirm|match|resolve|enrich|score|dossier|check|render):/.test(t);
+  const summaries = order.filter(isSummary).map((text2) => ({ text: text2, count: counts.get(text2) }));
+  const rest = order.filter((t) => !isSummary(t)).map((text2) => ({ text: text2, count: counts.get(text2) })).sort((a, b) => b.count - a.count);
+  return { lines: [...summaries, ...rest].slice(0, cap), distinct: order.length, emitted: notes.length };
+}
+function summarise(places, manifest) {
+  const { bySection, byBand } = distribution(places);
+  const withSignals = places.filter((p) => p.signals);
+  const registered = places.filter((p) => p.registry);
+  const dated = registered.filter((p) => p.registry.asOf);
+  const legalIds = places.flatMap((p) => p.legalIds ?? []);
+  const scored = places.map((p) => p.score?.total ?? 0);
+  return {
+    total: places.length,
+    websites: {
+      corroborated: places.filter((p) => p.website?.confidence === "corroborated").length,
+      declared: places.filter((p) => p.website?.confidence === "declared").length,
+      unverified: places.filter((p) => p.website?.confidence === "unverified").length,
+      none: places.filter((p) => !p.website).length
+    },
+    hiring: {
+      yes: withSignals.filter((p) => p.signals.isHiring === true).length,
+      no: withSignals.filter((p) => p.signals.isHiring === false).length,
+      unknown: withSignals.filter((p) => p.signals.isHiring === void 0).length,
+      roles: places.reduce((n, p) => n + (p.signals?.isHiring === true ? p.signals.openRoles ?? 0 : 0), 0),
+      matchedRoles: places.reduce((n, p) => n + (p.signals?.matchedRoles ?? 0), 0),
+      ats: tally(
+        places.flatMap((p) => p.signals?.atsProviders ?? []),
+        (a) => a
+      )
+    },
+    contact: {
+      emails: places.filter((p) => p.contacts.emails.length > 0).length,
+      phones: places.filter((p) => p.contacts.phones.length > 0).length,
+      both: places.filter((p) => p.contacts.emails.length > 0 && p.contacts.phones.length > 0).length,
+      any: places.filter((p) => p.contacts.emails.length > 0 || p.contacts.phones.length > 0).length
+    },
+    registry: {
+      withRecord: registered.length,
+      byConnector: tally(registered, (p) => p.registry.connectorId),
+      byEvidence: tally(places, (p) => p.registryEvidence ? EVIDENCE_LABELS[p.registryEvidence.how] ?? p.registryEvidence.how : void 0),
+      dated: { count: dated.length, years: [...new Set(dated.map((p) => p.registry.asOf.slice(0, 4)))].sort() },
+      headOffices: registered.filter((p) => p.registry.isHeadOffice).length,
+      ceased: registered.filter((p) => p.registry.status === "ceased").length,
+      withOfficers: registered.filter((p) => p.registry.officers.length > 0).length,
+      officers: registered.reduce((n, p) => n + p.registry.officers.length, 0)
+    },
+    legalIds: {
+      verified: legalIds.filter((x) => x.status === "verified").length,
+      attested: legalIds.filter((x) => x.status === "attested").length,
+      unverified: legalIds.filter((x) => x.status === "unverified").length,
+      total: legalIds.length
+    },
+    site: {
+      withCms: withSignals.filter((p) => p.signals.cms).length,
+      withLastContent: withSignals.filter((p) => p.signals.lastContentAt).length,
+      pricing: withSignals.filter((p) => p.signals.hasPricingPage).length,
+      ecommerce: withSignals.filter((p) => p.signals.hasEcommerce).length,
+      enriched: withSignals.length,
+      pagesRead: places.reduce((n, p) => n + p.pages.length, 0),
+      withPages: places.filter((p) => p.pages.length > 0).length,
+      topTech: tally(
+        places.flatMap((p) => [...p.signals?.techStack ?? [], ...p.signals?.cms ? [p.signals.cms] : []]),
+        (t) => t
+      ).slice(0, 10)
+    },
+    scores: {
+      bands: SCORE_BANDS.map((b) => [b.label, scored.filter((n) => n >= b.min && n <= b.max).length]),
+      zero: scored.filter((n) => n === 0).length,
+      max: scored.length ? Math.max(...scored) : 0
+    },
+    fit: {
+      judged: places.filter((p) => p.score?.fit).length,
+      byVerdict: tally(places, (p) => p.score?.fit)
+    },
+    bySection,
+    byBand,
+    filters: describeFilters(manifest.filters ?? {}),
+    notes: foldNotes(manifest.notes ?? [])
+  };
+}
+
+// src/html.ts
+var esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+function link(url, text2) {
+  return `<a href="${esc(url)}" rel="noreferrer nofollow">${esc(text2 ?? url)}</a>`;
+}
+function hostOf2(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+var HTML_ROW_CAP = 2e3;
+function mapSvg(order, manifest) {
+  const pts = order.map((p, i) => ({ p, i })).filter(({ p }) => typeof p.lat === "number" && typeof p.lon === "number");
   if (pts.length === 0) return "";
-  const lats = pts.map((p) => p.lat);
-  const lons = pts.map((p) => p.lon);
+  const lats = pts.map(({ p }) => p.lat);
+  const lons = pts.map(({ p }) => p.lon);
   const [s, n] = [Math.min(...lats), Math.max(...lats)];
   const [w, e] = [Math.min(...lons), Math.max(...lons)];
   const midLat = (s + n) / 2;
@@ -9915,29 +9973,221 @@ function mapSvg(places, manifest) {
   const height = Math.max(220, Math.min(620, Math.round(width * spanY / spanX)));
   const x = (lon) => (lon - w) * kx * (width - 24) / spanX + 12;
   const y = (lat) => height - 12 - (lat - s) * (height - 24) / spanY;
-  const max = Math.max(1, ...pts.map((p) => p.score?.total ?? 0));
-  const circles = pts.map((p) => {
+  const max = Math.max(1, ...pts.map(({ p }) => p.score?.total ?? 0));
+  const circles = pts.map(({ p, i }) => {
     const t = (p.score?.total ?? 0) / max;
     const r = 2.5 + t * 5;
-    const cls = p.score?.fit === "strong" ? "pt strong" : p.website?.confidence === "corroborated" ? "pt sited" : "pt";
-    return `<circle class="${cls}" cx="${x(p.lon).toFixed(1)}" cy="${y(p.lat).toFixed(1)}" r="${r.toFixed(1)}"><title>${esc(p.name)} \u2014 ${p.score?.total ?? 0}</title></circle>`;
+    const fit = p.score?.fit;
+    const cls = fit === "strong" || fit === "possible" ? `pt ${fit}` : fit === "no" ? "pt no" : p.website?.confidence === "corroborated" ? "pt sited" : "pt";
+    const hiring = p.signals?.isHiring === true ? ` \u2014 ${p.signals.openRoles} open role(s)` : "";
+    return `<circle class="${cls}" data-i="${i}" cx="${x(p.lon).toFixed(1)}" cy="${y(p.lat).toFixed(1)}" r="${r.toFixed(1)}"><title>${esc(p.name)} \u2014 ${p.score?.total ?? 0}${esc(hiring)}</title></circle>`;
   }).join("");
   return `<figure class="map">
 <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Every company in ${esc(manifest.target.label)}, positioned by coordinate and sized by score">${circles}</svg>
-<figcaption>${pts.length} located companies. Larger is a higher measured score; filled points have a corroborated website.</figcaption>
+<figcaption>${pts.length} located companies. Larger is a higher measured score. <b class="k strong"></b> judged a strong fit \xB7 <b class="k possible"></b> possible \xB7 <b class="k sited"></b> a corroborated website \xB7 <b class="k plain"></b> everything else. Click a point to open its row.</figcaption>
 </figure>`;
 }
-var HTML_ROW_CAP = 500;
+function block(label, body) {
+  return body ? `<div class="b"><dt>${esc(label)}</dt><dd>${body}</dd></div>` : "";
+}
+function sourced(items, href) {
+  if (!items.length) return "";
+  return items.map((c) => {
+    const value = href ? `<a href="${esc(href(c.value))}">${esc(c.value)}</a>` : esc(c.value);
+    return `<span class="c">${value} <span class="src">[${esc(c.from)}]</span></span>`;
+  }).join("");
+}
+function scoreBreakdown(place) {
+  const parts = Object.entries(place.score?.parts ?? {}).filter(([, v]) => v > 0);
+  if (!parts.length) return "";
+  const total = parts.reduce((n, [, v]) => n + v, 0);
+  const bar = parts.map(([, v]) => `<i style="width:${(v / total * 100).toFixed(1)}%"></i>`).join("");
+  const words = parts.map(([k, v]) => `<span class="c">${esc(SCORE_PART_LABELS[k] ?? k)} <b>${v}</b></span>`).join("");
+  return `<div class="bar">${bar}</div>${words}<span class="c">total <b>${place.score?.total ?? 0}</b></span>`;
+}
+function registerBlock(place) {
+  const s = place.registry;
+  if (!s) return "";
+  const bits = [];
+  if (s.legalName && s.legalName !== place.name) bits.push(`<span class="c">legal name <b>${esc(s.legalName)}</b></span>`);
+  bits.push(`<span class="c">${esc(s.connectorId)} <b>${esc(s.id)}</b></span>`);
+  if (s.establishmentId && s.establishmentId !== s.id) bits.push(`<span class="c">establishment <b>${esc(s.establishmentId)}</b></span>`);
+  if (s.legalForm) bits.push(`<span class="c">form <b>${esc(s.legalForm)}</b></span>`);
+  if (s.status && s.status !== "unknown") bits.push(`<span class="c">state <b>${esc(s.status)}</b></span>`);
+  if (s.dateCreated) bits.push(`<span class="c">since <b>${esc(s.dateCreated)}</b></span>`);
+  if (s.isHeadOffice) bits.push(`<span class="c">head office</span>`);
+  if (s.establishmentCount) bits.push(`<span class="c">establishments <b>${s.establishmentCount}</b></span>`);
+  if (s.finances?.revenue)
+    bits.push(`<span class="c">revenue ${s.finances.year ?? ""} <b>${esc(s.finances.revenue)} ${esc(s.finances.currency ?? "")}</b></span>`);
+  if (place.registryEvidence) {
+    const ev = place.registryEvidence;
+    bits.push(
+      `<span class="c">matched <b>${esc(ev.mode)} / ${esc(ev.how)}</b>${ev.legalId ? ` ${esc(ev.legalId)}` : ""}${ev.from ? ` <span class="src">[${esc(ev.from)}]</span>` : ""}</span>`
+    );
+  }
+  if (s.asOf) bits.push(`<span class="c warnc">as of ${esc(s.asOf)} \u2014 from a bulk snapshot, not from asking the register</span>`);
+  if (s.officers.length) {
+    bits.push(
+      `<span class="c">officers ${esc(s.officers.map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" \u2014 ")).join("; "))}</span>`
+    );
+  }
+  if (s.sourceUrl) bits.push(`<span class="c">${link(s.sourceUrl, "open on the register")}</span>`);
+  return bits.join("");
+}
+function siteBlock(place) {
+  const sg = place.signals;
+  if (!sg) return "";
+  const bits = [];
+  bits.push(`<span class="c">pages stored <b>${place.pages.length}</b></span>`);
+  if (sg.lastContentAt) bits.push(`<span class="c">newest content <b>${esc(sg.lastContentAt.slice(0, 10))}</b></span>`);
+  if (sg.sitemapUrls) bits.push(`<span class="c">sitemap <b>${sg.sitemapUrls}</b> urls</span>`);
+  if (sg.cms) bits.push(`<span class="c">CMS <b>${esc(sg.cms)}</b></span>`);
+  if (sg.analytics.length) bits.push(`<span class="c">analytics <b>${esc(sg.analytics.join(", "))}</b></span>`);
+  if (sg.techStack.length) bits.push(`<span class="c">stack <b>${esc(sg.techStack.join(", "))}</b></span>`);
+  if (sg.languages.length) bits.push(`<span class="c">languages <b>${esc(sg.languages.join(", "))}</b></span>`);
+  if (sg.hasPricingPage) bits.push(`<span class="c">publishes pricing</span>`);
+  if (sg.hasEcommerce) bits.push(`<span class="c">sells online</span>`);
+  if (sg.legalIdOnSite) bits.push(`<span class="c">legal id on site <b>${esc(sg.legalIdOnSite)}</b></span>`);
+  if (sg.siteReachable === false) bits.push(`<span class="c warnc">the site did not respond</span>`);
+  return bits.join("");
+}
+function legalIdBlock(place) {
+  if (!place.legalIds?.length) return "";
+  return place.legalIds.map((x) => {
+    const note = x.note ? ` \u2014 ${esc(x.note)}` : "";
+    const who = x.authority ? ` (${esc(x.authority)})` : "";
+    return `<span class="c"><b>${esc(x.kind)} ${esc(x.value)}</b> <span class="tag ${esc(x.status)}">${esc(x.status)}</span>${who}${note}${x.from ? ` <span class="src">[${esc(x.from)}]</span>` : ""}</span>`;
+  }).join("");
+}
+function jobsBlock(place) {
+  if (!place.jobs.length) return "";
+  const rows = place.jobs.slice(0, 25).map((j) => {
+    const where = [j.location, j.department, j.employmentType].filter(Boolean).join(" \xB7 ");
+    const title = j.url ? link(j.url, j.title) : esc(j.title);
+    const when = j.postedAt ? ` <span class="src">posted ${esc(j.postedAt.slice(0, 10))}</span>` : "";
+    return `<li>${title}${where ? ` \u2014 ${esc(where)}` : ""}${when} <span class="src">via ${esc(j.via)}</span></li>`;
+  }).join("");
+  const more = place.jobs.length > 25 ? `<li class="src">\u2026and ${place.jobs.length - 25} more</li>` : "";
+  return `<ul class="jobs">${rows}${more}</ul>`;
+}
+function detail(place, columns) {
+  const blocks = [
+    // The verdict first: it is the only thing in the run a person wrote, and
+    // verbatim, because a judgement paraphrased by the tool carrying it is no
+    // longer that person's judgement.
+    block("Why", place.score?.why ? esc(place.score.why) : ""),
+    block("Angle", place.score?.angle ? esc(place.score.angle) : ""),
+    block("Score", scoreBreakdown(place)),
+    block(
+      "Emails",
+      sourced(place.contacts.emails, (v) => `mailto:${v}`)
+    ),
+    block(
+      "Phones",
+      sourced(place.contacts.phones, (v) => `tel:${v.replace(/[^\d+]/g, "")}`)
+    ),
+    block("Socials", sourced(place.contacts.socials)),
+    block(
+      "People named on the site",
+      place.contacts.people.map((p) => `<span class="c">${esc(p.value)}${p.role ? ` \u2014 ${esc(p.role)}` : ""} <span class="src">[${esc(p.from)}]</span></span>`).join("")
+    ),
+    block(`Open roles (${place.jobs.length})`, jobsBlock(place)),
+    block("Register", registerBlock(place)),
+    block("Legal identifiers", legalIdBlock(place)),
+    block("Site", siteBlock(place)),
+    block(
+      "Where",
+      [streetLine(place.address), place.address.codePostal, place.address.commune, place.address.pays].filter(Boolean).map(esc).join(", ") + (typeof place.lat === "number" ? ` <span class="src">${place.lat.toFixed(5)}, ${place.lon?.toFixed(5)}</span>` : "")
+    ),
+    block(
+      "Provenance",
+      `<span class="c">id <b>${esc(place.id)}</b></span><span class="c">lanes <b>${esc(place.sources.join(" + "))}</b></span>` + (place.matchConfidence !== void 0 ? `<span class="c">match confidence <b>${place.matchConfidence}</b>${place.matchedBy ? ` on ${esc(place.matchedBy)}` : ""}</span>` : "") + (place.website ? `<span class="c">website <b>${esc(place.website.confidence)}</b> \u2014 ${esc(place.website.evidence.join(", "))}</span>` : "")
+    )
+  ].filter(Boolean).join("");
+  const empty = `<p class="src">Nothing beyond the row above: no site was corroborated for this company, so no page was fetched and nothing was read from one.</p>`;
+  return `<tr class="d" id="d${esc(place.id)}"><td colspan="${columns}"><dl>${blocks || empty}</dl></td></tr>`;
+}
+var FACETS = [
+  { key: "hiring", label: "hiring", of: (p) => p.signals?.isHiring === true },
+  { key: "site", label: "website proved", of: (p) => p.website?.confidence === "corroborated" },
+  { key: "contact", label: "contactable", of: (p) => p.contacts.emails.length > 0 || p.contacts.phones.length > 0 },
+  { key: "reg", label: "in the register", of: (p) => Boolean(p.registry) },
+  { key: "judged", label: "judged possible or better", of: (p) => p.score?.fit === "strong" || p.score?.fit === "possible" },
+  { key: "dated", label: "register record is dated", of: (p) => Boolean(p.registry?.asOf) }
+];
+function statCards(s, manifest) {
+  const cards = [
+    [s.total, "companies"],
+    [s.registry.withRecord, "carry a register identity"],
+    [s.websites.corroborated, "with a website we proved"]
+  ];
+  if (s.site.enriched === 0) {
+    cards.push(["\u2014", "hiring: no site read yet, so unknown rather than none"]);
+  } else {
+    cards.push([s.hiring.yes, `hiring now \xB7 ${s.hiring.roles} open roles`]);
+    cards.push([s.contact.any, "contactable"]);
+    cards.push([s.site.pagesRead, `pages stored across ${s.site.withPages} sites`]);
+  }
+  cards.push([s.fit.judged, "judged for fit by a person"]);
+  if (manifest.counts.merged) cards.push([manifest.counts.merged, "matched across lanes"]);
+  return `<div class="cards">${cards.map(([n, what]) => `<div class="card"><b>${esc(n)}</b><span>${esc(what)}</span></div>`).join("")}</div>`;
+}
+function coverageTable(manifest, s) {
+  const rows = manifest.lanes.map((l) => {
+    const mode2 = l.mode ?? (l.lane === "registry" ? "not swept" : "\u2014");
+    return `<tr><td>${esc(l.lane)}</td><td>${esc(mode2)}</td><td class="n">${l.returned}</td><td>${l.truncated ? "<b>no</b>" : "yes"}</td><td>${esc(l.reason ?? "")}</td></tr>`;
+  }).join("");
+  const under = [];
+  if (s.registry.byConnector.length) under.push(`Register records by connector: ${esc(s.registry.byConnector.map(([id, n]) => `${id} ${n}`).join(" \xB7 "))}`);
+  if (s.registry.byEvidence.length) under.push(`How each was attached: ${esc(s.registry.byEvidence.map(([how, n]) => `${n} ${how}`).join(" \xB7 "))}`);
+  return `<details class="cov" open><summary>Coverage \u2014 what this run actually asked</summary>
+<div class="scroll"><table><thead><tr><th>Lane</th><th>Mode</th><th class="n">Returned</th><th>Complete</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div>
+${under.map((x) => `<p class="cap">${x}</p>`).join("")}</details>`;
+}
 function buildHtml(places, manifest) {
+  const s = summarise(places, manifest);
   const order = ranked(places);
   const shown = Math.min(order.length, HTML_ROW_CAP);
-  const rows = order.slice(0, HTML_ROW_CAP).map((p) => {
+  const visible = order.slice(0, HTML_ROW_CAP);
+  const COLUMNS = 10;
+  const rows = visible.map((p, i) => {
     const h = p.signals?.isHiring === true ? `${p.signals.openRoles}` : p.signals?.isHiring === false ? "\u2014" : "?";
-    const site = p.website?.url ? `<a href="${esc(p.website.url)}" rel="noreferrer nofollow">${esc(new URL(p.website.url).hostname)}</a>` : "";
-    const hay = [p.name, p.registry?.activityCode, p.category, p.address.commune, p.website?.url, p.score?.fit].filter(Boolean).join(" ").toLowerCase();
-    return `<tr data-h="${esc(hay)}"><td>${esc(p.name)}</td><td class="n">${p.score?.total ?? 0}</td><td>${esc(p.score?.fit ?? "")}</td><td class="n">${h}</td><td>${esc(p.registry?.activityCode ?? p.category ?? "")}</td><td>${esc(p.address.commune ?? "")}</td><td>${site}</td></tr>`;
+    const site = p.website?.url ? link(p.website.url, hostOf2(p.website.url)) : "";
+    const hay = [
+      p.name,
+      p.registry?.legalName,
+      p.registry?.id,
+      p.registry?.activityCode,
+      p.category,
+      p.address.commune,
+      p.website?.url,
+      p.score?.fit,
+      p.score?.why
+    ].filter(Boolean).join(" ").toLowerCase();
+    const facets = FACETS.filter((f) => f.of(p)).map((f) => f.key).join(" ");
+    const contact = [p.contacts.emails.length ? "\u2709" : "", p.contacts.phones.length ? "\u260E" : ""].filter(Boolean).join(" ");
+    const reg = p.registry ? `${p.registry.id}` : "";
+    return `<tr class="r" id="r${i}" data-h="${esc(hay)}" data-f="${esc(facets)}"><td class="n">${i + 1}</td><td><button type="button" class="tog" aria-expanded="false" aria-controls="d${esc(p.id)}">${esc(p.name)}</button></td><td class="n">${p.score?.total ?? 0}</td><td>${esc(p.score?.fit ?? "")}</td><td class="n">${h}</td><td>${esc(p.registry?.activityCode ?? p.category ?? "")}</td><td>${esc(p.address.commune ?? "")}</td><td>${contact}</td><td>${esc(reg)}</td><td>${site}</td></tr>
+${detail(p, COLUMNS)}`;
   }).join("\n");
-  const banner = manifest.truncated ? `<div class="warn"><strong>This run does not cover the whole territory.</strong> ${manifest.lanes.filter((l) => l.truncated).map((l) => `${esc(l.lane)}: ${esc(l.reason ?? "capped")}`).join(" \xB7 ")} Every count below is a floor.</div>` : "";
+  const banners = [];
+  if (manifest.truncated) {
+    banners.push(
+      `<div class="warn"><strong>This run does not cover the whole territory.</strong> ${manifest.lanes.filter((l) => l.truncated).map((l) => `${esc(l.lane)}: ${esc(l.reason ?? "capped")}`).join(" \xB7 ")} Every count below is a floor.</div>`
+    );
+  }
+  if (s.registry.dated.count) {
+    banners.push(
+      `<div class="warn"><strong>Some register records are dated.</strong> ${s.registry.dated.count} of ${s.total} companies carry a register record from a bulk open-data snapshot rather than from asking the register: ${esc(s.registry.dated.years.join(", "))}. Those identities were true then. They are not evidence about today.</div>`
+    );
+  }
+  if (s.filters.length) {
+    banners.push(
+      `<div class="note"><strong>What this run looked for:</strong> ${esc(s.filters.join(" \xB7 "))}. A company outside that is absent from this list because it was not asked for, not because it is not there.</div>`
+    );
+  }
+  const activeFacets = FACETS.map((f) => ({ ...f, n: places.filter(f.of).length })).filter((f) => f.n > 0 && f.n < places.length);
+  const chips = activeFacets.map((f) => `<button type="button" class="chip" data-facet="${esc(f.key)}" aria-pressed="false">${esc(f.label)} <span class="src">${f.n}</span></button>`).join("");
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -9945,64 +10195,101 @@ function buildHtml(places, manifest) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(shortLabel(manifest.target.label || manifest.slug))} \u2014 ultraprospect</title>
 <style>
-:root{--bg:#fff;--fg:#16181d;--muted:#5b6270;--line:#e3e6ec;--accent:#1c6dd0;--warnbg:#fff4e5;--warnfg:#7a4b00;--pt:#9aa3b2;--sited:#1c6dd0;--strong:#0a7d4f}
-@media (prefers-color-scheme:dark){:root{--bg:#11131a;--fg:#e8eaf0;--muted:#98a0b0;--line:#252a35;--accent:#6aa9ff;--warnbg:#3a2a06;--warnfg:#ffd68a;--pt:#4c5566;--sited:#6aa9ff;--strong:#3ddc9a}}
+:root{--bg:#fff;--fg:#16181d;--muted:#5b6270;--line:#e3e6ec;--soft:#f6f7fa;--accent:#1c6dd0;--warnbg:#fff4e5;--warnfg:#7a4b00;--notebg:#eef4fd;--notefg:#1c4a80;--pt:#9aa3b2;--sited:#1c6dd0;--strong:#0a7d4f;--possible:#b7791f;--no:#c0392b}
+@media (prefers-color-scheme:dark){:root{--bg:#11131a;--fg:#e8eaf0;--muted:#98a0b0;--line:#252a35;--soft:#171a22;--accent:#6aa9ff;--warnbg:#3a2a06;--warnfg:#ffd68a;--notebg:#12233a;--notefg:#a9ccf5;--pt:#4c5566;--sited:#6aa9ff;--strong:#3ddc9a;--possible:#e0b357;--no:#e77f72}}
 *{box-sizing:border-box}
 body{margin:0;padding:2rem 1.25rem 4rem;background:var(--bg);color:var(--fg);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-main{max-width:1100px;margin:0 auto}
-h1{font-size:1.6rem;margin:0 0 .25rem}
-.sub{color:var(--muted);margin:0 0 1.5rem}
-.warn{background:var(--warnbg);color:var(--warnfg);border-radius:8px;padding:.9rem 1rem;margin:0 0 1.5rem}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.75rem;margin:0 0 1.5rem}
-.card{border:1px solid var(--line);border-radius:8px;padding:.75rem .9rem}
-.card b{display:block;font-size:1.5rem;font-weight:650}
-.card span{color:var(--muted);font-size:.82rem}
-.map{margin:0 0 1.5rem}
+main{max-width:1240px;margin:0 auto}
+h1{font-size:1.7rem;margin:0 0 .25rem;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0 0 1.25rem}
+.warn,.note{border-radius:8px;padding:.85rem 1rem;margin:0 0 .75rem}
+.warn{background:var(--warnbg);color:var(--warnfg)}
+.note{background:var(--notebg);color:var(--notefg)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:.6rem;margin:1.25rem 0}
+.card{border:1px solid var(--line);border-radius:8px;padding:.7rem .85rem;background:var(--soft)}
+.card b{display:block;font-size:1.45rem;font-weight:650;font-variant-numeric:tabular-nums}
+.card span{color:var(--muted);font-size:.8rem;line-height:1.35;display:block}
+.cov{border:1px solid var(--line);border-radius:8px;padding:.6rem .9rem;margin:0 0 1.25rem;background:var(--soft)}
+.cov summary{cursor:pointer;font-weight:600}
+.cov .scroll{margin-top:.6rem;background:var(--bg)}
+.map{margin:0 0 1.25rem}
 .map svg{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;background:transparent}
 .map figcaption{color:var(--muted);font-size:.82rem;margin-top:.4rem}
-circle.pt{fill:var(--pt);opacity:.65}
-circle.sited{fill:var(--sited);opacity:.8}
+circle.pt{fill:var(--pt);opacity:.6;cursor:pointer}
+circle.sited{fill:var(--sited);opacity:.75}
+circle.possible{fill:var(--possible);opacity:.95}
 circle.strong{fill:var(--strong);opacity:.95}
-.tools{display:flex;gap:.75rem;align-items:center;margin:0 0 .6rem;flex-wrap:wrap}
+circle.no{fill:var(--no);opacity:.5}
+b.k{display:inline-block;width:.62rem;height:.62rem;border-radius:50%;background:var(--pt);vertical-align:baseline}
+b.k.strong{background:var(--strong)}b.k.possible{background:var(--possible)}b.k.sited{background:var(--sited)}
+.tools{display:flex;gap:.5rem;align-items:center;margin:0 0 .5rem;flex-wrap:wrap}
 #q{flex:1 1 18rem;min-width:12rem;padding:.5rem .7rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+.chip{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:999px;padding:.35rem .75rem;font:inherit;font-size:.85rem;cursor:pointer}
+.chip:hover{border-color:var(--accent)}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.chip[aria-pressed="true"] .src{color:#fff;opacity:.75}
 .muted{color:var(--muted);font-size:.85rem}
-.cap{color:var(--muted);font-size:.85rem;margin:0 0 .6rem}
+.cap{color:var(--muted);font-size:.85rem;margin:.4rem 0}
+.src{color:var(--muted);font-size:.85em;font-weight:400}
 th[data-sort]{cursor:pointer;user-select:none}
 th[data-sort]:hover{color:var(--accent)}
 th[aria-sort]::after{content:" \u25B2";font-size:.7em}
 th[aria-sort="descending"]::after{content:" \u25BC"}
 .scroll{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
 table{border-collapse:collapse;width:100%;font-size:.9rem}
-th,td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--line);white-space:nowrap}
-th{position:sticky;top:0;background:var(--bg);font-weight:600}
-td.n,th.n{text-align:right}
-tr:last-child td{border-bottom:0}
+th,td{text-align:left;padding:.45rem .7rem;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:top}
+th{position:sticky;top:0;background:var(--bg);font-weight:600;z-index:1}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.r:hover td{background:var(--soft)}
+tr.r.on td{background:var(--soft)}
+.tog{background:none;border:0;padding:0;font:inherit;color:var(--accent);cursor:pointer;text-align:left;max-width:26rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tog::before{content:"\u25B8 ";color:var(--muted)}
+tr.r.on .tog::before{content:"\u25BE "}
+tr.d{display:none}
+tr.d.open{display:table-row}
+tr.d td{white-space:normal;background:var(--soft);padding:.9rem 1.1rem}
+tr.d dl{margin:0;display:grid;grid-template-columns:minmax(9rem,11rem) 1fr;gap:.1rem .9rem}
+tr.d .b{display:contents}
+tr.d dt{color:var(--muted);font-size:.82rem;padding:.3rem 0;text-transform:uppercase;letter-spacing:.04em}
+tr.d dd{margin:0;padding:.3rem 0;min-width:0}
+.c{display:inline-block;margin:0 .7rem .2rem 0}
+.c b{font-weight:600}
+.warnc{color:var(--warnfg)}
+.tag{border:1px solid var(--line);border-radius:4px;padding:0 .3rem;font-size:.78rem;text-transform:uppercase;letter-spacing:.03em}
+.tag.verified{color:var(--strong);border-color:currentColor}
+.tag.attested{color:var(--possible);border-color:currentColor}
+.bar{display:flex;height:.5rem;border-radius:3px;overflow:hidden;margin:.15rem 0 .45rem;max-width:32rem;background:var(--line)}
+.bar i{display:block;height:100%;background:var(--accent);border-right:1px solid var(--bg)}
+.bar i:nth-child(even){opacity:.62}
+ul.jobs{margin:0;padding-left:1.1rem}
+ul.jobs li{margin:.15rem 0}
 a{color:var(--accent)}
 footer{color:var(--muted);font-size:.82rem;margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem}
 footer p{margin:.25rem 0}
+footer details{margin:.5rem 0}
+footer summary{cursor:pointer}
+footer li{margin:.1rem 0}
 </style>
+<noscript><style>tr.d{display:table-row}.tog{color:inherit;cursor:default}.tog::before{content:""}.tools{display:none}</style></noscript>
 </head>
 <body>
 <main>
 <h1>${esc(shortLabel(manifest.target.label || manifest.slug))}</h1>
 <p class="sub">${esc(manifest.target.label)} \xB7 ${esc(coverage(manifest).short)} \xB7 ultraprospect ${esc(manifest.toolVersion)}</p>
-${banner}
-<div class="cards">
-<div class="card"><b>${places.length}</b><span>companies</span></div>
-<div class="card"><b>${places.filter((p) => p.website?.confidence === "corroborated").length}</b><span>with a proven website</span></div>
-<div class="card"><b>${places.filter((p) => p.signals?.isHiring === true).length}</b><span>hiring now</span></div>
-<div class="card"><b>${places.filter((p) => p.contacts.emails.length || p.contacts.phones.length).length}</b><span>contactable</span></div>
-<div class="card"><b>${manifest.counts.merged}</b><span>matched across lanes</span></div>
-</div>
-${mapSvg(places, manifest)}
+${banners.join("\n")}
+${statCards(s, manifest)}
+${coverageTable(manifest, s)}
+${mapSvg(visible, manifest)}
 <div class="tools">
-<input id="q" type="search" placeholder="Filter \u2014 name, activity, town, domain, fit" autocomplete="off" aria-label="Filter the table">
+<input id="q" type="search" placeholder="Filter \u2014 name, legal name, register id, activity, town, domain, verdict" autocomplete="off" aria-label="Filter the table">
+${chips}
 <span id="count" class="muted"></span>
 </div>
 ${order.length > shown ? `<p class="cap">Showing the ${shown} highest-ranked of ${order.length} companies. The rest are in <code>PROSPECTS.csv</code> and <code>prospects.json</code> \u2014 this table is capped so a browser can open it, not because the run stopped there.</p>` : ""}
+<p class="cap">Every company name opens a panel: the verdict, the score broken into its terms, each contact with the page it was read from, the open roles, and what the register filed.</p>
 <div class="scroll">
 <table>
-<thead><tr><th data-sort="t">Company</th><th class="n" data-sort="n">Score</th><th data-sort="t">Fit</th><th class="n" data-sort="n">Roles</th><th data-sort="t">Activity</th><th data-sort="t">Town</th><th data-sort="t">Website</th></tr></thead>
+<thead><tr><th class="n">#</th><th data-sort="t">Company</th><th class="n" data-sort="n">Score</th><th data-sort="t">Fit</th><th class="n" data-sort="n">Roles</th><th data-sort="t">Activity</th><th data-sort="t">Town</th><th data-sort="t">Contact</th><th data-sort="t">Register</th><th data-sort="t">Website</th></tr></thead>
 <tbody>
 ${rows}
 </tbody>
@@ -10010,30 +10297,75 @@ ${rows}
 </div>
 <footer>
 ${manifest.licences.map((x) => `<p>${esc(x)}</p>`).join("\n")}
+${s.notes.lines.length ? `<details><summary>Run notes (${s.notes.distinct === s.notes.emitted ? s.notes.emitted : `${s.notes.distinct} distinct of ${s.notes.emitted}`})</summary><ul>${s.notes.lines.map((n) => `<li>${n.count > 1 ? `\xD7${n.count} ` : ""}${esc(n.text)}</li>`).join(
+    ""
+  )}${s.notes.distinct > s.notes.lines.length ? `<li>\u2026and ${s.notes.distinct - s.notes.lines.length} more distinct notes, in <code>manifest.json</code></li>` : ""}</ul></details>` : ""}
 <p>Extracted ${esc(manifest.builtAt.slice(0, 10))}. This page makes no network requests.</p>
 </footer>
 </main>
 <script>
-// Filtering and sorting, inline and offline. Without JavaScript the table is
-// still a table \u2014 the controls simply do nothing, which is why the cap note
-// above is markup rather than something this script writes.
+// Filtering, faceting, sorting and the detail panels \u2014 inline and offline.
+// Without JavaScript every panel is open and the table is still a table, which
+// is why the cap note above is markup rather than something this script writes.
 (function(){
   var tb=document.querySelector("tbody"), q=document.getElementById("q"), c=document.getElementById("count");
   if(!tb) return;
-  var rows=[].slice.call(tb.rows), total=rows.length;
+  var rows=[].slice.call(tb.querySelectorAll("tr.r")), total=rows.length, on={};
+  rows.forEach(function(r){ r.detail = r.nextElementSibling; });
+
   function tell(n){ if(c) c.textContent = n===total ? total+" rows" : n+" of "+total+" rows"; }
-  tell(total);
-  if(q) q.addEventListener("input", function(){
-    var t=q.value.trim().toLowerCase(), n=0;
+
+  function apply(){
+    var t=(q&&q.value||"").trim().toLowerCase(), keys=Object.keys(on).filter(function(k){return on[k]}), n=0;
     for(var i=0;i<rows.length;i++){
-      var hit = !t || (rows[i].dataset.h||"").indexOf(t) !== -1;
-      rows[i].hidden = !hit; if(hit) n++;
+      var r=rows[i], f=" "+(r.dataset.f||"")+" ", hit = !t || (r.dataset.h||"").indexOf(t) !== -1;
+      for(var j=0;hit&&j<keys.length;j++) if(f.indexOf(" "+keys[j]+" ")===-1) hit=false;
+      r.hidden=!hit;
+      if(r.detail) r.detail.hidden=!hit;
+      if(hit) n++;
     }
     tell(n);
+  }
+  tell(total);
+  if(q) q.addEventListener("input", apply);
+
+  [].forEach.call(document.querySelectorAll(".chip"), function(chip){
+    chip.addEventListener("click", function(){
+      var k=chip.dataset.facet, next = chip.getAttribute("aria-pressed") !== "true";
+      chip.setAttribute("aria-pressed", next ? "true" : "false");
+      on[k]=next; apply();
+    });
   });
+
+  function open(r, want){
+    if(!r.detail) return;
+    var next = want===undefined ? !r.classList.contains("on") : want;
+    r.classList.toggle("on", next);
+    r.detail.classList.toggle("open", next);
+    var b=r.querySelector(".tog"); if(b) b.setAttribute("aria-expanded", next ? "true" : "false");
+  }
+  tb.addEventListener("click", function(e){
+    var b=e.target.closest ? e.target.closest(".tog") : null;
+    if(!b) return;
+    open(b.parentNode.parentNode);
+  });
+
+  // A point on the map is a row. Clicking one opens it rather than only
+  // naming it, which is the difference between a picture and an index.
+  [].forEach.call(document.querySelectorAll("circle[data-i]"), function(dot){
+    dot.addEventListener("click", function(){
+      var r=document.getElementById("r"+dot.dataset.i);
+      if(!r) return;
+      if(r.hidden){ if(q) q.value=""; [].forEach.call(document.querySelectorAll(".chip"), function(ch){ ch.setAttribute("aria-pressed","false"); on[ch.dataset.facet]=false; }); apply(); }
+      open(r, true);
+      r.scrollIntoView({block:"center"});
+    });
+  });
+
   var heads=[].slice.call(document.querySelectorAll("th[data-sort]"));
-  heads.forEach(function(th,i){
+  heads.forEach(function(th){
     th.addEventListener("click", function(){
+      var i=[].indexOf.call(th.parentNode.children, th);
       var desc = th.getAttribute("aria-sort") !== "descending";
       heads.forEach(function(h){ h.removeAttribute("aria-sort"); });
       th.setAttribute("aria-sort", desc ? "descending" : "ascending");
@@ -10045,9 +10377,12 @@ ${manifest.licences.map((x) => `<p>${esc(x)}</p>`).join("\n")}
         if(num){ var nx=parseFloat(x), ny=parseFloat(y);
           if(isNaN(nx)&&isNaN(ny)) return 0; if(isNaN(nx)) return 1; if(isNaN(ny)) return -1;
           return desc ? ny-nx : nx-ny; }
+        if(!x&&!y) return 0; if(!x) return 1; if(!y) return -1;
         return desc ? y.localeCompare(x) : x.localeCompare(y);
       });
-      rows.forEach(function(r){ tb.appendChild(r); });
+      // A row and its panel move together, or the panel ends up under a
+      // different company.
+      rows.forEach(function(r){ tb.appendChild(r); if(r.detail) tb.appendChild(r.detail); });
     });
   });
 })();
@@ -10056,6 +10391,261 @@ ${manifest.licences.map((x) => `<p>${esc(x)}</p>`).join("\n")}
 </html>
 `;
 }
+
+// src/report.ts
+function mdCell(value) {
+  return String(value ?? "").replace(/\|/g, "\\|").replace(/\s*[\r\n]+\s*/g, " ").trim();
+}
+var row = (cells) => `| ${cells.map(mdCell).join(" | ")} |`;
+function truncationBanner(manifest) {
+  if (!manifest.truncated) return [];
+  const lanes = manifest.lanes.filter((l) => l.truncated);
+  return [
+    "> \u26A0 **This run does not cover the whole territory.**",
+    ">",
+    ...lanes.map((l) => `> - **${l.lane}**: ${l.reason ?? "capped"} (${l.returned} returned)`),
+    ">",
+    "> Treat every count below as a floor, not a total.",
+    ""
+  ];
+}
+function contactMark(place) {
+  return [place.contacts.emails.length ? "\u2709" : "", place.contacts.phones.length ? "\u260E" : ""].filter(Boolean).join(" ");
+}
+function registerMark(place) {
+  const s = place.registry;
+  if (!s) return "";
+  return `${s.id} (${s.connectorId})`;
+}
+function share(n, total) {
+  if (!total) return String(n);
+  return `${n} (${Math.round(n / total * 100)}%)`;
+}
+function coverageSection(manifest, s, places) {
+  const l = ["## Coverage", ""];
+  l.push("| Lane | Mode | Returned | Complete | Note |");
+  l.push("|---|---|---:|---|---|");
+  for (const lane of manifest.lanes) {
+    const mode2 = lane.mode ?? (lane.lane === "registry" ? "not swept" : "\u2014");
+    l.push(row([lane.lane, mode2, lane.returned, lane.truncated ? "**no**" : "yes", lane.reason ?? ""]));
+  }
+  l.push("");
+  if (s.registry.byConnector.length) {
+    l.push(`Register records by connector: ${s.registry.byConnector.map(([id, n]) => `${id} ${n}`).join(" \xB7 ")}`);
+    l.push("");
+  }
+  if (s.registry.byEvidence.length) {
+    l.push(`How each register record was attached: ${s.registry.byEvidence.map(([how, n]) => `${n} ${how}`).join(" \xB7 ")}`);
+    l.push("");
+  }
+  if (s.filters.length) {
+    l.push(`What this run looked for: ${s.filters.join(" \xB7 ")}.`);
+    l.push("");
+  }
+  l.push(
+    `${places.length} companies after fusion (${manifest.counts.merged} matched across both lanes, ${manifest.counts.undecided} pairs left for adjudication).`
+  );
+  l.push("");
+  if (s.registry.dated.count) {
+    l.push("> \u26A0 **Some register records are dated.**");
+    l.push(">");
+    l.push(
+      `> ${s.registry.dated.count} of ${places.length} companies carry a register record from a bulk open-data snapshot rather than from asking the register: ${s.registry.dated.years.join(", ")}. Those identities were true then. They are not evidence about today, and the \`registry_as_of\` column in the CSV carries the date for each one.`
+    );
+    l.push("");
+  }
+  return l;
+}
+function inventorySection(s) {
+  const l = ["## What is there", ""];
+  const sites = [
+    `${s.websites.corroborated} with a website we corroborated`,
+    s.websites.declared ? `${s.websites.declared} declared in OSM and never checked` : "",
+    s.websites.unverified ? `${s.websites.unverified} unverified` : "",
+    `${s.websites.none} with none at all`
+  ].filter(Boolean);
+  l.push(`- **Websites.** ${sites.join(" \xB7 ")}`);
+  if (s.site.enriched === 0) {
+    l.push(
+      "- **Hiring, contacts and site signals.** Not established: no site in this run has been read yet. `enrich` fetches the pages and the job boards, and until it runs these are unknown rather than absent."
+    );
+  } else {
+    const hiring = [`${s.hiring.yes} hiring right now (${s.hiring.roles} open roles read from ATS APIs)`, `${s.hiring.no} not hiring`];
+    if (s.hiring.unknown) hiring.push(`${s.hiring.unknown} run a board we could not read \u2014 their hiring is unknown, not absent`);
+    if (s.site.enriched < s.total) hiring.push(`${s.total - s.site.enriched} whose site was never read at all`);
+    l.push(`- **Hiring.** ${hiring.join(" \xB7 ")}`);
+    if (s.hiring.ats.length) l.push(`  - Boards seen: ${s.hiring.ats.map(([name, n]) => `${name} ${n}`).join(" \xB7 ")}`);
+    if (s.hiring.matchedRoles) l.push(`  - ${s.hiring.matchedRoles} of those roles match the \`--role\` filter this run was given`);
+    l.push(
+      `- **Contactable.** ${s.contact.any} from a published address or number \u2014 ${s.contact.emails} by email, ${s.contact.phones} by phone, ${s.contact.both} by both`
+    );
+  }
+  if (s.registry.withRecord) {
+    const reg = [`${share(s.registry.withRecord, s.total)} carry a register identity`];
+    if (s.registry.headOffices) reg.push(`${s.registry.headOffices} head offices`);
+    if (s.registry.ceased) reg.push(`${s.registry.ceased} filed as ceased`);
+    if (s.registry.withOfficers) reg.push(`${s.registry.withOfficers} publish officers (${s.registry.officers} people)`);
+    l.push(`- **Register.** ${reg.join(" \xB7 ")}`);
+  }
+  if (s.legalIds.total) {
+    l.push(
+      `- **Legal identifiers found on the companies' own sites.** ${s.legalIds.total} read \xB7 ${s.legalIds.verified} verified and named by an authority \xB7 ${s.legalIds.attested} attested live but with no name disclosed \xB7 ${s.legalIds.unverified} nobody could answer on`
+    );
+  }
+  if (s.site.enriched) {
+    const site = [`${s.site.pagesRead} pages stored across ${s.site.withPages} companies`];
+    if (s.site.withCms) site.push(`${s.site.withCms} on a recognised CMS`);
+    if (s.site.withLastContent) site.push(`${s.site.withLastContent} publish a last-modified date`);
+    if (s.site.pricing) site.push(`${s.site.pricing} publish pricing`);
+    if (s.site.ecommerce) site.push(`${s.site.ecommerce} sell online`);
+    l.push(`- **Sites.** ${site.join(" \xB7 ")}`);
+  }
+  l.push("");
+  if (s.total) {
+    l.push("### Score distribution");
+    l.push("");
+    l.push("| Measured score | Companies |");
+    l.push("|---|---:|");
+    for (const [label, n] of s.scores.bands) l.push(row([label, n]));
+    l.push("");
+    l.push(`Highest measured score in the run: ${s.scores.max}.`);
+    l.push("");
+  }
+  if (s.bySection.length) {
+    l.push("### By activity");
+    l.push("");
+    l.push("| Activity | Companies |");
+    l.push("|---|---:|");
+    for (const [key, n] of s.bySection.slice(0, 12)) l.push(row([key, n]));
+    l.push("");
+  }
+  if (s.byBand.length) {
+    l.push("### By size");
+    l.push("");
+    l.push("| Headcount | Companies |");
+    l.push("|---|---:|");
+    for (const [label, n] of s.byBand) l.push(row([label, n]));
+    l.push("");
+  }
+  return l;
+}
+var SECTION_CAP = 25;
+function hiringSection(places) {
+  const hiring = ranked(places.filter((p) => p.signals?.isHiring === true && (p.signals.openRoles ?? 0) > 0));
+  if (!hiring.length) return [];
+  const roles = hiring.reduce((n, p) => n + (p.signals?.openRoles ?? 0), 0);
+  const l = [`## Who is hiring (${hiring.length} companies, ${roles} open roles)`, ""];
+  l.push("| Company | Open roles | Matching the brief | Oldest role | Via | Website |");
+  l.push("|---|---:|---:|---:|---|---|");
+  for (const p of hiring.slice(0, SECTION_CAP)) {
+    const sg = p.signals;
+    l.push(
+      row([
+        p.name,
+        sg.openRoles,
+        sg.matchedRoles ?? "",
+        sg.oldestOpenRoleDays !== void 0 ? `${Math.round(sg.oldestOpenRoleDays)} d` : "",
+        sg.atsProviders.join(", ") || "the site",
+        p.website?.url ?? ""
+      ])
+    );
+  }
+  if (hiring.length > SECTION_CAP) l.push(row([`\u2026and ${hiring.length - SECTION_CAP} more, in PROSPECTS.csv`, "", "", "", "", ""]));
+  l.push("");
+  return l;
+}
+function judgedSection(places, s) {
+  const judged = ranked(places).filter((p) => p.score?.fit);
+  if (!judged.length) return [];
+  const l = [`## Judged (${judged.length} of ${s.total})`, ""];
+  if (s.fit.byVerdict.length) {
+    l.push(s.fit.byVerdict.map(([verdict, n]) => `${n} ${verdict}`).join(" \xB7 "));
+    l.push("");
+  }
+  for (const [i, p] of judged.slice(0, SECTION_CAP).entries()) {
+    l.push(`### ${i + 1}. ${p.name} \u2014 ${p.score.fit} \xB7 ${p.score.total}`);
+    l.push("");
+    const where = [streetLine(p.address), p.address.codePostal, p.address.commune].filter(Boolean).join(", ");
+    const contact = [p.contacts.emails[0], p.contacts.phones[0]].filter(Boolean).map((c) => `${c.value} [${c.from}]`);
+    const line = [where, p.website?.url, ...contact].filter(Boolean).join(" \xB7 ");
+    if (line) {
+      l.push(line);
+      l.push("");
+    }
+    if (p.score.why) {
+      l.push(`**Why.** ${p.score.why}`);
+      l.push("");
+    }
+    if (p.score.angle) {
+      l.push(`**Angle.** ${p.score.angle}`);
+      l.push("");
+    }
+  }
+  if (judged.length > SECTION_CAP) {
+    l.push(`\u2026and ${judged.length - SECTION_CAP} more verdicts, in the \`fit_why\` and \`angle\` columns of \`PROSPECTS.csv\`.`);
+    l.push("");
+  }
+  const unjudged = s.total - judged.length;
+  if (unjudged > 0) {
+    l.push(
+      `${unjudged} companies carry a measured score and no verdict. Their Fit column is empty because nobody has read them yet, not because they were rejected \u2014 \`dossier\` then \`score --apply\` is what fills it.`
+    );
+    l.push("");
+  }
+  return l;
+}
+var RANKED_CAP = 50;
+function rankedSection(places) {
+  const order = ranked(places);
+  const l = ["## Ranked", ""];
+  l.push("| # | Company | Score | Fit | Roles | Town | Contact | Register | Website |");
+  l.push("|---:|---|---:|---|---|---|---|---|---|");
+  for (const [i, p] of order.slice(0, RANKED_CAP).entries()) {
+    const h = p.signals?.isHiring === true ? `${p.signals.openRoles}` : p.signals?.isHiring === false ? "\u2014" : "?";
+    l.push(row([i + 1, p.name, p.score?.total ?? 0, p.score?.fit ?? "", h, p.address.commune ?? "", contactMark(p), registerMark(p), p.website?.url ?? ""]));
+  }
+  l.push("");
+  if (order.length > RANKED_CAP) {
+    l.push(`The other ${order.length - RANKED_CAP} companies are in \`PROSPECTS.csv\` and \`index.html\`, ranked the same way.`);
+    l.push("");
+  }
+  return l;
+}
+function notesSection(s) {
+  if (!s.notes.lines.length) return [];
+  const header2 = s.notes.distinct === s.notes.emitted ? `## Run notes (${s.notes.emitted})` : `## Run notes (${s.notes.distinct} distinct of ${s.notes.emitted})`;
+  const l = [header2, ""];
+  for (const n of s.notes.lines) l.push(`- ${n.count > 1 ? `\xD7${n.count} ` : ""}${n.text}`);
+  const rest = s.notes.distinct - s.notes.lines.length;
+  if (rest > 0) l.push(`- \u2026and ${rest} more distinct notes, in \`manifest.json\``);
+  l.push("");
+  return l;
+}
+function buildReport(places, manifest) {
+  const s = summarise(places, manifest);
+  const l = [];
+  l.push(`# ${shortLabel(manifest.target.label || manifest.slug)}`);
+  l.push("");
+  l.push(...truncationBanner(manifest));
+  l.push(`${manifest.target.label}`);
+  l.push("");
+  l.push(coverage(manifest).sentence);
+  l.push("");
+  l.push(...coverageSection(manifest, s, places));
+  l.push(...inventorySection(s));
+  l.push(...hiringSection(places));
+  l.push(...judgedSection(places, s));
+  l.push(...rankedSection(places));
+  l.push(...notesSection(s));
+  l.push("## Sources");
+  l.push("");
+  for (const licence of manifest.licences) l.push(`- ${licence}`);
+  l.push("");
+  l.push(`Extracted ${manifest.builtAt.slice(0, 10)}.`);
+  return l.join("\n") + "\n";
+}
+
+// src/render.ts
 function buildPrivacyNote(places, manifest) {
   const withOfficers = places.filter((p) => (p.registry?.officers.length ?? 0) > 0);
   const withPeople = places.filter((p) => p.contacts.people.length > 0);
@@ -10361,7 +10951,7 @@ var TOOLS = [
   {
     name: "ultraprospect_render",
     title: "Write the deliverables",
-    description: "Writes PROSPECTS.csv (flat, CRM-shaped, score and fit in separate columns, each contact's source page beside it), prospects.json, REPORT.md and a self-contained index.html that makes no network requests. The report's opening sentence is DERIVED from the lanes, so it cannot claim a sweep the run did not perform, and a truncated run leads with that. If PRIVACY.md appears in the file list, the run holds named individuals.",
+    description: "Writes PROSPECTS.csv (flat, CRM-shaped, score and fit in separate columns, each contact's source page beside it), prospects.json, REPORT.md and a self-contained index.html that makes no network requests. Both documents carry what the run knows rather than a summary of it: which connector answered and what attached each record, what the run was narrowed to, the score broken into its terms, every fit verdict verbatim, each contact with the page id it was read from. The report's opening sentence is DERIVED from the lanes, so it cannot claim a sweep the run did not perform; a truncated run and a dated register record each lead with that. If PRIVACY.md appears in the file list, the run holds named individuals.",
     inputSchema: {
       type: "object",
       properties: {
