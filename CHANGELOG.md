@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [3.1.0](https://github.com/maxgfr/ultraprospect/compare/v3.0.1...v3.1.0) (2026-08-21)
+
+
+### Bug Fixes
+
+* **check:** re-read a legal identifier the way the page writes it ([94439b9](https://github.com/maxgfr/ultraprospect/commit/94439b9c838242149c9fe46c9922486779e86645))
+* **signals:** a contractor term only counts on the page where it means hiring ([eeeaf9f](https://github.com/maxgfr/ultraprospect/commit/eeeaf9f9bc17effc0c9f507511859895fdbd03dc))
+* **signals:** an evergreen posting is not a role nobody could fill ([b1e0cdd](https://github.com/maxgfr/ultraprospect/commit/b1e0cddaa2ebb3265874c4e167eb813ed15f7cdf))
+* **tests:** the legal-id fixture was missing its status field ([7e2d1fa](https://github.com/maxgfr/ultraprospect/commit/7e2d1faa47d93a547342ceb36e9abfa6178ba1ae))
+
+
+### Features
+
+* **ats,signals:** read the German boards, and measure who buys contract work ([181dcc3](https://github.com/maxgfr/ultraprospect/commit/181dcc3e4b3b8b5bd8a3e8fd2e3b6a4f65392363))
+* **render:** the page is usable at the size a real run produces ([18b2c40](https://github.com/maxgfr/ultraprospect/commit/18b2c408575802af11c31e593ea9f680e00d605b))
+* **signals:** make the contractor signal multilingual, and stop encoding one brief ([56a43ad](https://github.com/maxgfr/ultraprospect/commit/56a43adf650ff4feb3a88147a49e760e58c49ac0))
+
 ## [3.0.1](https://github.com/maxgfr/ultraprospect/compare/v3.0.0...v3.0.1) (2026-08-14)
 
 
