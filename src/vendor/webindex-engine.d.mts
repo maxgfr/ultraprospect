@@ -1,7 +1,7 @@
 import { Readable, Writable } from 'node:stream';
 import { Server } from 'node:http';
 
-declare const ENGINE_VERSION = "1.18.2";
+declare const ENGINE_VERSION = "1.18.3";
 
 interface Brand {
     /** Human-readable engine consumer, used in notes and diagnostics. */
@@ -1520,10 +1520,11 @@ declare function throttleReason(status: number): {
  * engine reports "returned no results" — a refusal wearing the clothes of an
  * empty web.
  *
- * Deliberately narrow. It only fires on a body that is BOTH short — a challenge
- * page carries no results, so it is a fraction of a result page — and carrying
- * one of these engines' own challenge markers. A results page that merely
- * mentions the word captcha must not trip it, which is why length comes first.
+ * Deliberately narrow, and never the first word. It only fires on a body that is
+ * BOTH short — a challenge page carries no results, so it is a fraction of a
+ * result page — and carrying one of these engines' own challenge markers. And
+ * `searchViaKeyless` only consults it once parsing has produced NOTHING, so a
+ * page with results can never be called blocked however its markup reads.
  */
 declare function looksLikeChallenge(body: string): boolean;
 /** One page of `html.duckduckgo.com/html/`. */

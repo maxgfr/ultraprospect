@@ -326,6 +326,39 @@ export interface WebHit {
   placeId?: string;
 }
 
+/**
+ * One doorway, normalised, or "" when the place has no street address.
+ *
+ * Number + street + postcode, because that is the granularity at which "the
+ * same address" means the same entrance. The commune is redundant with the
+ * postcode and spelled inconsistently between the two lanes.
+ */
+export function addressKey(place: Place): string {
+  const a = place.address;
+  if (!a.libelleVoie || !a.codePostal) return "";
+  return `${a.numero ?? ""}|${foldAccents(a.libelleVoie).toUpperCase().trim()}|${a.codePostal}`;
+}
+
+/**
+ * The addresses this run found more than one company at.
+ *
+ * Business centres, coworking floors and domiciliation services are not edge
+ * cases: on a Saint-Mandé sweep 62 of 86 companies shared an address with
+ * another company in the same run, 36 of them at a single building. So "two
+ * businesses do not share a doorway" cannot be assumed — but it can be
+ * MEASURED, and measured from the run's own register records rather than from a
+ * list of known business centres that would need maintaining and would still
+ * miss the next one.
+ */
+export function sharedAddressesIn(places: readonly Place[]): Set<string> {
+  const seen = new Map<string, number>();
+  for (const p of places) {
+    const key = addressKey(p);
+    if (key) seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+  return new Set([...seen].filter(([, n]) => n > 1).map(([key]) => key));
+}
+
 export interface Corroboration {
   ok: boolean;
   /** What was found on the page that ties it to this company. */
@@ -354,7 +387,7 @@ export interface Corroboration {
  *     tokens are dropped before matching and at least one distinctive token
  *     must survive and appear.
  */
-export function corroborate(place: Place, pageText: string, pageTitle?: string): Corroboration {
+export function corroborate(place: Place, pageText: string, pageTitle?: string, sharedAddresses: ReadonlySet<string> = new Set()): Corroboration {
   const haystack = foldAccents(`${pageTitle ?? ""}\n${pageText}`).toLowerCase();
   const digits = haystack.replace(/[^0-9]/g, "");
   const evidence: string[] = [];
@@ -375,7 +408,11 @@ export function corroborate(place: Place, pageText: string, pageTitle?: string):
 
   const street = place.address.libelleVoie;
   const postcode = place.address.codePostal;
-  if (street && postcode) {
+  // An address only distinguishes a company from the others when it is HERS.
+  // Where this run has already found several companies behind the same door,
+  // it has measured that this one does not, so the signal is dropped here
+  // rather than believed and explained away downstream.
+  if (street && postcode && !sharedAddresses.has(addressKey(place))) {
     const streetNorm = foldAccents(street)
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, " ")
@@ -523,16 +560,38 @@ export function groupHits(places: readonly Place[], hits: readonly WebHit[]): Ma
     }
     return byPlace;
   }
-  // Untagged pool: attribute each hit to the place whose distinctive name
-  // tokens appear in its title or snippet. A hit that matches nothing is
-  // dropped rather than assigned to the nearest guess.
+  // Untagged pool: attribute each hit to the place whose distinctive name tokens
+  // appear in it. A hit that matches nothing is dropped rather than assigned to
+  // the nearest guess.
+  //
+  // Two rules, and the split between them is what a URL can honestly prove:
+  //
+  //   TEXT (title and snippet) is matched WORD BY WORD. Substring matching read
+  //     "national" out of "UBISOFT INTERNATIONAL" and handed Ubisoft's careers
+  //     page to the CNRS on a live Saint-Mandé run; the page then corroborated
+  //     on a shared street address and became the CNRS's website.
+  //   THE HOST is matched as a substring, because that is how domains spell a
+  //     company name — matchtune.com for MATCH TUNE. The PATH is not matched at
+  //     all: `actulegales.fr/recherche/siren/…` is that directory's own
+  //     vocabulary, and it went to the CNRS for the word "recherche".
   for (const place of places) {
     const names = [place.osm?.name, ...namesOf(place)].filter((n): n is string => Boolean(n));
     const tokens = names.flatMap((n) => [...tokenSet(normalizeName(n))].filter((t) => t.length >= 4));
     if (tokens.length === 0) continue;
     for (const h of hits) {
-      const hay = foldAccents(`${h.title ?? ""} ${h.snippet ?? ""} ${h.url}`).toLowerCase();
-      if (tokens.some((t) => hay.includes(t))) {
+      const words = new Set(
+        foldAccents(`${h.title ?? ""} ${h.snippet ?? ""}`)
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter(Boolean),
+      );
+      let host = "";
+      try {
+        host = foldAccents(new URL(h.url).hostname).toLowerCase();
+      } catch {
+        // A malformed URL contributes no host; the text rule still applies.
+      }
+      if (tokens.some((t) => words.has(t) || (host !== "" && host.includes(t)))) {
         const list = byPlace.get(place.id) ?? [];
         list.push(h);
         byPlace.set(place.id, list);
@@ -561,6 +620,11 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
 
   const locale = searchLocaleFor(opts.countryCode, opts.lang);
   if (opts.useEngineSearch && locale) note(`resolve: the keyless fallback will search in ${locale}`);
+
+  // Computed over EVERY place in the run, not just the ones being resolved: a
+  // company sharing a door with one the caller filtered out still shares it.
+  const shared = sharedAddressesIn(places);
+  if (shared.size) note(`resolve: ${shared.size} address(es) hold more than one company in this run — an address alone will not corroborate a site for those`);
 
   const targets = needsResolving(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
   const grouped = groupHits(targets, opts.webResults ?? []);
@@ -629,7 +693,7 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
       }
       const page = fetched.page;
 
-      const check = corroborate(place, page.text, page.title);
+      const check = corroborate(place, page.text, page.title, shared);
       const list = outcome.pages.get(place.id) ?? [];
       list.push(page.record);
       outcome.pages.set(place.id, list);

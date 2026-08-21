@@ -119,6 +119,51 @@ describe("corroborate", () => {
     expect(r.evidence.some((e) => e.includes("Avenue de Nogent"))).toBe(true);
   });
 
+  it("refuses an address the run itself shows is shared by several companies", () => {
+    // "Two businesses can share a name; they do not share a doorway" is false
+    // often enough to matter. Measured on a live Saint-Mandé sweep: 62 of 86
+    // companies sat at an address occupied by at least one other company in the
+    // same run — 36 of them at one business centre. At 2 avenue Pasteur the CNRS,
+    // BaxterStorey and three Ubisoft entities share a door, and Ubisoft's own
+    // page duly corroborated as the CNRS's website.
+    //
+    // Nothing is assumed here: sharing is READ OFF the run, so the signal is
+    // dropped exactly where it has been shown not to distinguish.
+    const shared = new Set(["2|PASTEUR|94160"]);
+    const p = place({
+      osm: undefined,
+      name: "CNRS",
+      registry: rec({ legalName: "CNRS" }),
+      address: { numero: "2", libelleVoie: "PASTEUR", codePostal: "94160" },
+    });
+    const r = corroborate(p, "Ubisoft Worldwide HQ — 2 avenue Pasteur, 94160 Saint-Mandé", "Ubisoft", shared);
+    expect(r.ok).toBe(false);
+    expect(r.evidence).toHaveLength(0);
+  });
+
+  it("still accepts the address when this run shows it belongs to one company", () => {
+    const p = place({ osm: undefined, name: "x", address: { numero: "12", libelleVoie: "Avenue de Nogent", codePostal: "94300" } });
+    const r = corroborate(p, "Retrouvez-nous 12 Avenue de Nogent, 94300 Vincennes", undefined, new Set(["2|PASTEUR|94160"]));
+    expect(r.ok).toBe(true);
+  });
+
+  it("keeps a registration number as evidence even at a shared address", () => {
+    // Sharing a door says nothing about a registration number, which no other
+    // company carries. Dropping that too would throw away the strongest signal
+    // there is at exactly the addresses where it is most needed.
+    const shared = new Set(["14|DU GENERAL DE GAULLE|94160"]);
+    const p = place({
+      osm: undefined,
+      name: "GEDIVOTE",
+      registry: rec({ id: "851901165", legalName: "GEDIVOTE" }),
+      address: { numero: "14", libelleVoie: "DU GENERAL DE GAULLE", codePostal: "94160" },
+    });
+    const r = corroborate(p, "RCS Créteil 851 901 165 — 14 avenue du Général de Gaulle, 94160 Saint-Mandé", "Gedivote", shared);
+    expect(r.ok).toBe(true);
+    expect(r.evidence.some((e) => e.includes("851901165"))).toBe(true);
+    expect(r.evidence.some((e) => e.includes("address"))).toBe(false);
+  });
+
   it("accepts a page carrying the distinctive part of the name", () => {
     const r = corroborate(place(), "Bienvenue au restaurant Les Officiers, cuisine de saison");
     expect(r.ok).toBe(true);
@@ -202,6 +247,48 @@ describe("groupHits", () => {
   it("drops a hit that matches nothing rather than assigning it to the nearest guess", () => {
     const grouped = groupHits([a, b], [{ url: "https://unrelated.example", title: "Something else" }]);
     expect([...grouped.values()].flat()).toHaveLength(0);
+  });
+
+  it("matches a name token as a WORD, not as a substring of a longer one", () => {
+    // Measured on a live Saint-Mandé run: the CNRS was handed Ubisoft's careers
+    // page, because "national" — a distinctive token of CENTRE NATIONAL DE LA
+    // RECHERCHE SCIENTIFIQUE — is a substring of "UBISOFT INTERNATIONAL". The
+    // page then corroborated on a shared street address and the CNRS's website
+    // became ubisoft.com.
+    const cnrs = place({
+      id: "cnrs",
+      name: "CENTRE NATIONAL DE LA RECHERCHE SCIENTIFIQUE",
+      osm: undefined,
+      registry: rec({ legalName: "CENTRE NATIONAL DE LA RECHERCHE SCIENTIFIQUE" }),
+    });
+    const grouped = groupHits(
+      [cnrs],
+      [{ url: "https://www.ubisoft.com/fr-fr/company/careers", title: "Ubisoft Worldwide HQ", snippet: "UBISOFT INTERNATIONAL" }],
+    );
+    expect([...grouped.values()].flat()).toHaveLength(0);
+  });
+
+  it("does not read a URL's PATH as evidence of whose page it is", () => {
+    // The same run: `actulegales.fr/recherche/siren/848367397` was handed to the
+    // CNRS because the path segment "recherche" is one of its name tokens. A
+    // path is the site's own vocabulary, not the company's.
+    const cnrs = place({
+      id: "cnrs",
+      name: "CENTRE NATIONAL DE LA RECHERCHE SCIENTIFIQUE",
+      osm: undefined,
+      registry: rec({ legalName: "CENTRE NATIONAL DE LA RECHERCHE SCIENTIFIQUE" }),
+    });
+    const grouped = groupHits([cnrs], [{ url: "https://actulegales.fr/recherche/siren/848367397", title: "STUDIOMATIC, 94160 ST MANDE" }]);
+    expect([...grouped.values()].flat()).toHaveLength(0);
+  });
+
+  it("still matches a name run together in a domain, which is how domains are spelled", () => {
+    // The word rule must not cost the commonest true positive there is: a
+    // company's own domain concatenates its name. So the host is still matched
+    // as a substring — it is the one part of a URL that identifies an owner.
+    const mt = place({ id: "mt", name: "MATCH TUNE", osm: undefined, registry: rec({ legalName: "MATCH TUNE" }) });
+    const grouped = groupHits([mt], [{ url: "https://www.matchtune.com/", title: "AI Music Audit & Compliance" }]);
+    expect(grouped.get("mt")).toHaveLength(1);
   });
 });
 

@@ -56,7 +56,12 @@ const ENGINES = {
     // a refusal as an empty web, which is the one failure mode this skill exists
     // to refuse. That is exactly the silent staleness this floor is here to
     // catch.
-    minRef: "v1.18.2",
+    // v1.18.3: 1.18.2 read the challenge markers out of a response BEFORE
+    // parsing it, so a real result page carrying one would have been reported as
+    // blocked and its hits discarded. `resolve` would then have thrown away
+    // websites it had actually found — a worse failure than the empty-web report
+    // 1.18.2 was written to fix. Results decide first from 1.18.3 on.
+    minRef: "v1.18.3",
     meta: "webindex.meta.json",
     files: [
       { remote: "scripts/engine.mjs", local: "webindex-engine.mjs" },

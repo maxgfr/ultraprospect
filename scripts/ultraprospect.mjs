@@ -1569,7 +1569,9 @@ async function searchViaKeyless(engine, query, opts = {}) {
       const { throttled, why } = throttleReason(r.status);
       return { hits: [], note: `${spec.label} ${why}.`, throttled, ...r.status === 403 ? { blocked: true } : {} };
     }
-    if (looksLikeChallenge(r.body)) {
+    const before = hits.length;
+    const parsed = spec.parse(r.body, limit * 2);
+    if (parsed.length === 0 && looksLikeChallenge(r.body)) {
       if (p > 0) break;
       return {
         hits: [],
@@ -1578,8 +1580,7 @@ async function searchViaKeyless(engine, query, opts = {}) {
         blocked: true
       };
     }
-    const before = hits.length;
-    for (const f of spec.parse(r.body, limit * 2)) {
+    for (const f of parsed) {
       const key = canonicalizeUrl(f.url);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -8201,7 +8202,20 @@ function namesOf2(place) {
   if (rec.legalName) out2.push(rec.legalName.replace(/\s*\([^)]*\)/g, "").trim());
   return out2.filter(Boolean);
 }
-function corroborate(place, pageText, pageTitle) {
+function addressKey(place) {
+  const a = place.address;
+  if (!a.libelleVoie || !a.codePostal) return "";
+  return `${a.numero ?? ""}|${foldAccents(a.libelleVoie).toUpperCase().trim()}|${a.codePostal}`;
+}
+function sharedAddressesIn(places) {
+  const seen = /* @__PURE__ */ new Map();
+  for (const p of places) {
+    const key = addressKey(p);
+    if (key) seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+  return new Set([...seen].filter(([, n]) => n > 1).map(([key]) => key));
+}
+function corroborate(place, pageText, pageTitle, sharedAddresses = /* @__PURE__ */ new Set()) {
   const haystack = foldAccents(`${pageTitle ?? ""}
 ${pageText}`).toLowerCase();
   const digits = haystack.replace(/[^0-9]/g, "");
@@ -8218,7 +8232,7 @@ ${pageText}`).toLowerCase();
   else if (carries(legalUnitId)) evidence.push(`registration ${legalUnitId} on the page`);
   const street = place.address.libelleVoie;
   const postcode = place.address.codePostal;
-  if (street && postcode) {
+  if (street && postcode && !sharedAddresses.has(addressKey(place))) {
     const streetNorm = foldAccents(street).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     const streetWords = streetNorm.split(" ").filter((w) => w.length > 3);
     const streetSeen = streetWords.length > 0 && streetWords.every((w) => haystack.includes(w));
@@ -8287,8 +8301,15 @@ function groupHits(places, hits) {
     const tokens = names.flatMap((n) => [...tokenSet(normalizeName(n))].filter((t) => t.length >= 4));
     if (tokens.length === 0) continue;
     for (const h of hits) {
-      const hay = foldAccents(`${h.title ?? ""} ${h.snippet ?? ""} ${h.url}`).toLowerCase();
-      if (tokens.some((t) => hay.includes(t))) {
+      const words = new Set(
+        foldAccents(`${h.title ?? ""} ${h.snippet ?? ""}`).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+      );
+      let host = "";
+      try {
+        host = foldAccents(new URL(h.url).hostname).toLowerCase();
+      } catch {
+      }
+      if (tokens.some((t) => words.has(t) || host !== "" && host.includes(t))) {
         const list2 = byPlace.get(place.id) ?? [];
         list2.push(h);
         byPlace.set(place.id, list2);
@@ -8312,6 +8333,8 @@ async function runResolve(runDir, places, store, opts = {}) {
   const outcome = { pages: /* @__PURE__ */ new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unreadable: 0, unchanged: 0, socials: 0, notes };
   const locale = searchLocaleFor(opts.countryCode, opts.lang);
   if (opts.useEngineSearch && locale) note(`resolve: the keyless fallback will search in ${locale}`);
+  const shared = sharedAddressesIn(places);
+  if (shared.size) note(`resolve: ${shared.size} address(es) hold more than one company in this run \u2014 an address alone will not corroborate a site for those`);
   const targets = needsResolving(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
   const grouped = groupHits(targets, opts.webResults ?? []);
   if (opts.webResults?.length) note(`resolve: ${opts.webResults.length} supplied web result(s) attributed to ${grouped.size} place(s)`);
@@ -8358,7 +8381,7 @@ async function runResolve(runDir, places, store, opts = {}) {
         continue;
       }
       const page = fetched.page;
-      const check = corroborate(place, page.text, page.title);
+      const check = corroborate(place, page.text, page.title, shared);
       const list2 = outcome.pages.get(place.id) ?? [];
       list2.push(page.record);
       outcome.pages.set(place.id, list2);
