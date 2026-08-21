@@ -7896,8 +7896,11 @@ async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
     return { ok: false, reason: "unreachable" };
   }
   const text2 = (result.text ?? "").trim();
+  const status = result.status ?? 0;
+  if (status === 0) return { ok: false, reason: "unreachable" };
+  if (status < 200 || status >= 300) return { ok: false, reason: "refused", status };
   if (text2.length < MIN_READABLE_CHARS) {
-    return { ok: false, reason: "no-readable-text", status: result.status ?? 0, chars: text2.length };
+    return { ok: false, reason: "no-readable-text", status, chars: text2.length };
   }
   const id = `P${store.next++}`;
   const dir2 = pageDirFor(placeId);
@@ -8009,6 +8012,30 @@ var DIRECTORY_HOSTS_BY_COUNTRY = {
     "dirigeants.bfmtv.com",
     "pappers.fr",
     "score3.fr",
+    // Company-record and annonces-légales sites, all harvested from LIVE French
+    // searches over a Saint-Mandé sweep, where each of them ranked at or above
+    // the company's own domain.
+    //
+    // These are the dangerous kind. A phone book carries a name and an address;
+    // these publish the SIREN, so the corroboration check accepts them on the
+    // strongest signal it has and files a register directory as the company's
+    // own site, CORROBORATED rather than merely unverified. Host exclusion is
+    // the only thing between that and a dossier written about a directory.
+    "actulegales.fr",
+    "data.inpi.fr",
+    "rubypayeur.com",
+    "societeinfo.com",
+    "repreneurs.com",
+    "infonet.fr",
+    "datalegal.fr",
+    "annuaire-inverse-france.com",
+    "business-directory.fr",
+    "compteo.fr",
+    "petitesaffiches.fr",
+    "maitredata.com",
+    "droits-salaries.com",
+    "afjv.com",
+    "experts-comptables.org",
     "leboncoin.fr",
     "doctolib.fr",
     "mappy.com",
@@ -8235,7 +8262,7 @@ async function runResolve(runDir, places, store, opts = {}) {
     notes.push(n);
     opts.onNote?.(n);
   };
-  const outcome = { pages: /* @__PURE__ */ new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unchanged: 0, socials: 0, notes };
+  const outcome = { pages: /* @__PURE__ */ new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unreadable: 0, unchanged: 0, socials: 0, notes };
   const locale = searchLocaleFor(opts.countryCode, opts.lang);
   if (opts.useEngineSearch && locale) note(`resolve: the keyless fallback will search in ${locale}`);
   const targets = needsResolving(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
@@ -8268,7 +8295,11 @@ async function runResolve(runDir, places, store, opts = {}) {
       if (kind === "directory") continue;
       const fetched = await fetchPage2(runDir, place.id, url, "home", store);
       if (!fetched.ok) {
-        if (fetched.reason === "no-readable-text" && (!place.website || place.website.confidence !== "unverified")) {
+        if (fetched.reason !== "no-readable-text") {
+          outcome.unreadable++;
+          continue;
+        }
+        if (!place.website || place.website.confidence !== "unverified") {
           place.website = {
             url,
             confidence: "unverified",
@@ -8300,7 +8331,7 @@ async function runResolve(runDir, places, store, opts = {}) {
     if (!settled) outcome.unchanged++;
   }
   note(
-    `resolve: ${outcome.corroborated} corroborated, ${outcome.rejected} fetched but unverified, ${outcome.jsOnly} reachable but JavaScript-only, ${outcome.socials} social profile(s), ${outcome.unchanged} left without a site`
+    `resolve: ${outcome.corroborated} corroborated, ${outcome.rejected} fetched but unverified, ${outcome.jsOnly} reachable but JavaScript-only, ${outcome.unreadable} candidate(s) refused or unreachable, ${outcome.socials} social profile(s), ${outcome.unchanged} left without a site`
   );
   return outcome;
 }
@@ -8908,6 +8939,8 @@ async function runEnrich(runDir, places, store, opts) {
       if (result.why === "no-readable-text") {
         outcome.jsOnly++;
         note(`enrich: ${place.name} \u2014 ${place.website?.url} answers but serves no readable text (a JavaScript-only page). The site exists; we cannot read it.`);
+      } else if (result.why === "refused") {
+        note(`enrich: ${place.name} \u2014 ${place.website?.url} turned the request away. Nothing was read, so nothing is known about the page.`);
       }
       place.signals = {
         ...place.signals ?? {
@@ -9155,7 +9188,12 @@ function factSheet(place) {
       ].filter(Boolean).join(" \xB7 ")}`
     );
     l.push(
-      `- hiring: ${sg.isHiring === true ? `yes \u2014 ${sg.openRoles} open role(s) via ${sg.atsProviders.join(", ") || "the site"}` : sg.isHiring === false ? "no \u2014 we looked at the careers page and the boards, and found none" : `UNKNOWN \u2014 a board (${sg.atsProviders.join(", ")}) was detected but could not be read. Do not write "not hiring".`}`
+      `- hiring: ${sg.isHiring === true ? `yes \u2014 ${sg.openRoles} open role(s) via ${sg.atsProviders.join(", ") || "the site"}` : sg.isHiring === false ? "no \u2014 we looked at the careers page and the boards, and found none" : (
+        // The provider list is often empty here — a careers page was found
+        // and no ATS behind it was identified — and printing "a board ()"
+        // reads as a rendering fault rather than as the finding it is.
+        `UNKNOWN \u2014 ${sg.atsProviders.length ? `a board (${sg.atsProviders.join(", ")})` : "a careers page"} was detected but its openings could not be read. Do not write "not hiring".`
+      )}`
     );
   }
   for (const [label, items] of [
@@ -11403,11 +11441,27 @@ async function cmdResolve(values, bools) {
   manifest.notes.push(...outcome.notes);
   writeRunManifest(runDir, manifest);
   if (bools.has("json")) {
-    out(jsonLine({ run: runDir, corroborated: outcome.corroborated, rejected: outcome.rejected, socials: outcome.socials, unchanged: outcome.unchanged }));
+    out(
+      jsonLine({
+        run: runDir,
+        corroborated: outcome.corroborated,
+        rejected: outcome.rejected,
+        unreadable: outcome.unreadable,
+        socials: outcome.socials,
+        unchanged: outcome.unchanged
+      })
+    );
   }
   say("");
-  say(`next: ultraprospect enrich --run ${runDir} --tier 1`);
-  return outcome.corroborated > 0 || outcome.unchanged === 0 ? EXIT_OK : EXIT_FAILURE;
+  const ok = outcome.corroborated > 0 || outcome.unchanged === 0;
+  if (ok) {
+    say(`next: ultraprospect enrich --run ${runDir} --tier 1`);
+  } else {
+    say("resolve: no website was corroborated, so there is nothing for `enrich` to read.");
+    say(`next: ultraprospect resolve --run ${runDir} --queries        # search those, then pass the hits back`);
+    say(`  then: ultraprospect resolve --run ${runDir} --web-results hits.json`);
+  }
+  return ok ? EXIT_OK : EXIT_FAILURE;
 }
 async function cmdEnrich(values, bools) {
   if (!values.run) throw new UsageError("enrich needs --run <dir>");

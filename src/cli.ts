@@ -802,11 +802,34 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
   writeRunManifest(runDir, manifest);
 
   if (bools.has("json")) {
-    out(jsonLine({ run: runDir, corroborated: outcome.corroborated, rejected: outcome.rejected, socials: outcome.socials, unchanged: outcome.unchanged }));
+    out(
+      jsonLine({
+        run: runDir,
+        corroborated: outcome.corroborated,
+        rejected: outcome.rejected,
+        unreadable: outcome.unreadable,
+        socials: outcome.socials,
+        unchanged: outcome.unchanged,
+      }),
+    );
   }
   say("");
-  say(`next: ultraprospect enrich --run ${runDir} --tier 1`);
-  return outcome.corroborated > 0 || outcome.unchanged === 0 ? EXIT_OK : EXIT_FAILURE;
+
+  // The exit code and the last line have to agree.
+  //
+  // Nothing corroborated means enrichment has nothing to read, so printing
+  // `next: enrich` under a failing exit code sends the reader at a command that
+  // will only tell them the same thing again. Say what actually comes next: more
+  // search results.
+  const ok = outcome.corroborated > 0 || outcome.unchanged === 0;
+  if (ok) {
+    say(`next: ultraprospect enrich --run ${runDir} --tier 1`);
+  } else {
+    say("resolve: no website was corroborated, so there is nothing for `enrich` to read.");
+    say(`next: ultraprospect resolve --run ${runDir} --queries        # search those, then pass the hits back`);
+    say(`  then: ultraprospect resolve --run ${runDir} --web-results hits.json`);
+  }
+  return ok ? EXIT_OK : EXIT_FAILURE;
 }
 
 async function cmdEnrich(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {

@@ -55,6 +55,44 @@ describe("classifyHost", () => {
     expect(classifyHost("https://www.doctolib.fr/dentiste/paris/x", "de")).toBe("own");
   });
 
+  it("excludes the French company-record directories a real French search actually returns", () => {
+    // Harvested from live searches over a Saint-Mandé sweep: every one of these
+    // ranked at or above the company's own domain for queries built out of the
+    // company name, the town and the SIREN.
+    //
+    // They are the dangerous shape rather than merely the useless one. A phone
+    // book carries a name and an address; these carry the SIREN — so
+    // `corroborate` accepts them on the strongest signal it has, and the run
+    // records a register directory as the company's own website, CORROBORATED.
+    // Excluding by host is the only thing that stops it.
+    for (const url of [
+      "https://actulegales.fr/recherche/siren/848367397",
+      "https://data.inpi.fr/entreprises/532821089",
+      "https://rubypayeur.com/societe/studiomatic-848367397",
+      "https://societeinfo.com/app/recherche/societe/443452503",
+      "https://repreneurs.com/814417424-kinequantum",
+      "https://infonet.fr/entreprises/84435572700026-sorare/",
+      "https://datalegal.fr/entreprises/443452503/",
+      "https://www.annuaire-inverse-france.com/0143659042/atixnet",
+      "https://www.business-directory.fr/sites/ubisoft-france-siege-social-adresse-et-contact/",
+      "https://www.compteo.fr/expert-comptable/soexpertise-21605",
+      "https://annuaire.petitesaffiches.fr/traiteur/baxterstorey-france-s-a-s-53282108900069/",
+      "https://www.maitredata.com/app/accords-entreprise/baxterstorey-france-sas/239141",
+      "https://www.droits-salaries.com/532821089-/53282108900010-/x.shtml",
+      "https://afjv.com/societe/1410-sorare.htm",
+      "https://annuaire.experts-comptables.org/expert-comptable/17702-so-expertise-saint-mande-94160",
+    ]) {
+      expect(classifyHost(url, "fr"), url).toBe("directory");
+    }
+  });
+
+  it("still calls those hosts a company's own outside France", () => {
+    // The national lists are added for the territory being swept, and adding a
+    // French register directory to every run would filter a real domain
+    // somewhere else that merely shares a name.
+    expect(classifyHost("https://data.inpi.fr/entreprises/532821089", "de")).toBe("own");
+  });
+
   it("separates social profiles rather than discarding them", () => {
     // For a small trader a Facebook page is often the only web presence there
     // is. It belongs in contacts.socials, not in website.

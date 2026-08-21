@@ -150,7 +150,10 @@ export function factSheet(place: Place): string {
           ? `yes — ${sg.openRoles} open role(s) via ${sg.atsProviders.join(", ") || "the site"}`
           : sg.isHiring === false
             ? "no — we looked at the careers page and the boards, and found none"
-            : `UNKNOWN — a board (${sg.atsProviders.join(", ")}) was detected but could not be read. Do not write "not hiring".`
+            : // The provider list is often empty here — a careers page was found
+              // and no ATS behind it was identified — and printing "a board ()"
+              // reads as a rendering fault rather than as the finding it is.
+              `UNKNOWN — ${sg.atsProviders.length ? `a board (${sg.atsProviders.join(", ")})` : "a careers page"} was detected but its openings could not be read. Do not write "not hiring".`
       }`,
     );
   }

@@ -99,6 +99,30 @@ const DIRECTORY_HOSTS_BY_COUNTRY: Record<string, string[]> = {
     "dirigeants.bfmtv.com",
     "pappers.fr",
     "score3.fr",
+    // Company-record and annonces-légales sites, all harvested from LIVE French
+    // searches over a Saint-Mandé sweep, where each of them ranked at or above
+    // the company's own domain.
+    //
+    // These are the dangerous kind. A phone book carries a name and an address;
+    // these publish the SIREN, so the corroboration check accepts them on the
+    // strongest signal it has and files a register directory as the company's
+    // own site, CORROBORATED rather than merely unverified. Host exclusion is
+    // the only thing between that and a dossier written about a directory.
+    "actulegales.fr",
+    "data.inpi.fr",
+    "rubypayeur.com",
+    "societeinfo.com",
+    "repreneurs.com",
+    "infonet.fr",
+    "datalegal.fr",
+    "annuaire-inverse-france.com",
+    "business-directory.fr",
+    "compteo.fr",
+    "petitesaffiches.fr",
+    "maitredata.com",
+    "droits-salaries.com",
+    "afjv.com",
+    "experts-comptables.org",
     "leboncoin.fr",
     "doctolib.fr",
     "mappy.com",
@@ -401,6 +425,14 @@ export interface ResolveOutcome {
   rejected: number;
   /** Reachable sites that serve no text without a browser. */
   jsOnly: number;
+  /**
+   * Candidates whose host turned us away, or never answered.
+   *
+   * Counted on its own because it is neither a rejection nor an absence: we
+   * learned nothing about the page. Folding it into "left without a site" would
+   * report a door we could not open as a company with no web presence.
+   */
+  unreadable: number;
   unchanged: number;
   socials: number;
   notes: string[];
@@ -503,7 +535,7 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
     notes.push(n);
     opts.onNote?.(n);
   };
-  const outcome: ResolveOutcome = { pages: new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unchanged: 0, socials: 0, notes };
+  const outcome: ResolveOutcome = { pages: new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unreadable: 0, unchanged: 0, socials: 0, notes };
 
   const locale = searchLocaleFor(opts.countryCode, opts.lang);
   if (opts.useEngineSearch && locale) note(`resolve: the keyless fallback will search in ${locale}`);
@@ -545,8 +577,21 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
 
       const fetched = await fetchPage(runDir, place.id, url, "home", store);
       if (!fetched.ok) {
+        // A host that turned us away, or never answered, teaches us NOTHING
+        // about whose site this is — so it must not become the place's website,
+        // not even as a candidate. data.inpi.fr answered 403 on a real run and
+        // was filed as this company's website, unverified; a register directory
+        // then sat in the CSV under the `website` column.
+        //
+        // It is still counted, because silence about it would put the company
+        // in "left without a site" — which is a claim about the company rather
+        // than about the fetch.
+        if (fetched.reason !== "no-readable-text") {
+          outcome.unreadable++;
+          continue;
+        }
         // Same first-wins rule as a corroboration failure below.
-        if (fetched.reason === "no-readable-text" && (!place.website || place.website.confidence !== "unverified")) {
+        if (!place.website || place.website.confidence !== "unverified") {
           // The site is real and a human can open it; only we could not read
           // it. Recording "no website" here would be a false absence — measured
           // on restaurant-elgringo.fr, which answers 200 with 37 bytes.
@@ -594,8 +639,8 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
   // whole category of prospect behind a number that looks like coverage.
   note(
     `resolve: ${outcome.corroborated} corroborated, ${outcome.rejected} fetched but unverified, ` +
-      `${outcome.jsOnly} reachable but JavaScript-only, ${outcome.socials} social profile(s), ` +
-      `${outcome.unchanged} left without a site`,
+      `${outcome.jsOnly} reachable but JavaScript-only, ${outcome.unreadable} candidate(s) refused or unreachable, ` +
+      `${outcome.socials} social profile(s), ${outcome.unchanged} left without a site`,
   );
   return outcome;
 }

@@ -290,6 +290,10 @@ export async function runEnrich(runDir: string, places: Place[], store: PageStor
       if (result.why === "no-readable-text") {
         outcome.jsOnly++;
         note(`enrich: ${place.name} — ${place.website?.url} answers but serves no readable text (a JavaScript-only page). The site exists; we cannot read it.`);
+      } else if (result.why === "refused") {
+        // A refusal and an empty page look the same from here — no text — and
+        // they are different facts about a prospect. Say which.
+        note(`enrich: ${place.name} — ${place.website?.url} turned the request away. Nothing was read, so nothing is known about the page.`);
       }
       place.signals = {
         ...(place.signals ?? {

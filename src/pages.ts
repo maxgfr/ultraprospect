@@ -45,14 +45,23 @@ export function newPageStore(existing: readonly PageRecord[] = []): PageStore {
 /**
  * Why a fetch produced no citable page.
  *
- * The two are worth telling apart, and the second one was found in real use:
- * `restaurant-elgringo.fr` answers HTTP 200 with 37 bytes — a JavaScript shell
- * with no server-rendered content. Reporting that as "no website" is wrong in a
- * way the reader cannot see: the site exists, a human can open it, and only the
- * MACHINE could not read it. "Unreachable" and "reachable but empty without a
- * browser" are different facts about a prospect.
+ * The three are worth telling apart, and each one was found in real use:
+ *
+ *   `no-readable-text` — `restaurant-elgringo.fr` answers HTTP 200 with 37
+ *     bytes, a JavaScript shell with no server-rendered content. Reporting that
+ *     as "no website" is wrong in a way the reader cannot see: the site exists,
+ *     a human can open it, and only the MACHINE could not read it.
+ *   `refused` — `data.inpi.fr` answers 403. The host turned us away, which says
+ *     nothing at all about what the page contains. Calling it a JavaScript-only
+ *     site states something false, and on a real Saint-Mandé run that sentence
+ *     went onto a prospect record as evidence.
+ *   `unreachable` — nothing answered: DNS, TLS, connection refused, or a status
+ *     the engine could not even read (0). There is no page to describe.
+ *
+ * The distinction is the same one this tool insists on everywhere else: a
+ * REFUSAL is not an ABSENCE, and neither is a rendering limitation.
  */
-export type FetchFailure = { reason: "unreachable" } | { reason: "no-readable-text"; status: number; chars: number };
+export type FetchFailure = { reason: "unreachable" } | { reason: "refused"; status: number } | { reason: "no-readable-text"; status: number; chars: number };
 
 export type FetchOutcome = { ok: true; page: FetchedPage } | ({ ok: false } & FetchFailure);
 
@@ -92,11 +101,23 @@ export async function fetchPage(
   }
 
   const text = (result.text ?? "").trim();
+  const status = result.status ?? 0;
+
+  // Read the STATUS before reading the body, or every failure looks like an
+  // empty page. A 403 is a host turning us away and a 0 is a request that never
+  // completed; describing either by how much text it carries asserts a fact
+  // about a page nobody was served.
+  //
+  // A 2xx with a body is the only case where the body is the story, so the
+  // emptiness test comes second and applies only there.
+  if (status === 0) return { ok: false, reason: "unreachable" };
+  if (status < 200 || status >= 300) return { ok: false, reason: "refused", status };
+
   // Below this a "page" is a cookie wall, a redirect stub or a JS shell. Citing
   // one would pass the resolution gate and support nothing — but the caller is
   // told which, because a live site we cannot read is not an absent site.
   if (text.length < MIN_READABLE_CHARS) {
-    return { ok: false, reason: "no-readable-text", status: result.status ?? 0, chars: text.length };
+    return { ok: false, reason: "no-readable-text", status, chars: text.length };
   }
 
   const id = `P${store.next++}`;
