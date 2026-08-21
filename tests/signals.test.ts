@@ -301,3 +301,30 @@ describe("devRoles and oldestOpenRoleDays", () => {
     expect(s.devRoles).toBe(0);
   });
 });
+
+describe("freelanceMentions is scoped to the page where the words mean hiring", () => {
+  // Measured on a real Hamburg run: tier 1 reads home + legal, and produced 48
+  // mentions of which every sampled one was a false positive — "externe
+  // Dienstleister" in a GDPR data-processor clause, a law firm describing the
+  // Freiberufler it ADVISES, a web freelancer describing himself. The words are
+  // right; the page was wrong. A careers page is where "wir arbeiten mit
+  // Freiberuflern" is a statement about how the company staffs work.
+  it("ignores a contractor term in a privacy policy, where it names data processors", () => {
+    const s = buildSignals({
+      ...base,
+      pages: [page("P9", "legal", "Externe Dienstleister und Partnerunternehmen verarbeiten Ihre Daten.")],
+    });
+    expect(s.freelanceMentions).toEqual([]);
+  });
+
+  it("ignores a term on a services page, where it usually names the CLIENTS", () => {
+    const s = buildSignals({ ...base, pages: [page("P3", "services", "Wir beraten Freiberufler und Mittelständler.")] });
+    expect(s.freelanceMentions).toEqual([]);
+  });
+
+  it("records it on a careers page, where it is a statement about hiring", () => {
+    const s = buildSignals({ ...base, pages: [page("P2", "careers", "Wir arbeiten regelmäßig mit Freiberuflern zusammen.")] });
+    expect(s.freelanceMentions).toHaveLength(1);
+    expect(s.freelanceMentions[0]!.from).toBe("P2");
+  });
+});

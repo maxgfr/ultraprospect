@@ -8699,7 +8699,17 @@ function buildSignals(input) {
     // the closest thing to a measurable freelance opportunity a public source
     // carries — and it is a COUNT of days, not a conclusion about why.
     oldestOpenRoleDays: oldestRoleDays(input.jobs, input.now),
-    freelanceMentions: input.pages.flatMap((p) => extractFreelanceMentions(p.text, p.record.id)),
+    // CAREERS ONLY, and that restriction is the signal.
+    //
+    // Measured on a Hamburg run before it was scoped: 48 mentions, every
+    // sampled one a false positive. `externe Dienstleister` is what a privacy
+    // policy calls a data processor; `Freiberufler` on a law firm's or tax
+    // adviser's site names the CLIENTS it advises; `Freelancer` on a one-person
+    // web studio's homepage describes the owner. The vocabulary was right and
+    // the page was wrong, which is the worst kind of wrong here: it reads as
+    // measured. On a careers page the same words are a company saying how it
+    // staffs work, which is the only reading worth acting on.
+    freelanceMentions: input.pages.filter((p) => p.record.role === "careers").flatMap((p) => extractFreelanceMentions(p.text, p.record.id)),
     atsProviders: [...input.atsProviders],
     cms: fingerprints(html, CMS_FINGERPRINTS)[0],
     analytics: fingerprints(html, ANALYTICS_FINGERPRINTS),
