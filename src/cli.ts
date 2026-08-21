@@ -61,7 +61,7 @@ import { buildDelta, diffRuns } from "./watch.js";
 import { createAdapter } from "./mcp/adapter.js";
 import { emitOrchestration } from "./orchestrate.js";
 import { runStdioServer, startHttpServer } from "./engine.js";
-import type { FitVerdict } from "./types.js";
+import type { FitVerdict, PageRole } from "./types.js";
 import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, shortLabel, writeJson, writePlaces, writeRunManifest } from "./run.js";
 import { clampInt, parseBbox, parseDistanceM } from "./util.js";
 import { VERSION } from "./version.js";
@@ -145,6 +145,8 @@ export const VALUE_FLAGS = [
   "web-results",
   "limit",
   "roles",
+  "terms",
+  "terms-on",
   "tier",
   "only",
   "max-pages",
@@ -236,6 +238,13 @@ ENRICHMENT (enrich)
   --roles <list>         Job-title terms YOU care about, e.g. entwickler,developer,engineer.
                          Counted into matched_roles. The engine has no default: it does not
                          know which roles matter to you, and will not invent one.
+  --terms <list>         Terms to find VERBATIM in the pages, e.g. freiberuflich,werkvertrag.
+                         The engine ships NO vocabulary in any language: translating a concept
+                         into a market's own words is your job, not a list frozen into the tool.
+                         Each hit is recorded with its page, and the check gate re-reads it.
+  --terms-on <roles>     Page roles --terms may be read on. Default: careers. Widen it
+                         deliberately (home,about,services) — on a legal page the same words
+                         name data processors, and on a services page they name the clients.
   --max-pages <n>        Ceiling on pages fetched per site in tier 2.
   --concurrency <n>      Sites in flight at once. Per-host pacing is separate and always on.
 
@@ -818,6 +827,8 @@ async function cmdEnrich(values: Record<string, string>, bools: ReadonlySet<stri
     limit: values.limit ? clampInt(values.limit, 1, 100_000, 20) : undefined,
     only: list(values.only),
     roleFilter: list(values.roles),
+    termLexicon: list(values.terms),
+    termRoles: list(values["terms-on"]) as PageRole[] | undefined,
     maxPages: values["max-pages"] ? clampInt(values["max-pages"], 1, 40, 9) : undefined,
     concurrency: values.concurrency ? clampInt(values.concurrency, 1, 12, 4) : undefined,
     onNote: (n) => say(`  ${n}`),

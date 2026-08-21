@@ -200,108 +200,50 @@ export function extractLanguages(html: string): string[] {
 }
 
 /**
- * Terms by which a company says, in its own words, that it works with people it
- * has not employed.
+ * Find every place a caller-supplied term appears, verbatim, with its page.
  *
- * German first, because German law and German usage are precise about it:
- * `Freiberufler` is a legal status, `Werkvertrag` is a contract form, and
- * `freiberuflich` on a careers page is a company describing how it buys work.
- * These are the strongest weak signal a public website carries — far stronger
- * than the presence of a careers page, and unlike an open role they do not
- * expire.
+ * The engine ships NO vocabulary, and that is the design rather than an
+ * omission. A word list frozen into a general tool is one person's curation
+ * pretending to be a measurement: it goes stale, it privileges the languages
+ * whoever wrote it happened to speak, and it silently reports "no such culture
+ * here" for every market it does not cover. Which words mean "this company buys
+ * outside work" in Portugal is a translation problem, and translation is the
+ * agent's job — it can read the country's own labour vocabulary and confirm the
+ * phrasing against the live web before asking for a scan.
  *
- * Matched on word boundaries, not as substrings: a blog post about
- * `Freelancerschutzgesetzgebung` is not a company hiring a contractor.
+ * So this is a mechanism: given terms, find them, and record each one with the
+ * page it came from so the gate can re-read it. What to look for, and in which
+ * language, comes in from outside.
+ *
+ * Matching tolerates up to three trailing letters, which carries the suffixing
+ * inflections (German -n/-ern, French -s, Spanish -os) without swallowing a
+ * compound: `Freiberuflern` yes, `Freelancerschutzgesetzgebung` no. Languages
+ * that inflect by REPLACING an ending need a stem, and the caller supplies one.
  */
-const FREELANCE_TERMS = [
-  // German — the vocabulary is legal, so it is precise: `Freiberufler` is a
-  // status, `Werkvertrag` a contract form.
-  "Freelancer:innen",
-  "Freiberufler:innen",
-  "Freiberufler",
-  "freiberuflich",
-  "Werkvertrag",
-  "Werkverträge",
-  "auf Projektbasis",
-  "Projektbasis",
-  "Subunternehmer",
-  // English
-  "Freelancer",
-  "Freelance",
-  "Contractor",
-  "self-employed",
-  "contract basis",
-  // French — `portage salarial` and `auto-entrepreneur` have no equivalent
-  // elsewhere and are exactly how a French company says it buys outside work.
-  "indépendant",
-  "indépendante",
-  "auto-entrepreneur",
-  "micro-entrepreneur",
-  "portage salarial",
-  "sous-traitance",
-  "sous-traitant",
-  "prestataire",
-  // Spanish
-  "autónomo",
-  "autónoma",
-  "subcontratación",
-  "subcontratista",
-  "colaborador externo",
-  // Italian
-  "libero professionista",
-  "liberi professionisti",
-  "partita IVA",
-  "collaboratore esterno",
-  // Dutch — the Netherlands runs on ZZP, and no translation of the German
-  // vocabulary would ever find it.
-  "ZZP",
-  "zzp'er",
-  "zelfstandige",
-  // Polish, Norwegian, Finnish, Czech, Estonian: the registers reach these
-  // countries, so the signal has to as well. Deliberately NOT including bare
-  // "B2B", which means contractor in a Polish job ad and business-to-business
-  // in every English one — a term that means two things cannot be a signal.
-  // Slavic languages inflect by REPLACING the ending, not by appending one, so
-  // the three-letter tolerance that carries German cannot reach
-  // `samozatrudnienia` from `samozatrudnienie`. These are stems, chosen long
-  // enough that nothing else in the language starts with them.
-  "samozatrudnieni",
-  "podwykonawc",
-  "frilans",
-  "frilanser",
-  "konsulent",
-  "alihankinta",
-  "ammatinharjoittaja",
-  "OSVČ",
-  "živnostní",
-  "vabakutseline",
-];
-
-/**
- * The terms, compiled once, longest first, with room for a German case ending.
- *
- * Two things this has to get right at the same time, and they pull apart:
- *
- *   * German inflects. The careers page says "wir arbeiten mit FREIBERUFLERN",
- *     not "mit Freiberufler". Demanding a hard word boundary on the right finds
- *     none of them, and the signal reads as absent on exactly the sites that
- *     carry it.
- *   * German also compounds without limit. `Freelancerschutzgesetzgebung` in a
- *     blog post is not a company buying contract work, and a suffix-tolerant
- *     match that swallows it turns a legal-news mention into a lead.
- *
- * So: up to three trailing letters — enough for -n, -s, -e, -en, -ern, -innen —
- * and no more. A compound noun adds far more than three. Longest alternative
- * first, so `Freelancer:innen` wins over `Freelance` on the same span and the
- * mention is recorded once, at its full length.
- */
-const FREELANCE_RE = new RegExp(
-  `(?<!\\p{L})(?:${[...FREELANCE_TERMS]
-    .sort((a, b) => b.length - a.length)
-    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .join("|")})\\p{L}{0,3}(?!\\p{L})`,
-  "giu",
-);
+export function extractTermMentions(text: string, pageId: string, terms: readonly string[]): SourcedValue[] {
+  if (!terms.length) return [];
+  const re = new RegExp(
+    `(?<!\\p{L})(?:${[...terms]
+      .sort((a, b) => b.length - a.length)
+      .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|")})\\p{L}{0,3}(?!\\p{L})`,
+    "giu",
+  );
+  const out: SourcedValue[] = [];
+  const seen = new Set<string>();
+  for (const m of text.matchAll(re)) {
+    const key = m[0].toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const from = Math.max(0, m.index - 90);
+    const line = text
+      .slice(from, Math.min(text.length, m.index + m[0].length + 90))
+      .replace(/\s+/g, " ")
+      .trim();
+    out.push({ value: m[0], from: pageId, lane: "web", note: line });
+  }
+  return out;
+}
 
 export interface SignalInput {
   pages: readonly { record: PageRecord; text: string; html?: string }[];
@@ -324,30 +266,20 @@ export interface SignalInput {
    * for, and `matchedRoles` stays unset rather than becoming a misleading zero.
    */
   roleFilter?: readonly string[];
-}
-
-/**
- * Every place a freelance term appears, verbatim, with the page it came from.
- *
- * Returns the matched term as the value and the line around it as the note, so
- * the gate can re-read the value and a human can judge the context. A term that
- * cannot be found in its own page again does not ship — same rule as a contact.
- */
-export function extractFreelanceMentions(text: string, pageId: string): SourcedValue[] {
-  const out: SourcedValue[] = [];
-  const seen = new Set<string>();
-  for (const m of text.matchAll(FREELANCE_RE)) {
-    const key = m[0].toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const start = Math.max(0, m.index - 90);
-    const line = text
-      .slice(start, Math.min(text.length, m.index + m[0].length + 90))
-      .replace(/\s+/g, " ")
-      .trim();
-    out.push({ value: m[0], from: pageId, lane: "web", note: line });
-  }
-  return out;
+  /**
+   * Terms to look for verbatim in the fetched pages. Supplied by the caller;
+   * the engine has no list of its own and will find nothing without one.
+   */
+  termLexicon?: readonly string[];
+  /**
+   * Which page roles the lexicon may be read on. Defaults to the careers page.
+   *
+   * Measured on a Hamburg run before this existed: scanning home and legal
+   * produced 48 hits and every sampled one was a false positive — `externe
+   * Dienstleister` naming data processors in a privacy policy, `Freiberufler`
+   * naming the CLIENTS a law firm advises. Right words, wrong page.
+   */
+  termRoles?: readonly PageRole[];
 }
 
 /** Days since the oldest posting that carries a date. Undefined when none do. */
@@ -400,7 +332,13 @@ export function buildSignals(input: SignalInput): Signals {
     // the page was wrong, which is the worst kind of wrong here: it reads as
     // measured. On a careers page the same words are a company saying how it
     // staffs work, which is the only reading worth acting on.
-    freelanceMentions: input.pages.filter((p) => p.record.role === "careers").flatMap((p) => extractFreelanceMentions(p.text, p.record.id)),
+    termMentions: (() => {
+      const terms = input.termLexicon ?? [];
+      if (!terms.length) return [];
+      const roles = new Set<PageRole>(input.termRoles ?? ["careers"]);
+      return input.pages.filter((p) => roles.has(p.record.role)).flatMap((p) => extractTermMentions(p.text, p.record.id, terms));
+    })(),
+    termLexicon: input.termLexicon?.length ? [...input.termLexicon] : undefined,
     atsProviders: [...input.atsProviders],
     cms: fingerprints(html, CMS_FINGERPRINTS)[0],
     analytics: fingerprints(html, ANALYTICS_FINGERPRINTS),

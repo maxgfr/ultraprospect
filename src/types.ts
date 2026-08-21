@@ -156,8 +156,10 @@ export interface Signals {
   roleFilter?: string[];
   /** Days the longest-open dated posting has been open. Absent when none is dated. */
   oldestOpenRoleDays?: number;
-  /** Verbatim occurrences of contractor vocabulary, each re-readable in its page. */
-  freelanceMentions: SourcedValue[];
+  /** Verbatim occurrences of the caller's lexicon, each re-readable in its page. */
+  termMentions: SourcedValue[];
+  /** The lexicon that produced them, so a hit says what it was looking for. */
+  termLexicon?: string[];
   atsProviders: string[];
   cms?: string;
   analytics: string[];

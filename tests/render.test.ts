@@ -73,7 +73,7 @@ describe("CSV", () => {
       pageCount: 1,
       openRoles: 0,
 
-      freelanceMentions: [],
+      termMentions: [],
       atsProviders: [],
       analytics: [],
       techStack: [],
@@ -250,7 +250,7 @@ describe("REPORT.md", () => {
       pageCount: 1,
       openRoles: 0,
 
-      freelanceMentions: [],
+      termMentions: [],
       atsProviders: ["welcometothejungle"],
       analytics: [],
       techStack: [],
@@ -340,7 +340,7 @@ describe("watch", () => {
     pageCount: 1,
     openRoles: 0,
 
-    freelanceMentions: [],
+    termMentions: [],
     atsProviders: [],
     analytics: [],
     techStack: [],

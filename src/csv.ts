@@ -71,8 +71,8 @@ const HEADER = [
   "matched_roles",
   "role_filter",
   "oldest_open_role_days",
-  "freelance_signal",
-  "freelance_signal_source",
+  "term_matches",
+  "term_match_source",
   "ats",
   "cms",
   "last_content_at",
@@ -174,8 +174,8 @@ export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
         sg?.oldestOpenRoleDays ?? "",
         // The terms the company itself used, verbatim, with the page beside
         // them — so a row can be checked without opening the run.
-        sg?.freelanceMentions?.map((m) => m.value).join(" | ") ?? "",
-        [...new Set(sg?.freelanceMentions?.map((m) => m.from) ?? [])].join(" | "),
+        sg?.termMentions?.map((m) => m.value).join(" | ") ?? "",
+        [...new Set(sg?.termMentions?.map((m) => m.from) ?? [])].join(" | "),
         sg?.atsProviders.join(" | ") ?? "",
         sg?.cms ?? "",
         sg?.lastContentAt ?? "",

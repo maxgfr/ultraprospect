@@ -8631,82 +8631,20 @@ function extractLanguages(html) {
   for (const m of html.matchAll(/hreflang=["']([a-z]{2})/gi)) langs.add(m[1].toLowerCase());
   return [...langs];
 }
-var FREELANCE_TERMS = [
-  // German — the vocabulary is legal, so it is precise: `Freiberufler` is a
-  // status, `Werkvertrag` a contract form.
-  "Freelancer:innen",
-  "Freiberufler:innen",
-  "Freiberufler",
-  "freiberuflich",
-  "Werkvertrag",
-  "Werkvertr\xE4ge",
-  "auf Projektbasis",
-  "Projektbasis",
-  "Subunternehmer",
-  // English
-  "Freelancer",
-  "Freelance",
-  "Contractor",
-  "self-employed",
-  "contract basis",
-  // French — `portage salarial` and `auto-entrepreneur` have no equivalent
-  // elsewhere and are exactly how a French company says it buys outside work.
-  "ind\xE9pendant",
-  "ind\xE9pendante",
-  "auto-entrepreneur",
-  "micro-entrepreneur",
-  "portage salarial",
-  "sous-traitance",
-  "sous-traitant",
-  "prestataire",
-  // Spanish
-  "aut\xF3nomo",
-  "aut\xF3noma",
-  "subcontrataci\xF3n",
-  "subcontratista",
-  "colaborador externo",
-  // Italian
-  "libero professionista",
-  "liberi professionisti",
-  "partita IVA",
-  "collaboratore esterno",
-  // Dutch — the Netherlands runs on ZZP, and no translation of the German
-  // vocabulary would ever find it.
-  "ZZP",
-  "zzp'er",
-  "zelfstandige",
-  // Polish, Norwegian, Finnish, Czech, Estonian: the registers reach these
-  // countries, so the signal has to as well. Deliberately NOT including bare
-  // "B2B", which means contractor in a Polish job ad and business-to-business
-  // in every English one — a term that means two things cannot be a signal.
-  // Slavic languages inflect by REPLACING the ending, not by appending one, so
-  // the three-letter tolerance that carries German cannot reach
-  // `samozatrudnienia` from `samozatrudnienie`. These are stems, chosen long
-  // enough that nothing else in the language starts with them.
-  "samozatrudnieni",
-  "podwykonawc",
-  "frilans",
-  "frilanser",
-  "konsulent",
-  "alihankinta",
-  "ammatinharjoittaja",
-  "OSV\u010C",
-  "\u017Eivnostn\xED",
-  "vabakutseline"
-];
-var FREELANCE_RE = new RegExp(
-  `(?<!\\p{L})(?:${[...FREELANCE_TERMS].sort((a, b) => b.length - a.length).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\p{L}{0,3}(?!\\p{L})`,
-  "giu"
-);
-function extractFreelanceMentions(text2, pageId) {
+function extractTermMentions(text2, pageId, terms) {
+  if (!terms.length) return [];
+  const re = new RegExp(
+    `(?<!\\p{L})(?:${[...terms].sort((a, b) => b.length - a.length).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\p{L}{0,3}(?!\\p{L})`,
+    "giu"
+  );
   const out2 = [];
   const seen = /* @__PURE__ */ new Set();
-  for (const m of text2.matchAll(FREELANCE_RE)) {
+  for (const m of text2.matchAll(re)) {
     const key = m[0].toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    const start = Math.max(0, m.index - 90);
-    const line = text2.slice(start, Math.min(text2.length, m.index + m[0].length + 90)).replace(/\s+/g, " ").trim();
+    const from = Math.max(0, m.index - 90);
+    const line = text2.slice(from, Math.min(text2.length, m.index + m[0].length + 90)).replace(/\s+/g, " ").trim();
     out2.push({ value: m[0], from: pageId, lane: "web", note: line });
   }
   return out2;
@@ -8755,7 +8693,13 @@ function buildSignals(input) {
     // the page was wrong, which is the worst kind of wrong here: it reads as
     // measured. On a careers page the same words are a company saying how it
     // staffs work, which is the only reading worth acting on.
-    freelanceMentions: input.pages.filter((p) => p.record.role === "careers").flatMap((p) => extractFreelanceMentions(p.text, p.record.id)),
+    termMentions: (() => {
+      const terms = input.termLexicon ?? [];
+      if (!terms.length) return [];
+      const roles2 = new Set(input.termRoles ?? ["careers"]);
+      return input.pages.filter((p) => roles2.has(p.record.role)).flatMap((p) => extractTermMentions(p.text, p.record.id, terms));
+    })(),
+    termLexicon: input.termLexicon?.length ? [...input.termLexicon] : void 0,
     atsProviders: [...input.atsProviders],
     cms: fingerprints(html, CMS_FINGERPRINTS)[0],
     analytics: fingerprints(html, ANALYTICS_FINGERPRINTS),
@@ -8909,7 +8853,9 @@ async function enrichOne(runDir, place, store, opts) {
     sitemapUrls: sitemap.count || void 0,
     lastContentAt: sitemap.lastContentAt,
     siteReachable: true,
-    roleFilter: opts.roleFilter
+    roleFilter: opts.roleFilter,
+    termLexicon: opts.termLexicon,
+    termRoles: opts.termRoles
   });
   return { pages: fetched.map((f) => f.record), jobs: jobs.length, reachable: true };
 }
@@ -8956,7 +8902,7 @@ async function runEnrich(runDir, places, store, opts) {
           openRoles: 0,
           // Nothing was readable, so nothing was counted — and `matchedRoles`
           // stays unset rather than zero, alongside `isHiring`.
-          freelanceMentions: [],
+          termMentions: [],
           atsProviders: [],
           analytics: [],
           techStack: [],
@@ -9006,7 +8952,7 @@ var DEFAULT_WEIGHTS = {
   // counted it once, and this adds the part that is about THEIR brief rather
   // than about hiring in general. Modest, so it cannot swamp the basics.
   perMatchedRole: 4,
-  freelanceSignal: 12,
+  termMatches: 12,
   staleRole: 8
 };
 function daysSince(iso) {
@@ -9039,7 +8985,7 @@ function scoreOf(place, weights = DEFAULT_WEIGHTS) {
   if (s?.hasEcommerce) parts.ecommerce = weights.ecommerce;
   if (s?.hasPricingPage) parts.pricing = weights.pricing;
   if (s?.matchedRoles) parts.matchedRoles = Math.min(weights.perMatchedRole * 5, weights.perMatchedRole * s.matchedRoles);
-  if (s?.freelanceMentions?.length) parts.freelanceSignal = weights.freelanceSignal;
+  if (s?.termMentions?.length) parts.termMatches = weights.termMatches;
   if ((s?.oldestOpenRoleDays ?? 0) >= 90) parts.staleRole = weights.staleRole;
   const total = Object.values(parts).reduce((n, v) => n + v, 0);
   return { total, parts, fit: place.score?.fit, why: place.score?.why, angle: place.score?.angle };
@@ -9348,10 +9294,10 @@ function runCheck(input) {
       ...place.contacts.emails.map((c) => ({ ...c, kind: "email" })),
       ...place.contacts.phones.map((c) => ({ ...c, kind: "phone" })),
       ...place.contacts.people.map((c) => ({ ...c, kind: "person" })),
-      // A freelance mention is a quote from the company's own page, and it is
-      // about to be used as a reason to call them. It gets the same treatment
-      // as a contact: findable in the page it cites, or it does not ship.
-      ...(place.signals?.freelanceMentions ?? []).map((c) => ({ ...c, kind: "freelance mention" }))
+      // A term mention is a quote from the company's own page, and it is about
+      // to be used as a reason to call them. Same treatment as a contact:
+      // findable in the page it cites, or it does not ship.
+      ...(place.signals?.termMentions ?? []).map((c) => ({ ...c, kind: "term mention" }))
     ];
     for (const item of items) {
       contacts++;
@@ -9573,8 +9519,8 @@ var HEADER = [
   "matched_roles",
   "role_filter",
   "oldest_open_role_days",
-  "freelance_signal",
-  "freelance_signal_source",
+  "term_matches",
+  "term_match_source",
   "ats",
   "cms",
   "last_content_at",
@@ -9666,8 +9612,8 @@ function toCsv(places, opts = {}) {
         sg?.oldestOpenRoleDays ?? "",
         // The terms the company itself used, verbatim, with the page beside
         // them — so a row can be checked without opening the run.
-        sg?.freelanceMentions?.map((m) => m.value).join(" | ") ?? "",
-        [...new Set(sg?.freelanceMentions?.map((m) => m.from) ?? [])].join(" | "),
+        sg?.termMentions?.map((m) => m.value).join(" | ") ?? "",
+        [...new Set(sg?.termMentions?.map((m) => m.from) ?? [])].join(" | "),
         sg?.atsProviders.join(" | ") ?? "",
         sg?.cms ?? "",
         sg?.lastContentAt ?? "",
@@ -10842,6 +10788,8 @@ var VALUE_FLAGS = [
   "web-results",
   "limit",
   "roles",
+  "terms",
+  "terms-on",
   "tier",
   "only",
   "max-pages",
@@ -10931,6 +10879,13 @@ ENRICHMENT (enrich)
   --roles <list>         Job-title terms YOU care about, e.g. entwickler,developer,engineer.
                          Counted into matched_roles. The engine has no default: it does not
                          know which roles matter to you, and will not invent one.
+  --terms <list>         Terms to find VERBATIM in the pages, e.g. freiberuflich,werkvertrag.
+                         The engine ships NO vocabulary in any language: translating a concept
+                         into a market's own words is your job, not a list frozen into the tool.
+                         Each hit is recorded with its page, and the check gate re-reads it.
+  --terms-on <roles>     Page roles --terms may be read on. Default: careers. Widen it
+                         deliberately (home,about,services) \u2014 on a legal page the same words
+                         name data processors, and on a services page they name the clients.
   --max-pages <n>        Ceiling on pages fetched per site in tier 2.
   --concurrency <n>      Sites in flight at once. Per-host pacing is separate and always on.
 
@@ -11400,6 +11355,8 @@ async function cmdEnrich(values, bools) {
     limit: values.limit ? clampInt(values.limit, 1, 1e5, 20) : void 0,
     only: list(values.only),
     roleFilter: list(values.roles),
+    termLexicon: list(values.terms),
+    termRoles: list(values["terms-on"]),
     maxPages: values["max-pages"] ? clampInt(values["max-pages"], 1, 40, 9) : void 0,
     concurrency: values.concurrency ? clampInt(values.concurrency, 1, 12, 4) : void 0,
     onNote: (n) => say(`  ${n}`),

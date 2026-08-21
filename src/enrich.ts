@@ -75,6 +75,10 @@ export interface EnrichOptions {
    * count stays unset rather than becoming a zero somebody reads as a finding.
    */
   roleFilter?: readonly string[];
+  /** Terms to look for verbatim in fetched pages. The engine ships none. */
+  termLexicon?: readonly string[];
+  /** Page roles the lexicon may be read on. Defaults to careers. */
+  termRoles?: readonly PageRole[];
   /** How many pages a tier-2 walk may fetch per site. */
   maxPages?: number;
   /** Sites to work on concurrently. Per-HOST pacing is separate and always on. */
@@ -236,6 +240,8 @@ async function enrichOne(
     lastContentAt: sitemap.lastContentAt,
     siteReachable: true,
     roleFilter: opts.roleFilter,
+    termLexicon: opts.termLexicon,
+    termRoles: opts.termRoles,
   });
 
   return { pages: fetched.map((f) => f.record), jobs: jobs.length, reachable: true };
@@ -292,7 +298,7 @@ export async function runEnrich(runDir: string, places: Place[], store: PageStor
           openRoles: 0,
           // Nothing was readable, so nothing was counted — and `matchedRoles`
           // stays unset rather than zero, alongside `isHiring`.
-          freelanceMentions: [],
+          termMentions: [],
           atsProviders: [],
           analytics: [],
           techStack: [],

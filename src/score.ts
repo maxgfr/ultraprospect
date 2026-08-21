@@ -35,8 +35,8 @@ export interface ScoreWeights {
   pricing: number;
   /** A role matching the caller's filter, per role. Unstaffed work they asked about. */
   perMatchedRole: number;
-  /** The company says on its own site that it works with contractors. */
-  freelanceSignal: number;
+  /** The caller's lexicon was found verbatim on the company's own site. */
+  termMatches: number;
   /** A dated role nobody has filled in a long time. */
   staleRole: number;
 }
@@ -66,7 +66,7 @@ export const DEFAULT_WEIGHTS: ScoreWeights = {
   // counted it once, and this adds the part that is about THEIR brief rather
   // than about hiring in general. Modest, so it cannot swamp the basics.
   perMatchedRole: 4,
-  freelanceSignal: 12,
+  termMatches: 12,
   staleRole: 8,
 };
 
@@ -133,7 +133,7 @@ export function scoreOf(place: Place, weights: ScoreWeights = DEFAULT_WEIGHTS): 
   // reader can see WHY a company ranked high and disagree with one term without
   // discarding the rest.
   if (s?.matchedRoles) parts.matchedRoles = Math.min(weights.perMatchedRole * 5, weights.perMatchedRole * s.matchedRoles);
-  if (s?.freelanceMentions?.length) parts.freelanceSignal = weights.freelanceSignal;
+  if (s?.termMentions?.length) parts.termMatches = weights.termMatches;
   // 90 days is the threshold, not a cliff: a role open three months is one the
   // company has already failed to fill through its normal channel.
   if ((s?.oldestOpenRoleDays ?? 0) >= 90) parts.staleRole = weights.staleRole;

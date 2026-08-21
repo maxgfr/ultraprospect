@@ -229,9 +229,9 @@ describe("buildSignals", () => {
 // The freelance signals.
 //
 // Everything here stays on the file's own rule: a COUNT or a PRESENCE, never a
-// conclusion. "Two dev roles open, the oldest for 840 days, and the word
-// Freiberufler appears on the careers page" is measured. "This company needs a
-// freelancer" is a judgement, and it is the agent's to make, not the engine's.
+// conclusion. "Two roles matched your filter, the oldest open for 840 days, and
+// the term you supplied appears on the careers page" is measured. "This company
+// needs a freelancer" is a judgement, and it is the agent's, not the engine's.
 // ---------------------------------------------------------------------------
 
 const page = (id: string, role: string, text: string) => ({
@@ -241,33 +241,6 @@ const page = (id: string, role: string, text: string) => ({
 });
 
 const base = { jobs: [], atsProviders: [], siteReachable: true, countryCode: "de" as const };
-
-describe("freelanceMentions", () => {
-  it("records a German contractor term verbatim, with the page it came from", () => {
-    const s = buildSignals({ ...base, pages: [page("P2", "careers", "Wir arbeiten regelmäßig mit Freiberuflern zusammen.")] });
-    expect(s.freelanceMentions).toHaveLength(1);
-    expect(s.freelanceMentions[0]).toMatchObject({ from: "P2", lane: "web" });
-    // The value must be re-findable in the page, because `check` re-reads it.
-    expect("Wir arbeiten regelmäßig mit Freiberuflern zusammen.").toContain(s.freelanceMentions[0]!.value);
-  });
-
-  it("carries the surrounding line as the note, so a human can judge the context", () => {
-    const s = buildSignals({ ...base, pages: [page("P2", "careers", "Für Freelancer:innen sind wir aktuell gut aufgestellt.")] });
-    expect(s.freelanceMentions[0]!.note).toContain("aktuell gut aufgestellt");
-  });
-
-  it("is empty, not absent, when a site says nothing about contractors", () => {
-    const s = buildSignals({ ...base, pages: [page("P1", "home", "Wir bauen Software für den Mittelstand.")] });
-    expect(s.freelanceMentions).toEqual([]);
-  });
-
-  it("does not fire on a word that merely contains the term", () => {
-    // "freiberuflich" is a real term; "Freiberuflichkeitsbescheinigung" in a tax
-    // boilerplate is not a hiring signal. Word boundaries, not substrings.
-    const s = buildSignals({ ...base, pages: [page("P1", "home", "Siehe Freelancerschutzgesetzgebungsdebatte im Blog.")] });
-    expect(s.freelanceMentions).toEqual([]);
-  });
-});
 
 describe("matchedRoles and oldestOpenRoleDays", () => {
   const jobs = [
@@ -328,56 +301,79 @@ describe("matchedRoles and oldestOpenRoleDays", () => {
   });
 });
 
-describe("freelanceMentions is scoped to the page where the words mean hiring", () => {
-  // Measured on a real Hamburg run: tier 1 reads home + legal, and produced 48
-  // mentions of which every sampled one was a false positive — "externe
-  // Dienstleister" in a GDPR data-processor clause, a law firm describing the
-  // Freiberufler it ADVISES, a web freelancer describing himself. The words are
-  // right; the page was wrong. A careers page is where "wir arbeiten mit
-  // Freiberuflern" is a statement about how the company staffs work.
-  it("ignores a contractor term in a privacy policy, where it names data processors", () => {
+// ---------------------------------------------------------------------------
+// termMentions — a mechanism, not a vocabulary.
+//
+// The engine ships no word list. Which words mean "this company buys outside
+// work" in Portugal is a translation problem, and translation belongs to the
+// agent, which can read the country's own labour vocabulary and check the
+// phrasing against the live web. What the engine owes is: find the caller's
+// terms verbatim, say which page each came from, and refuse to look on a page
+// where the words would mean something else.
+// ---------------------------------------------------------------------------
+
+describe("termMentions", () => {
+  it("finds nothing at all when the caller supplied no lexicon", () => {
+    // Not an empty result because the site is clean — an empty result because
+    // nobody said what to look for. The engine has no default to fall back on.
+    const s = buildSignals({ ...base, pages: [page("P2", "careers", "Wir arbeiten mit Freiberuflern.")] });
+    expect(s.termMentions).toEqual([]);
+    expect(s.termLexicon).toBeUndefined();
+  });
+
+  it("finds the caller's term verbatim, with the page and the surrounding line", () => {
     const s = buildSignals({
       ...base,
-      pages: [page("P9", "legal", "Externe Dienstleister und Partnerunternehmen verarbeiten Ihre Daten.")],
+      pages: [page("P2", "careers", "Wir arbeiten regelmäßig mit Freiberuflern zusammen.")],
+      termLexicon: ["Freiberufler"],
     });
-    expect(s.freelanceMentions).toEqual([]);
+    expect(s.termMentions).toHaveLength(1);
+    expect(s.termMentions[0]).toMatchObject({ from: "P2", lane: "web" });
+    expect(s.termMentions[0]!.note).toContain("zusammen");
+    expect(s.termLexicon).toEqual(["Freiberufler"]);
   });
 
-  it("ignores a term on a services page, where it usually names the CLIENTS", () => {
-    const s = buildSignals({ ...base, pages: [page("P3", "services", "Wir beraten Freiberufler und Mittelständler.")] });
-    expect(s.freelanceMentions).toEqual([]);
+  it("carries a suffixing inflection but not a compound", () => {
+    const hit = buildSignals({ ...base, pages: [page("P2", "careers", "mit Freiberuflern")], termLexicon: ["Freiberufler"] });
+    expect(hit.termMentions).toHaveLength(1);
+    const miss = buildSignals({ ...base, pages: [page("P2", "careers", "Freelancerschutzgesetzgebung")], termLexicon: ["Freelancer"] });
+    expect(miss.termMentions).toEqual([]);
   });
 
-  it("records it on a careers page, where it is a statement about hiring", () => {
-    const s = buildSignals({ ...base, pages: [page("P2", "careers", "Wir arbeiten regelmäßig mit Freiberuflern zusammen.")] });
-    expect(s.freelanceMentions).toHaveLength(1);
-    expect(s.freelanceMentions[0]!.from).toBe("P2");
-  });
-});
-
-describe("the contractor vocabulary travels", () => {
-  // The engine already speaks five languages in ROLE_PATTERNS, and the register
-  // lane reaches eleven countries. A signal that only fires in German makes the
-  // tool report "no contractor culture" for France, Spain and the Netherlands —
-  // three markets that run on it. Each of these is the term the country's own
-  // labour vocabulary actually uses, not a translation of the German one.
-  it.each([
-    ["de", "Wir arbeiten regelmäßig mit Freiberuflern zusammen."],
-    ["en", "We regularly work with freelancers and contractors."],
-    ["fr", "Nous travaillons avec des indépendants en sous-traitance."],
-    ["fr", "Statut auto-entrepreneur ou portage salarial accepté."],
-    ["es", "Buscamos profesionales autónomos para colaboración externa."],
-    ["it", "Cerchiamo liberi professionisti con partita IVA."],
-    ["nl", "Wij werken graag met ZZP'ers en zelfstandigen."],
-    ["pl", "Współpraca na zasadzie samozatrudnienia."],
-    ["no", "Vi samarbeider med frilansere."],
-  ])("fires on a %s careers page", (_lang, text) => {
-    const s = buildSignals({ ...base, pages: [page("P2", "careers", text)] });
-    expect(s.freelanceMentions.length).toBeGreaterThan(0);
+  it("works in any language, because the language never reaches the engine", () => {
+    // The agent translated these. The engine cannot tell them apart, which is
+    // exactly the property that makes it work outside the languages one author
+    // happened to speak.
+    for (const [text, term] of [
+      ["Statut auto-entrepreneur ou portage salarial accepté.", "portage salarial"],
+      ["Buscamos profesionales autónomos.", "autónomo"],
+      ["Wij werken graag met ZZP'ers.", "ZZP"],
+      ["Współpraca na zasadzie samozatrudnienia.", "samozatrudnieni"],
+    ] as const) {
+      const s = buildSignals({ ...base, pages: [page("P2", "careers", text)], termLexicon: [term] });
+      expect(s.termMentions.length, `${term} in "${text}"`).toBeGreaterThan(0);
+    }
   });
 
-  it("still refuses a compound that merely contains the term", () => {
-    const s = buildSignals({ ...base, pages: [page("P2", "careers", "Siehe Freelancerschutzgesetzgebungsdebatte.")] });
-    expect(s.freelanceMentions).toEqual([]);
+  it("reads only the careers page by default, where the words are about hiring", () => {
+    // Measured: scanning home and legal produced 48 hits on a Hamburg run and
+    // every sampled one was a false positive — GDPR boilerplate naming data
+    // processors, a law firm naming the clients it advises.
+    const legal = buildSignals({
+      ...base,
+      pages: [page("P9", "legal", "Externe Dienstleister verarbeiten Ihre Daten.")],
+      termLexicon: ["Externe Dienstleister"],
+    });
+    expect(legal.termMentions).toEqual([]);
+  });
+
+  it("lets the caller widen the pages deliberately, rather than silently", () => {
+    const s = buildSignals({
+      ...base,
+      pages: [page("P1", "home", "Wir suchen Freiberufler.")],
+      termLexicon: ["Freiberufler"],
+      termRoles: ["home", "careers"],
+    });
+    expect(s.termMentions).toHaveLength(1);
   });
 });

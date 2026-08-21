@@ -11,7 +11,7 @@ function signals(over: Partial<Signals> = {}): Signals {
     pageCount: 3,
     openRoles: 0,
 
-    freelanceMentions: [],
+    termMentions: [],
     atsProviders: [],
     analytics: [],
     techStack: [],
@@ -174,9 +174,7 @@ describe("factSheet", () => {
   });
 
   it("states the three hiring states in words, not as a boolean", () => {
-    expect(factSheet(place({ signals: signals({ isHiring: true, openRoles: 4, freelanceMentions: [], atsProviders: ["lever"] }) }))).toContain(
-      "4 open role(s)",
-    );
+    expect(factSheet(place({ signals: signals({ isHiring: true, openRoles: 4, termMentions: [], atsProviders: ["lever"] }) }))).toContain("4 open role(s)");
     expect(factSheet(place({ signals: signals({ isHiring: false }) }))).toContain("we looked");
     expect(factSheet(place({ signals: signals({ isHiring: undefined, atsProviders: ["welcometothejungle"] }) }))).toContain("UNKNOWN");
   });

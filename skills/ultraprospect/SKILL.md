@@ -209,6 +209,48 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    the ones you have a reason to care about, not on the whole town: a thousand
    places at eight pages each is six thousand requests and several hours.
 
+6b. **Bring your own vocabulary — the engine has none, on purpose.**
+
+   `--terms` finds words VERBATIM in the pages tier 1 and 2 fetched, and
+   `--roles` counts job titles matching them. Neither ships a default in any
+   language, and that is the design rather than a gap. A word list frozen into a
+   general tool is one person's curation wearing the costume of a measurement:
+   it goes stale, it privileges whichever languages its author happened to
+   speak, and for every market it misses it reports a confident absence.
+
+   So translating a concept into a market's own words is YOUR job, and you have
+   two things the engine does not: the languages, and the web.
+
+   - **Translate the concept, not the German.** "Does this company buy outside
+     work" is `portage salarial` and `auto-entrepreneur` in France, `ZZP` in the
+     Netherlands, `autónomo` in Spain, `Freiberufler` and `Werkvertrag` in
+     Germany, `libero professionista` in Italy. A literal translation of a
+     German word finds nothing, because these are legal statuses, not synonyms.
+   - **Check the phrasing against the live web before you scan.** Search how
+     companies in that country actually word it on their careers pages, and take
+     the words you SEE rather than the ones you expect. `resolve --engine-search`
+     already drives webindex's keyless search from inside this bundle; your own
+     WebSearch does the same job.
+   - **Mind the inflection.** Matching tolerates up to three trailing letters,
+     which carries German `-n`/`-ern`, French `-s` and Spanish `-os`. Languages
+     that inflect by REPLACING the ending — Polish, Czech — need a stem:
+     `samozatrudnieni`, not `samozatrudnienie`.
+   - **Refuse a term that means two things.** `B2B` means contractor in a Polish
+     job ad and business-to-business in every English one. A term with two
+     readings produces hits nobody can act on, and they will look measured.
+
+   **`--terms-on` defaults to the careers page, and widening it is a decision.**
+   Measured on a real run before that default existed: 48 hits from home and
+   legal pages, and every sampled one was wrong — `externe Dienstleister` naming
+   data processors in a privacy policy, `Freiberufler` naming the CLIENTS a law
+   firm advises, `Freelancer` on a one-person studio's homepage describing its
+   owner. The words were right and the page was wrong, which is the worst shape
+   of wrong here because it reads as evidence.
+
+   Whatever you pass is recorded in the signals beside the hits, so a count
+   always says what it counted, and `check` re-reads every hit against the page
+   it cites.
+
 7. **Rank, then judge.** `score` adds a measured total from things it counted —
    site alive, recently touched, roles open, headcount band, revenue filed,
    contactable. It does NOT score whether a company matches the brief, however

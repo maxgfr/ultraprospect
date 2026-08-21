@@ -134,10 +134,10 @@ export function runCheck(input: CheckInput): CheckReport {
       ...place.contacts.emails.map((c) => ({ ...c, kind: "email" })),
       ...place.contacts.phones.map((c) => ({ ...c, kind: "phone" })),
       ...place.contacts.people.map((c) => ({ ...c, kind: "person" })),
-      // A freelance mention is a quote from the company's own page, and it is
-      // about to be used as a reason to call them. It gets the same treatment
-      // as a contact: findable in the page it cites, or it does not ship.
-      ...(place.signals?.freelanceMentions ?? []).map((c) => ({ ...c, kind: "freelance mention" })),
+      // A term mention is a quote from the company's own page, and it is about
+      // to be used as a reason to call them. Same treatment as a contact:
+      // findable in the page it cites, or it does not ship.
+      ...(place.signals?.termMentions ?? []).map((c) => ({ ...c, kind: "term mention" })),
     ];
     for (const item of items) {
       contacts++;

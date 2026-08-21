@@ -223,7 +223,7 @@ describe("warnings", () => {
         pageCount: 0,
         openRoles: 0,
 
-        freelanceMentions: [],
+        termMentions: [],
         atsProviders: [],
         analytics: [],
         techStack: [],
