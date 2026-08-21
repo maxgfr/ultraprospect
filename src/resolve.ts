@@ -476,11 +476,24 @@ function candidateUrlsFor(place: Place, hits: readonly WebHit[]): string[] {
  * registration number" is exactly the signal that identifies a company's own
  * site.
  */
-async function keylessHits(queries: readonly string[], locale: string | undefined): Promise<WebHit[]> {
+async function keylessHits(queries: readonly string[], locale: string | undefined, onEngineNote?: (note: string) => void): Promise<WebHit[]> {
   const lists: WebHit[][] = [];
   for (const query of queries) {
     try {
       const res = await search(query, { limit: 5, lang: locale });
+      // What the cascade says about ITSELF has to reach the run.
+      //
+      // These notes used to be dropped on the floor, and the one that matters
+      // says the engines refused to answer. Without it a blocked search and a
+      // territory with no web presence produce the same output — 12 companies
+      // searched, 0 found, "left without a site" — and the reader has no way to
+      // tell which they are looking at.
+      //
+      // The local-stack advice is filtered out: SearXNG and Firecrawl are
+      // localhost and off by default, so the cascade mentions them on every
+      // single query. That is a note about this machine's Docker, not a finding
+      // about a territory, and repeating it per place would bury the one that is.
+      for (const n of res.notes ?? []) if (!/searxng|firecrawl|stack up/i.test(n)) onEngineNote?.(n);
       lists.push((res.hits ?? []).map((h: { url: string; title?: string; snippet?: string }) => ({ url: h.url, title: h.title, snippet: h.snippet })));
     } catch {
       // A keyless engine being unavailable is not this place's problem.
@@ -535,6 +548,15 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
     notes.push(n);
     opts.onNote?.(n);
   };
+  // The search cascade says the same thing on every query — one place with three
+  // queries would repeat it three times, a town with eight hundred, twice that.
+  // It is one fact about the run, so it is recorded once.
+  const saidByEngine = new Set<string>();
+  const engineNote = (n: string) => {
+    if (saidByEngine.has(n)) return;
+    saidByEngine.add(n);
+    note(`resolve: the keyless fallback reports — ${n}`);
+  };
   const outcome: ResolveOutcome = { pages: new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unreadable: 0, unchanged: 0, socials: 0, notes };
 
   const locale = searchLocaleFor(opts.countryCode, opts.lang);
@@ -552,7 +574,7 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
 
     let hits = grouped.get(place.id) ?? [];
     if (hits.length === 0 && opts.useEngineSearch) {
-      hits = await keylessHits(queriesFor(place, opts.town, opts.countryCode), locale);
+      hits = await keylessHits(queriesFor(place, opts.town, opts.countryCode), locale, engineNote);
     }
 
     const candidates = candidateUrlsFor(place, hits);

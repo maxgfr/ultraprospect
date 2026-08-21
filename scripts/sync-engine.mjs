@@ -46,7 +46,17 @@ const ENGINES = {
     // indirection (configure/brand/envName) that re-prefixes every env var to
     // ULTRAPROSPECT_*. Vendoring anything older typechecks against the old
     // declarations and then fails on names that are not there.
-    minRef: "v1.18.1",
+    //
+    // v1.18.2: `resolve` now repeats what the search cascade says about itself,
+    // and on an older engine there is nothing worth repeating. Before this
+    // release a keyless engine that BLOCKED the client — a 403, or a CAPTCHA
+    // served with a 2xx — came back as "No results from any engine", so a
+    // blocked search and a territory with no web presence were the same output.
+    // Vendoring anything older still typechecks and still runs; it just reports
+    // a refusal as an empty web, which is the one failure mode this skill exists
+    // to refuse. That is exactly the silent staleness this floor is here to
+    // catch.
+    minRef: "v1.18.2",
     meta: "webindex.meta.json",
     files: [
       { remote: "scripts/engine.mjs", local: "webindex-engine.mjs" },
