@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [3.1.2](https://github.com/maxgfr/ultraprospect/compare/v3.1.1...v3.1.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* **resolve:** a shared doorway is not evidence, and a substring is not a name ([84fbca4](https://github.com/maxgfr/ultraprospect/commit/84fbca498a7ea8178334fb6b9f75c95ed003ff94))
+
 ## [3.1.1](https://github.com/maxgfr/ultraprospect/compare/v3.1.0...v3.1.1) (2026-08-21)
 
 
