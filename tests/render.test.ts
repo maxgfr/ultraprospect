@@ -266,13 +266,21 @@ describe("REPORT.md", () => {
 describe("index.html", () => {
   const html = buildHtml([place({ lat: 48.8, lon: 2.4, score: { total: 10, parts: {} } })], manifest());
 
-  it("loads no external asset", () => {
+  it("loads no external asset, and cannot reach the network at all", () => {
     // No tiles, no CDN, no font, no analytics. A page about who somebody's
     // prospects are should not phone anyone while it is being read.
-    expect(html).not.toMatch(/<script/i);
+    //
+    // This used to be enforced by banning `<script>` outright, which was the
+    // blunt way to say it while the page had nothing to run. The page now
+    // filters and sorts in place — eight hundred rows are not readable
+    // otherwise — so the ban is stated as what it always meant, and it is
+    // STRICTER than before: an inline script that called fetch() would have
+    // passed the old rule and fails this one.
+    expect(html).not.toMatch(/<script[^>]+src=/i);
     expect(html).not.toMatch(/<link[^>]+stylesheet/i);
     expect(html).not.toMatch(/<img/i);
     expect(html).not.toMatch(/@import|url\(https?:/i);
+    expect(html).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|sendBeacon|new WebSocket|EventSource|\bimport\s*\(/i);
   });
 
   it("draws the map as inline SVG from the run's own coordinates", () => {
@@ -400,5 +408,29 @@ describe("watch", () => {
     const delta = buildDelta(diffRuns([place()], [place()]), manifest(), manifest({ builtAt: "2026-09-10T00:00:00.000Z" }));
     expect(delta).toContain("Comparing the run of 2026-08-10 with the one of 2026-09-10.");
     expect(delta).not.toContain("Comparing the sweep");
+  });
+});
+
+describe("buildHtml is usable at the size a real run produces", () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => place({ id: `osm:n${i}`, name: `Firma ${i}` }));
+
+  it("says so when the table shows fewer rows than the run holds", () => {
+    // The page caps the table so a browser can open it. Capping is fine;
+    // capping SILENTLY is the one thing this tool refuses everywhere else —
+    // a reader counting rows would conclude the territory holds 500 companies.
+    const html = buildHtml(many(854), manifest());
+    expect(html).toMatch(/showing .*500.* of .*854/i);
+  });
+
+  it("says nothing about a cap when there was none", () => {
+    expect(buildHtml(many(12), manifest())).not.toMatch(/showing/i);
+  });
+
+  it("ships a filter and sortable columns, and still makes no network request", () => {
+    const html = buildHtml(many(30), manifest());
+    expect(html).toContain('id="q"');
+    expect(html).toContain("data-sort");
+    // Self-contained is a promise the page makes in its own footer.
+    expect(html).not.toMatch(/<script[^>]+src=|<link[^>]+href="http|@import|fetch\(/);
   });
 });

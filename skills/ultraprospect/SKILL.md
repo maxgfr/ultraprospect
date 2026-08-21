@@ -272,14 +272,25 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    a naming convention is plausible, unfalsifiable at a glance, and will be
    emailed. The gate makes it impossible rather than discouraged.
 
-10. **Render, and hand over what the render says.** `render` writes
-    `PROSPECTS.csv` (flat, CRM-shaped, with `score` and `fit` in separate
-    columns, each contact's source page beside it, and `registry_as_of` carrying
-    the date of any record that came from a snapshot), `prospects.json`,
-    `REPORT.md`, and a self-contained `index.html` that makes no network
-    requests. If the run is truncated, both the report and the page lead with
-    that — repeat it, do not paraphrase it away. If `PRIVACY.md` was written,
-    the run holds named individuals and that file says what follows from it.
+10. **Render, and hand over all four — they are not the same deliverable.**
+    `render` writes one run in four shapes, and which one you put in front of
+    someone decides whether they can act on it:
+
+    | File | What it is for | Hand it to |
+    |---|---|---|
+    | `index.html` | **Looking.** Self-contained, makes NO network request, opens from a file:// path with nothing installed. Sort and filter in place to find the twenty rows that matter out of eight hundred. | anyone who has to SEE the territory |
+    | `REPORT.md` | **Reading and sharing.** Coverage table with each lane's `mode`, the counts, the activity breakdown, the attributions. Pastes into an issue, a PR, a wiki, a mail. | anyone who has to judge whether the run is sound |
+    | `PROSPECTS.csv` | **Working.** Flat and CRM-shaped: `score` and `fit` in separate columns so the measured number survives your judgement, each contact's source page beside it, `registry_as_of` on anything from a snapshot, and `role_filter` / `term_lexicon` beside their counts so a number says what it counted. | a CRM, a spreadsheet, a mail-merge |
+    | `prospects.json` | **Piping.** The same rows, unflattened, for whatever comes next. | another program |
+
+    Do not hand over one and describe the others. The CSV is where someone will
+    act, the HTML is where they will look first, and the report is the only one
+    that carries the coverage — a CSV read without it is a list with no idea how
+    much of the territory it covers.
+
+    If the run is truncated, both the report and the page lead with that —
+    repeat it, do not paraphrase it away. If `PRIVACY.md` was written, the run
+    holds named individuals and that file says what follows from it.
 
 11. **Write from `places.json`.** Every field carries where it came from. A place
    with `sources: ["osm","sirene"]` has both records attached; a place with one

@@ -9804,12 +9804,15 @@ function mapSvg(places, manifest) {
 <figcaption>${pts.length} located companies. Larger is a higher measured score; filled points have a corroborated website.</figcaption>
 </figure>`;
 }
+var HTML_ROW_CAP = 500;
 function buildHtml(places, manifest) {
   const order = ranked(places);
-  const rows = order.slice(0, 500).map((p) => {
+  const shown = Math.min(order.length, HTML_ROW_CAP);
+  const rows = order.slice(0, HTML_ROW_CAP).map((p) => {
     const h = p.signals?.isHiring === true ? `${p.signals.openRoles}` : p.signals?.isHiring === false ? "\u2014" : "?";
     const site = p.website?.url ? `<a href="${esc(p.website.url)}" rel="noreferrer nofollow">${esc(new URL(p.website.url).hostname)}</a>` : "";
-    return `<tr><td>${esc(p.name)}</td><td class="n">${p.score?.total ?? 0}</td><td>${esc(p.score?.fit ?? "")}</td><td class="n">${h}</td><td>${esc(p.registry?.activityCode ?? p.category ?? "")}</td><td>${esc(p.address.commune ?? "")}</td><td>${site}</td></tr>`;
+    const hay = [p.name, p.registry?.activityCode, p.category, p.address.commune, p.website?.url, p.score?.fit].filter(Boolean).join(" ").toLowerCase();
+    return `<tr data-h="${esc(hay)}"><td>${esc(p.name)}</td><td class="n">${p.score?.total ?? 0}</td><td>${esc(p.score?.fit ?? "")}</td><td class="n">${h}</td><td>${esc(p.registry?.activityCode ?? p.category ?? "")}</td><td>${esc(p.address.commune ?? "")}</td><td>${site}</td></tr>`;
   }).join("\n");
   const banner = manifest.truncated ? `<div class="warn"><strong>This run does not cover the whole territory.</strong> ${manifest.lanes.filter((l) => l.truncated).map((l) => `${esc(l.lane)}: ${esc(l.reason ?? "capped")}`).join(" \xB7 ")} Every count below is a floor.</div>` : "";
   return `<!doctype html>
@@ -9837,6 +9840,14 @@ h1{font-size:1.6rem;margin:0 0 .25rem}
 circle.pt{fill:var(--pt);opacity:.65}
 circle.sited{fill:var(--sited);opacity:.8}
 circle.strong{fill:var(--strong);opacity:.95}
+.tools{display:flex;gap:.75rem;align-items:center;margin:0 0 .6rem;flex-wrap:wrap}
+#q{flex:1 1 18rem;min-width:12rem;padding:.5rem .7rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+.muted{color:var(--muted);font-size:.85rem}
+.cap{color:var(--muted);font-size:.85rem;margin:0 0 .6rem}
+th[data-sort]{cursor:pointer;user-select:none}
+th[data-sort]:hover{color:var(--accent)}
+th[aria-sort]::after{content:" \u25B2";font-size:.7em}
+th[aria-sort="descending"]::after{content:" \u25BC"}
 .scroll{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
 table{border-collapse:collapse;width:100%;font-size:.9rem}
 th,td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -9861,9 +9872,14 @@ ${banner}
 <div class="card"><b>${manifest.counts.merged}</b><span>matched across lanes</span></div>
 </div>
 ${mapSvg(places, manifest)}
+<div class="tools">
+<input id="q" type="search" placeholder="Filter \u2014 name, activity, town, domain, fit" autocomplete="off" aria-label="Filter the table">
+<span id="count" class="muted"></span>
+</div>
+${order.length > shown ? `<p class="cap">Showing the ${shown} highest-ranked of ${order.length} companies. The rest are in <code>PROSPECTS.csv</code> and <code>prospects.json</code> \u2014 this table is capped so a browser can open it, not because the run stopped there.</p>` : ""}
 <div class="scroll">
 <table>
-<thead><tr><th>Company</th><th class="n">Score</th><th>Fit</th><th class="n">Roles</th><th>Activity</th><th>Town</th><th>Website</th></tr></thead>
+<thead><tr><th data-sort="t">Company</th><th class="n" data-sort="n">Score</th><th data-sort="t">Fit</th><th class="n" data-sort="n">Roles</th><th data-sort="t">Activity</th><th data-sort="t">Town</th><th data-sort="t">Website</th></tr></thead>
 <tbody>
 ${rows}
 </tbody>
@@ -9874,6 +9890,45 @@ ${manifest.licences.map((x) => `<p>${esc(x)}</p>`).join("\n")}
 <p>Extracted ${esc(manifest.builtAt.slice(0, 10))}. This page makes no network requests.</p>
 </footer>
 </main>
+<script>
+// Filtering and sorting, inline and offline. Without JavaScript the table is
+// still a table \u2014 the controls simply do nothing, which is why the cap note
+// above is markup rather than something this script writes.
+(function(){
+  var tb=document.querySelector("tbody"), q=document.getElementById("q"), c=document.getElementById("count");
+  if(!tb) return;
+  var rows=[].slice.call(tb.rows), total=rows.length;
+  function tell(n){ if(c) c.textContent = n===total ? total+" rows" : n+" of "+total+" rows"; }
+  tell(total);
+  if(q) q.addEventListener("input", function(){
+    var t=q.value.trim().toLowerCase(), n=0;
+    for(var i=0;i<rows.length;i++){
+      var hit = !t || (rows[i].dataset.h||"").indexOf(t) !== -1;
+      rows[i].hidden = !hit; if(hit) n++;
+    }
+    tell(n);
+  });
+  var heads=[].slice.call(document.querySelectorAll("th[data-sort]"));
+  heads.forEach(function(th,i){
+    th.addEventListener("click", function(){
+      var desc = th.getAttribute("aria-sort") !== "descending";
+      heads.forEach(function(h){ h.removeAttribute("aria-sort"); });
+      th.setAttribute("aria-sort", desc ? "descending" : "ascending");
+      var num = th.dataset.sort === "n";
+      rows.sort(function(a,b){
+        var x=a.cells[i].textContent.trim(), y=b.cells[i].textContent.trim();
+        // "?" means the board could not be read and "\u2014" means none: neither is
+        // a number, and neither may sort as zero next to a real count.
+        if(num){ var nx=parseFloat(x), ny=parseFloat(y);
+          if(isNaN(nx)&&isNaN(ny)) return 0; if(isNaN(nx)) return 1; if(isNaN(ny)) return -1;
+          return desc ? ny-nx : nx-ny; }
+        return desc ? y.localeCompare(x) : x.localeCompare(y);
+      });
+      rows.forEach(function(r){ tb.appendChild(r); });
+    });
+  });
+})();
+</script>
 </body>
 </html>
 `;
