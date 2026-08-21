@@ -311,7 +311,7 @@ describe("a legal identifier is re-read the way it was written down", () => {
     return place({
       id: "osm:n2",
       pages: ["P2"],
-      legalIds: [{ kind: "hrb", value: "HRB 77491", from: "P2" }],
+      legalIds: [{ kind: "hrb", value: "HRB 77491", from: "P2", status: "verified" as const }],
     });
   };
 
