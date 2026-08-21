@@ -294,3 +294,40 @@ describe("a dated register record", () => {
     expect(report.errors.map((e) => e.rule)).not.toContain("dated-record-undated");
   });
 });
+
+describe("a legal identifier is re-read the way it was written down", () => {
+  // Found on a real German run: four identities were rejected because the
+  // Impressum writes "HRB: 77491" with a colon, while the extractor records
+  // "HRB 77491" — it has to, since no register accepts a colon in a lookup.
+  // The gate then hunted the normalised form in the raw page and failed to
+  // find it. The identity was genuine and re-readable; the gate's normaliser
+  // simply did not strip the punctuation the extractor had.
+  //
+  // A gate that rejects true evidence is not "strict", it is broken: people
+  // learn to pass --force, and then it stops catching the fabricated ones.
+  const withId = (body: string) => {
+    mkdirSync(join(runDir, "pages", "osm_n2"), { recursive: true });
+    writeFileSync(join(runDir, "pages", "osm_n2", "P2.md"), `# P2\n\n- url: https://acme.de/impressum\n- role: legal\n\n---\n\n${body}\n`);
+    return place({
+      id: "osm:n2",
+      pages: ["P2"],
+      legalIds: [{ kind: "hrb", value: "HRB 77491", from: "P2" }],
+    });
+  };
+
+  it.each([
+    ["HRB: 77491", "a colon, as most Impressums write it"],
+    ["HRB 77491", "a plain space"],
+    ["HRB 77491", "a non-breaking space"],
+    ["HRB / 77491", "a slash"],
+    ["Amtsgericht Hamburg, HRB: 77.491", "a colon and a thousands dot"],
+  ])("accepts %s (%s)", (body) => {
+    const r = runCheck({ runDir, places: [withId(body)], manifest: manifest() });
+    expect(r.errors.filter((e) => e.rule === "legal-id-not-on-page")).toEqual([]);
+  });
+
+  it("still rejects a number that is genuinely not on the page", () => {
+    const r = runCheck({ runDir, places: [withId("Amtsgericht Hamburg, HRB: 11111")], manifest: manifest() });
+    expect(r.errors.map((e) => e.rule)).toContain("legal-id-not-on-page");
+  });
+});

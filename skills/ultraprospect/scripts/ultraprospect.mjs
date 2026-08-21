@@ -9351,8 +9351,9 @@ function runCheck(input) {
         err("legal-id-unsourced", `${place.id} \xB7 ${id.kind} ${id.value}`, `claims to come from ${id.from}, which is not a stored page in this run.`);
         continue;
       }
-      const haystack = text2.replace(/[\s.\-–—]/g, "").toLowerCase();
-      if (!haystack.includes(id.value.replace(/[\s.\-–—]/g, "").toLowerCase())) {
+      const strip = (x) => x.replace(/[\s.\-–—:/,\u00a0\u202f]/g, "").toLowerCase();
+      const haystack = strip(text2);
+      if (!haystack.includes(strip(id.value))) {
         err(
           "legal-id-not-on-page",
           `${place.id} \xB7 ${id.kind} ${id.value}`,

@@ -191,8 +191,18 @@ export function runCheck(input: CheckInput): CheckReport {
       // Compared with separators stripped from both sides: a page writes
       // "DE 811 907 980" and the record holds "DE811907980", and neither
       // spelling is wrong.
-      const haystack = text.replace(/[\s.\-–—]/g, "").toLowerCase();
-      if (!haystack.includes(id.value.replace(/[\s.\-–—]/g, "").toLowerCase())) {
+      //
+      // Both sides are stripped of the PUNCTUATION a register number is merely
+      // presented with, because the value was normalised on the way in and the
+      // page was not. A German Impressum writes "HRB: 77491" and no register
+      // accepts a colon in a lookup, so the extractor is right to drop it and
+      // this has to drop it too. Found the hard way: four genuine identities
+      // failed this rule over a colon. A gate that rejects true evidence is not
+      // strict, it is broken — people route around it, and then it stops
+      // catching the fabricated ones it exists for.
+      const strip = (x: string) => x.replace(/[\s.\-–—:/,\u00a0\u202f]/g, "").toLowerCase();
+      const haystack = strip(text);
+      if (!haystack.includes(strip(id.value))) {
         err(
           "legal-id-not-on-page",
           `${place.id} · ${id.kind} ${id.value}`,
