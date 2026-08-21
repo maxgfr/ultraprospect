@@ -282,6 +282,13 @@ export interface SignalInput {
   termRoles?: readonly PageRole[];
 }
 
+/** The postings the caller's filter selects, or all of them when there is none. */
+function matchingJobs(input: SignalInput): readonly JobPosting[] {
+  const terms = input.roleFilter ?? [];
+  if (!terms.length) return input.jobs;
+  return input.jobs.filter((j) => terms.some((t) => j.title.toLowerCase().includes(t.toLowerCase())));
+}
+
 /** Days since the oldest posting that carries a date. Undefined when none do. */
 function oldestRoleDays(jobs: readonly JobPosting[], now?: string): number | undefined {
   const stamps = jobs.map((j) => (j.postedAt ? Date.parse(j.postedAt) : Number.NaN)).filter((n) => Number.isFinite(n));
@@ -314,14 +321,21 @@ export function buildSignals(input: SignalInput): Signals {
     // hiring" and "we could not look" are different facts.
     isHiring: input.atsProviders.length === 0 && !roles.has("careers") ? false : input.jobs.length > 0 || undefined,
     openRoles: input.jobs.length,
-    matchedRoles: input.roleFilter?.length
-      ? input.jobs.filter((j) => input.roleFilter!.some((t) => j.title.toLowerCase().includes(t.toLowerCase()))).length
-      : undefined,
+    matchedRoles: input.roleFilter?.length ? matchingJobs(input).length : undefined,
     roleFilter: input.roleFilter?.length ? [...input.roleFilter] : undefined,
     // A role open for a long time is a role the company cannot fill. That is
-    // the closest thing to a measurable freelance opportunity a public source
-    // carries — and it is a COUNT of days, not a conclusion about why.
-    oldestOpenRoleDays: oldestRoleDays(input.jobs, input.now),
+    // the closest thing to a measurable opportunity a public source carries —
+    // and it is a COUNT of days, not a conclusion about why.
+    //
+    // Aged over the FILTERED roles when a filter exists. Measured on a real
+    // run: the oldest posting on two German boards was an "Initiativbewerbung",
+    // a standing invitation to apply speculatively that never closes, and it
+    // made a company whose oldest real vacancy was two months old look like it
+    // had failed to fill one for 1766 days. The engine must not learn that
+    // word — it is one country's, and the next country has another — but a
+    // caller's filter already excludes an evergreen catch-all, so the age
+    // follows the filter.
+    oldestOpenRoleDays: oldestRoleDays(matchingJobs(input), input.now),
     // CAREERS ONLY, and that restriction is the signal.
     //
     // Measured on a Hamburg run before it was scoped: 48 mentions, every

@@ -377,3 +377,52 @@ describe("termMentions", () => {
     expect(s.termMentions).toHaveLength(1);
   });
 });
+
+describe("oldestOpenRoleDays ages the roles the caller asked about", () => {
+  // Measured on a Hamburg run: the oldest posting on two German boards was an
+  // "Initiativbewerbung" — a standing invitation to apply speculatively, which
+  // by construction never closes. It made one company look like it had failed
+  // to fill a role for 1766 days when its oldest real vacancy was two months
+  // old. An evergreen listing poisons the one reading this number exists for.
+  //
+  // The engine must not learn what "Initiativbewerbung" means — that is one
+  // country's word, and the next country has another. But the caller ALREADY
+  // says which roles matter, and an evergreen catch-all is precisely what a
+  // real filter excludes. So the age follows the filter.
+  const jobs = [
+    { title: "Initiativbewerbung", postedAt: "2021-10-20T00:00:00Z", via: "personio" },
+    { title: "DevOps Engineer (m/w/d)", postedAt: "2025-10-20T00:00:00Z", via: "personio" },
+  ];
+
+  it("ages only the matching roles when a filter was given", () => {
+    const s = buildSignals({
+      ...base,
+      jobs,
+      atsProviders: ["personio"],
+      pages: [page("P1", "home", "x")],
+      roleFilter: ["engineer"],
+      now: "2026-08-21T00:00:00Z",
+    });
+    expect(s.matchedRoles).toBe(1);
+    expect(s.oldestOpenRoleDays).toBe(305);
+  });
+
+  it("ages every role when no filter was given, because nothing said otherwise", () => {
+    const s = buildSignals({ ...base, jobs, atsProviders: ["personio"], pages: [page("P1", "home", "x")], now: "2026-08-21T00:00:00Z" });
+    expect(s.oldestOpenRoleDays).toBe(1766);
+  });
+
+  it("leaves the age unset when a filter matched nothing", () => {
+    // Not zero, and not the age of a role they never asked about.
+    const s = buildSignals({
+      ...base,
+      jobs,
+      atsProviders: ["personio"],
+      pages: [page("P1", "home", "x")],
+      roleFilter: ["pflege"],
+      now: "2026-08-21T00:00:00Z",
+    });
+    expect(s.matchedRoles).toBe(0);
+    expect(s.oldestOpenRoleDays).toBeUndefined();
+  });
+});
