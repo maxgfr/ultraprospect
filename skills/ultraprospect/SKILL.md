@@ -229,8 +229,9 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    - **Check the phrasing against the live web before you scan.** Search how
      companies in that country actually word it on their careers pages, and take
      the words you SEE rather than the ones you expect. `resolve --engine-search`
-     already drives webindex's keyless search from inside this bundle; your own
-     WebSearch does the same job.
+     drives webindex's keyless search from inside this bundle, but prefer your
+     own WebSearch: the keyless engines block automated clients, and when they
+     do the lane says so in words rather than reporting an empty web.
    - **Mind the inflection.** Matching tolerates up to three trailing letters,
      which carries German `-n`/`-ern`, French `-s` and Spanish `-os`. Languages
      that inflect by REPLACING the ending — Polish, Czech — need a stem:
@@ -315,6 +316,8 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | A merged place looks like two companies | Adjudication was skipped or answered too generously. Check `matchConfidence` and the raw lanes in `osm.json` / `registry.json`. |
 | Thousands of dormant one-person companies | Add `--min-employees`; ceased companies are already excluded unless `--include-ceased`. |
 | `resolve` exits 2 saying no results were supplied | Working as designed. Run `--queries`, do the searching, pass `--web-results`. |
+| `--engine-search` says the keyless fallback was **blocked** | The engines refused the request — a 403, or an anti-bot challenge served with a 200. Nothing was searched, which is NOT the same as nothing being there. Do your own WebSearch and pass `--web-results`; never report the run as a territory with no web presence. |
+| `--engine-search` corroborated almost nothing | Expected, and the reason `resolve` refuses to run without your hits. Measured on a Saint-Mandé sweep: 0 sites out of 12 through the keyless fallback, 9 out of 12 from the same queries run through the agent's own WebSearch. |
 | A company's own domain shows as `unverified` | The page did not carry its name, address or registration number. Often a JavaScript-only site — the evidence string says which. It is a candidate, not a confirmed site. |
 | `enrich` says "no place has a corroborated website" | `resolve` has not run, or corroborated nothing. Enrichment only ever reads sites we proved belong to the company. |
 | A company with a careers page shows `isHiring` unset | Deliberate. A board was detected but its openings could not be read, and "not hiring" would be a different claim. |
