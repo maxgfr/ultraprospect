@@ -150,8 +150,10 @@ export interface Signals {
   sitemapUrls?: number;
   isHiring?: boolean;
   openRoles: number;
-  /** Of `openRoles`, how many are development work. A count, not a judgement. */
-  devRoles: number;
+  /** Of `openRoles`, how many matched `roleFilter`. Unset when none was given. */
+  matchedRoles?: number;
+  /** The terms that produced `matchedRoles`, so the count says what it counted. */
+  roleFilter?: string[];
   /** Days the longest-open dated posting has been open. Absent when none is dated. */
   oldestOpenRoleDays?: number;
   /** Verbatim occurrences of contractor vocabulary, each re-readable in its page. */

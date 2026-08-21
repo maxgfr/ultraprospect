@@ -33,8 +33,8 @@ export interface ScoreWeights {
   contactable: number;
   ecommerce: number;
   pricing: number;
-  /** A dev role open, weighted per role. Unstaffed dev work is the whole point. */
-  perDevRole: number;
+  /** A role matching the caller's filter, per role. Unstaffed work they asked about. */
+  perMatchedRole: number;
   /** The company says on its own site that it works with contractors. */
   freelanceSignal: number;
   /** A dated role nobody has filled in a long time. */
@@ -62,10 +62,10 @@ export const DEFAULT_WEIGHTS: ScoreWeights = {
   contactable: 10,
   ecommerce: 4,
   pricing: 4,
-  // A dev role weighs more than a role: `perRole` already counted it once, and
-  // this adds the part that is about THIS brief rather than about hiring in
-  // general. Kept modest so it cannot swamp the measured basics.
-  perDevRole: 4,
+  // A role the caller asked about weighs more than a role: `perRole` already
+  // counted it once, and this adds the part that is about THEIR brief rather
+  // than about hiring in general. Modest, so it cannot swamp the basics.
+  perMatchedRole: 4,
   freelanceSignal: 12,
   staleRole: 8,
 };
@@ -132,7 +132,7 @@ export function scoreOf(place: Place, weights: ScoreWeights = DEFAULT_WEIGHTS): 
   // The freelance half. Each part stays its own line in `score.parts`, so a
   // reader can see WHY a company ranked high and disagree with one term without
   // discarding the rest.
-  if (s?.devRoles) parts.devRoles = Math.min(weights.perDevRole * 5, weights.perDevRole * s.devRoles);
+  if (s?.matchedRoles) parts.matchedRoles = Math.min(weights.perMatchedRole * 5, weights.perMatchedRole * s.matchedRoles);
   if (s?.freelanceMentions?.length) parts.freelanceSignal = weights.freelanceSignal;
   // 90 days is the threshold, not a cliff: a role open three months is one the
   // company has already failed to fill through its normal channel.

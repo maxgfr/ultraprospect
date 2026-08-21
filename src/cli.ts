@@ -144,6 +144,7 @@ export const VALUE_FLAGS = [
   "record",
   "web-results",
   "limit",
+  "roles",
   "tier",
   "only",
   "max-pages",
@@ -232,6 +233,9 @@ WEBSITE DISCOVERY (resolve)
 ENRICHMENT (enrich)
   --tier <1|2>           1: home + legal notice on every site. 2: a page per role + the ATS APIs.
   --only <ids>           Enrich just these place ids, comma-separated.
+  --roles <list>         Job-title terms YOU care about, e.g. entwickler,developer,engineer.
+                         Counted into matched_roles. The engine has no default: it does not
+                         know which roles matter to you, and will not invent one.
   --max-pages <n>        Ceiling on pages fetched per site in tier 2.
   --concurrency <n>      Sites in flight at once. Per-host pacing is separate and always on.
 
@@ -813,6 +817,7 @@ async function cmdEnrich(values: Record<string, string>, bools: ReadonlySet<stri
     tier: tier as 1 | 2,
     limit: values.limit ? clampInt(values.limit, 1, 100_000, 20) : undefined,
     only: list(values.only),
+    roleFilter: list(values.roles),
     maxPages: values["max-pages"] ? clampInt(values["max-pages"], 1, 40, 9) : undefined,
     concurrency: values.concurrency ? clampInt(values.concurrency, 1, 12, 4) : undefined,
     onNote: (n) => say(`  ${n}`),

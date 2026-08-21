@@ -67,6 +67,14 @@ export interface EnrichOptions {
   limit?: number;
   /** Only these place ids. */
   only?: string[];
+  /**
+   * Job-title terms the CALLER cares about, counted into `signals.matchedRoles`.
+   *
+   * The engine has no opinion about which roles matter: "Entwickler" for one
+   * user is "Pflegefachkraft" for the next. Absent means nobody said, and the
+   * count stays unset rather than becoming a zero somebody reads as a finding.
+   */
+  roleFilter?: readonly string[];
   /** How many pages a tier-2 walk may fetch per site. */
   maxPages?: number;
   /** Sites to work on concurrently. Per-HOST pacing is separate and always on. */
@@ -227,6 +235,7 @@ async function enrichOne(
     sitemapUrls: sitemap.count || undefined,
     lastContentAt: sitemap.lastContentAt,
     siteReachable: true,
+    roleFilter: opts.roleFilter,
   });
 
   return { pages: fetched.map((f) => f.record), jobs: jobs.length, reachable: true };
@@ -281,9 +290,8 @@ export async function runEnrich(runDir: string, places: Place[], store: PageStor
           hasWebsite: true,
           pageCount: 0,
           openRoles: 0,
-          // Nothing was readable, so nothing was counted. Zero here means "we
-          // read no openings", which is why `isHiring` stays unset alongside it.
-          devRoles: 0,
+          // Nothing was readable, so nothing was counted — and `matchedRoles`
+          // stays unset rather than zero, alongside `isHiring`.
           freelanceMentions: [],
           atsProviders: [],
           analytics: [],

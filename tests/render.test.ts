@@ -72,7 +72,7 @@ describe("CSV", () => {
       hasWebsite: true,
       pageCount: 1,
       openRoles: 0,
-      devRoles: 0,
+
       freelanceMentions: [],
       atsProviders: [],
       analytics: [],
@@ -249,7 +249,7 @@ describe("REPORT.md", () => {
       hasWebsite: true,
       pageCount: 1,
       openRoles: 0,
-      devRoles: 0,
+
       freelanceMentions: [],
       atsProviders: ["welcometothejungle"],
       analytics: [],
@@ -339,7 +339,7 @@ describe("watch", () => {
     hasWebsite: true,
     pageCount: 1,
     openRoles: 0,
-    devRoles: 0,
+
     freelanceMentions: [],
     atsProviders: [],
     analytics: [],

@@ -8632,9 +8632,9 @@ function extractLanguages(html) {
   return [...langs];
 }
 var FREELANCE_TERMS = [
+  // German — the vocabulary is legal, so it is precise: `Freiberufler` is a
+  // status, `Werkvertrag` a contract form.
   "Freelancer:innen",
-  "Freelancer",
-  "Freelance",
   "Freiberufler:innen",
   "Freiberufler",
   "freiberuflich",
@@ -8642,17 +8642,62 @@ var FREELANCE_TERMS = [
   "Werkvertr\xE4ge",
   "auf Projektbasis",
   "Projektbasis",
-  "externe Unterst\xFCtzung",
-  "externe Dienstleister",
   "Subunternehmer",
+  // English
+  "Freelancer",
+  "Freelance",
   "Contractor",
-  "Interim"
+  "self-employed",
+  "contract basis",
+  // French — `portage salarial` and `auto-entrepreneur` have no equivalent
+  // elsewhere and are exactly how a French company says it buys outside work.
+  "ind\xE9pendant",
+  "ind\xE9pendante",
+  "auto-entrepreneur",
+  "micro-entrepreneur",
+  "portage salarial",
+  "sous-traitance",
+  "sous-traitant",
+  "prestataire",
+  // Spanish
+  "aut\xF3nomo",
+  "aut\xF3noma",
+  "subcontrataci\xF3n",
+  "subcontratista",
+  "colaborador externo",
+  // Italian
+  "libero professionista",
+  "liberi professionisti",
+  "partita IVA",
+  "collaboratore esterno",
+  // Dutch — the Netherlands runs on ZZP, and no translation of the German
+  // vocabulary would ever find it.
+  "ZZP",
+  "zzp'er",
+  "zelfstandige",
+  // Polish, Norwegian, Finnish, Czech, Estonian: the registers reach these
+  // countries, so the signal has to as well. Deliberately NOT including bare
+  // "B2B", which means contractor in a Polish job ad and business-to-business
+  // in every English one — a term that means two things cannot be a signal.
+  // Slavic languages inflect by REPLACING the ending, not by appending one, so
+  // the three-letter tolerance that carries German cannot reach
+  // `samozatrudnienia` from `samozatrudnienie`. These are stems, chosen long
+  // enough that nothing else in the language starts with them.
+  "samozatrudnieni",
+  "podwykonawc",
+  "frilans",
+  "frilanser",
+  "konsulent",
+  "alihankinta",
+  "ammatinharjoittaja",
+  "OSV\u010C",
+  "\u017Eivnostn\xED",
+  "vabakutseline"
 ];
 var FREELANCE_RE = new RegExp(
   `(?<!\\p{L})(?:${[...FREELANCE_TERMS].sort((a, b) => b.length - a.length).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\p{L}{0,3}(?!\\p{L})`,
   "giu"
 );
-var DEV_ROLE_RE = /\b(?:entwickler|entwicklerin|developer|engineer|ingenieur|programmier|softwarearchitekt|architect|devops|sre|fullstack|full-stack|frontend|front-end|backend|back-end|webentwickl|data\s+engineer|platform\s+engineer|cloud\s+engineer|qa\s+engineer|tech\s+lead)/i;
 function extractFreelanceMentions(text2, pageId) {
   const out2 = [];
   const seen = /* @__PURE__ */ new Set();
@@ -8694,7 +8739,8 @@ function buildSignals(input) {
     // hiring" and "we could not look" are different facts.
     isHiring: input.atsProviders.length === 0 && !roles.has("careers") ? false : input.jobs.length > 0 || void 0,
     openRoles: input.jobs.length,
-    devRoles: input.jobs.filter((j) => DEV_ROLE_RE.test(j.title)).length,
+    matchedRoles: input.roleFilter?.length ? input.jobs.filter((j) => input.roleFilter.some((t) => j.title.toLowerCase().includes(t.toLowerCase()))).length : void 0,
+    roleFilter: input.roleFilter?.length ? [...input.roleFilter] : void 0,
     // A role open for a long time is a role the company cannot fill. That is
     // the closest thing to a measurable freelance opportunity a public source
     // carries — and it is a COUNT of days, not a conclusion about why.
@@ -8862,7 +8908,8 @@ async function enrichOne(runDir, place, store, opts) {
     atsProviders: uniqueBoards.map((b) => b.provider),
     sitemapUrls: sitemap.count || void 0,
     lastContentAt: sitemap.lastContentAt,
-    siteReachable: true
+    siteReachable: true,
+    roleFilter: opts.roleFilter
   });
   return { pages: fetched.map((f) => f.record), jobs: jobs.length, reachable: true };
 }
@@ -8907,9 +8954,8 @@ async function runEnrich(runDir, places, store, opts) {
           hasWebsite: true,
           pageCount: 0,
           openRoles: 0,
-          // Nothing was readable, so nothing was counted. Zero here means "we
-          // read no openings", which is why `isHiring` stays unset alongside it.
-          devRoles: 0,
+          // Nothing was readable, so nothing was counted — and `matchedRoles`
+          // stays unset rather than zero, alongside `isHiring`.
           freelanceMentions: [],
           atsProviders: [],
           analytics: [],
@@ -8956,10 +9002,10 @@ var DEFAULT_WEIGHTS = {
   contactable: 10,
   ecommerce: 4,
   pricing: 4,
-  // A dev role weighs more than a role: `perRole` already counted it once, and
-  // this adds the part that is about THIS brief rather than about hiring in
-  // general. Kept modest so it cannot swamp the measured basics.
-  perDevRole: 4,
+  // A role the caller asked about weighs more than a role: `perRole` already
+  // counted it once, and this adds the part that is about THEIR brief rather
+  // than about hiring in general. Modest, so it cannot swamp the basics.
+  perMatchedRole: 4,
   freelanceSignal: 12,
   staleRole: 8
 };
@@ -8992,7 +9038,7 @@ function scoreOf(place, weights = DEFAULT_WEIGHTS) {
   if (contactable) parts.contactable = weights.contactable;
   if (s?.hasEcommerce) parts.ecommerce = weights.ecommerce;
   if (s?.hasPricingPage) parts.pricing = weights.pricing;
-  if (s?.devRoles) parts.devRoles = Math.min(weights.perDevRole * 5, weights.perDevRole * s.devRoles);
+  if (s?.matchedRoles) parts.matchedRoles = Math.min(weights.perMatchedRole * 5, weights.perMatchedRole * s.matchedRoles);
   if (s?.freelanceMentions?.length) parts.freelanceSignal = weights.freelanceSignal;
   if ((s?.oldestOpenRoleDays ?? 0) >= 90) parts.staleRole = weights.staleRole;
   const total = Object.values(parts).reduce((n, v) => n + v, 0);
@@ -9524,7 +9570,8 @@ var HEADER = [
   "officers",
   "is_hiring",
   "open_roles",
-  "dev_roles",
+  "matched_roles",
+  "role_filter",
   "oldest_open_role_days",
   "freelance_signal",
   "freelance_signal_source",
@@ -9614,7 +9661,8 @@ function toCsv(places, opts = {}) {
         // could not be read, which is not the same as "no".
         sg?.isHiring === true ? "yes" : sg?.isHiring === false ? "no" : "",
         sg?.openRoles ?? "",
-        sg?.devRoles ?? "",
+        sg?.matchedRoles ?? "",
+        sg?.roleFilter?.join(" | ") ?? "",
         sg?.oldestOpenRoleDays ?? "",
         // The terms the company itself used, verbatim, with the page beside
         // them — so a row can be checked without opening the run.
@@ -10793,6 +10841,7 @@ var VALUE_FLAGS = [
   "record",
   "web-results",
   "limit",
+  "roles",
   "tier",
   "only",
   "max-pages",
@@ -10879,6 +10928,9 @@ WEBSITE DISCOVERY (resolve)
 ENRICHMENT (enrich)
   --tier <1|2>           1: home + legal notice on every site. 2: a page per role + the ATS APIs.
   --only <ids>           Enrich just these place ids, comma-separated.
+  --roles <list>         Job-title terms YOU care about, e.g. entwickler,developer,engineer.
+                         Counted into matched_roles. The engine has no default: it does not
+                         know which roles matter to you, and will not invent one.
   --max-pages <n>        Ceiling on pages fetched per site in tier 2.
   --concurrency <n>      Sites in flight at once. Per-host pacing is separate and always on.
 
@@ -11347,6 +11399,7 @@ async function cmdEnrich(values, bools) {
     tier,
     limit: values.limit ? clampInt(values.limit, 1, 1e5, 20) : void 0,
     only: list(values.only),
+    roleFilter: list(values.roles),
     maxPages: values["max-pages"] ? clampInt(values["max-pages"], 1, 40, 9) : void 0,
     concurrency: values.concurrency ? clampInt(values.concurrency, 1, 12, 4) : void 0,
     onNote: (n) => say(`  ${n}`),

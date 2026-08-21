@@ -269,16 +269,42 @@ describe("freelanceMentions", () => {
   });
 });
 
-describe("devRoles and oldestOpenRoleDays", () => {
+describe("matchedRoles and oldestOpenRoleDays", () => {
   const jobs = [
     { title: "Senior Frontend Entwickler (m/w/d)", postedAt: "2024-05-03T00:00:00Z", via: "personio" },
     { title: "Backend Engineer", postedAt: "2026-08-01T00:00:00Z", via: "personio" },
     { title: "Buchhalter:in", postedAt: "2026-08-10T00:00:00Z", via: "personio" },
   ];
 
-  it("counts only the roles that are actually development work", () => {
+  it("counts the roles matching the CALLER's filter, and nothing about dev is baked in", () => {
+    // The engine must not know what "a developer" is. It counts what it was
+    // asked to count, and records the terms beside the number so the count is
+    // self-describing rather than a magic figure someone has to trust.
+    const s = buildSignals({ ...base, jobs, atsProviders: ["personio"], pages: [page("P1", "home", "x")], roleFilter: ["entwickler", "engineer"] });
+    expect(s.matchedRoles).toBe(2);
+    expect(s.roleFilter).toEqual(["entwickler", "engineer"]);
+    expect(s.openRoles).toBe(3);
+  });
+
+  it("serves a filter that has nothing to do with software", () => {
+    const s = buildSignals({
+      ...base,
+      jobs: [
+        { title: "Pflegefachkraft (m/w/d)", via: "personio" },
+        { title: "Backend Engineer", via: "personio" },
+      ],
+      atsProviders: ["personio"],
+      pages: [page("P1", "home", "x")],
+      roleFilter: ["pflege"],
+    });
+    expect(s.matchedRoles).toBe(1);
+  });
+
+  it("leaves the count UNSET when no filter was given, rather than reporting zero", () => {
+    // Zero would read as "none of these roles interest you". Unset reads as
+    // "nobody said what to look for", which is what happened.
     const s = buildSignals({ ...base, jobs, atsProviders: ["personio"], pages: [page("P1", "home", "x")] });
-    expect(s.devRoles).toBe(2);
+    expect(s.matchedRoles).toBeUndefined();
     expect(s.openRoles).toBe(3);
   });
 
@@ -294,11 +320,11 @@ describe("devRoles and oldestOpenRoleDays", () => {
 
   it("does not turn an unreadable board into zero dev roles", () => {
     // softgarden detected, nothing readable. openRoles is 0 because we read
-    // nothing, devRoles likewise — and isHiring stays undefined, which is what
+    // nothing, matchedRoles likewise — and isHiring stays undefined, which is what
     // stops any of this being reported as "not hiring".
     const s = buildSignals({ ...base, atsProviders: ["softgarden"], pages: [page("P2", "careers", "Offene Stellen")] });
     expect(s.isHiring).toBeUndefined();
-    expect(s.devRoles).toBe(0);
+    expect(s.matchedRoles).toBeUndefined();
   });
 });
 
@@ -326,5 +352,32 @@ describe("freelanceMentions is scoped to the page where the words mean hiring", 
     const s = buildSignals({ ...base, pages: [page("P2", "careers", "Wir arbeiten regelmäßig mit Freiberuflern zusammen.")] });
     expect(s.freelanceMentions).toHaveLength(1);
     expect(s.freelanceMentions[0]!.from).toBe("P2");
+  });
+});
+
+describe("the contractor vocabulary travels", () => {
+  // The engine already speaks five languages in ROLE_PATTERNS, and the register
+  // lane reaches eleven countries. A signal that only fires in German makes the
+  // tool report "no contractor culture" for France, Spain and the Netherlands —
+  // three markets that run on it. Each of these is the term the country's own
+  // labour vocabulary actually uses, not a translation of the German one.
+  it.each([
+    ["de", "Wir arbeiten regelmäßig mit Freiberuflern zusammen."],
+    ["en", "We regularly work with freelancers and contractors."],
+    ["fr", "Nous travaillons avec des indépendants en sous-traitance."],
+    ["fr", "Statut auto-entrepreneur ou portage salarial accepté."],
+    ["es", "Buscamos profesionales autónomos para colaboración externa."],
+    ["it", "Cerchiamo liberi professionisti con partita IVA."],
+    ["nl", "Wij werken graag met ZZP'ers en zelfstandigen."],
+    ["pl", "Współpraca na zasadzie samozatrudnienia."],
+    ["no", "Vi samarbeider med frilansere."],
+  ])("fires on a %s careers page", (_lang, text) => {
+    const s = buildSignals({ ...base, pages: [page("P2", "careers", text)] });
+    expect(s.freelanceMentions.length).toBeGreaterThan(0);
+  });
+
+  it("still refuses a compound that merely contains the term", () => {
+    const s = buildSignals({ ...base, pages: [page("P2", "careers", "Siehe Freelancerschutzgesetzgebungsdebatte.")] });
+    expect(s.freelanceMentions).toEqual([]);
   });
 });

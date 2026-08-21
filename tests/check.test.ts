@@ -222,7 +222,7 @@ describe("warnings", () => {
         siteReachable: false,
         pageCount: 0,
         openRoles: 0,
-        devRoles: 0,
+
         freelanceMentions: [],
         atsProviders: [],
         analytics: [],

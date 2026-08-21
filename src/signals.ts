@@ -214,9 +214,9 @@ export function extractLanguages(html: string): string[] {
  * `Freelancerschutzgesetzgebung` is not a company hiring a contractor.
  */
 const FREELANCE_TERMS = [
+  // German — the vocabulary is legal, so it is precise: `Freiberufler` is a
+  // status, `Werkvertrag` a contract form.
   "Freelancer:innen",
-  "Freelancer",
-  "Freelance",
   "Freiberufler:innen",
   "Freiberufler",
   "freiberuflich",
@@ -224,11 +224,57 @@ const FREELANCE_TERMS = [
   "Werkverträge",
   "auf Projektbasis",
   "Projektbasis",
-  "externe Unterstützung",
-  "externe Dienstleister",
   "Subunternehmer",
+  // English
+  "Freelancer",
+  "Freelance",
   "Contractor",
-  "Interim",
+  "self-employed",
+  "contract basis",
+  // French — `portage salarial` and `auto-entrepreneur` have no equivalent
+  // elsewhere and are exactly how a French company says it buys outside work.
+  "indépendant",
+  "indépendante",
+  "auto-entrepreneur",
+  "micro-entrepreneur",
+  "portage salarial",
+  "sous-traitance",
+  "sous-traitant",
+  "prestataire",
+  // Spanish
+  "autónomo",
+  "autónoma",
+  "subcontratación",
+  "subcontratista",
+  "colaborador externo",
+  // Italian
+  "libero professionista",
+  "liberi professionisti",
+  "partita IVA",
+  "collaboratore esterno",
+  // Dutch — the Netherlands runs on ZZP, and no translation of the German
+  // vocabulary would ever find it.
+  "ZZP",
+  "zzp'er",
+  "zelfstandige",
+  // Polish, Norwegian, Finnish, Czech, Estonian: the registers reach these
+  // countries, so the signal has to as well. Deliberately NOT including bare
+  // "B2B", which means contractor in a Polish job ad and business-to-business
+  // in every English one — a term that means two things cannot be a signal.
+  // Slavic languages inflect by REPLACING the ending, not by appending one, so
+  // the three-letter tolerance that carries German cannot reach
+  // `samozatrudnienia` from `samozatrudnienie`. These are stems, chosen long
+  // enough that nothing else in the language starts with them.
+  "samozatrudnieni",
+  "podwykonawc",
+  "frilans",
+  "frilanser",
+  "konsulent",
+  "alihankinta",
+  "ammatinharjoittaja",
+  "OSVČ",
+  "živnostní",
+  "vabakutseline",
 ];
 
 /**
@@ -257,17 +303,6 @@ const FREELANCE_RE = new RegExp(
   "giu",
 );
 
-/**
- * Job titles that are development work.
- *
- * Deliberately generous on the German side: `Entwickler` is the word, and a run
- * that only knew "Developer" would read a Hamburg board as having no dev roles
- * at all. A false positive is a row to discard; a false negative is a mission
- * nobody learns about.
- */
-const DEV_ROLE_RE =
-  /\b(?:entwickler|entwicklerin|developer|engineer|ingenieur|programmier|softwarearchitekt|architect|devops|sre|fullstack|full-stack|frontend|front-end|backend|back-end|webentwickl|data\s+engineer|platform\s+engineer|cloud\s+engineer|qa\s+engineer|tech\s+lead)/i;
-
 export interface SignalInput {
   pages: readonly { record: PageRecord; text: string; html?: string }[];
   jobs: readonly JobPosting[];
@@ -279,6 +314,16 @@ export interface SignalInput {
   countryCode?: string;
   /** Injectable clock, so `oldestOpenRoleDays` is testable and reproducible. */
   now?: string;
+  /**
+   * Case-insensitive substrings the CALLER cares about in a job title.
+   *
+   * The engine deliberately does not know what a developer is, or a nurse, or
+   * a project manager. Encoding one brief in a general tool is the same mistake
+   * as turning `--icp` into a number: it produces an authoritative-looking
+   * count of something nobody agreed on. Absent means nobody said what to look
+   * for, and `matchedRoles` stays unset rather than becoming a misleading zero.
+   */
+  roleFilter?: readonly string[];
 }
 
 /**
@@ -337,7 +382,10 @@ export function buildSignals(input: SignalInput): Signals {
     // hiring" and "we could not look" are different facts.
     isHiring: input.atsProviders.length === 0 && !roles.has("careers") ? false : input.jobs.length > 0 || undefined,
     openRoles: input.jobs.length,
-    devRoles: input.jobs.filter((j) => DEV_ROLE_RE.test(j.title)).length,
+    matchedRoles: input.roleFilter?.length
+      ? input.jobs.filter((j) => input.roleFilter!.some((t) => j.title.toLowerCase().includes(t.toLowerCase()))).length
+      : undefined,
+    roleFilter: input.roleFilter?.length ? [...input.roleFilter] : undefined,
     // A role open for a long time is a role the company cannot fill. That is
     // the closest thing to a measurable freelance opportunity a public source
     // carries — and it is a COUNT of days, not a conclusion about why.
@@ -352,9 +400,7 @@ export function buildSignals(input: SignalInput): Signals {
     // the page was wrong, which is the worst kind of wrong here: it reads as
     // measured. On a careers page the same words are a company saying how it
     // staffs work, which is the only reading worth acting on.
-    freelanceMentions: input.pages
-      .filter((p) => p.record.role === "careers")
-      .flatMap((p) => extractFreelanceMentions(p.text, p.record.id)),
+    freelanceMentions: input.pages.filter((p) => p.record.role === "careers").flatMap((p) => extractFreelanceMentions(p.text, p.record.id)),
     atsProviders: [...input.atsProviders],
     cms: fingerprints(html, CMS_FINGERPRINTS)[0],
     analytics: fingerprints(html, ANALYTICS_FINGERPRINTS),
