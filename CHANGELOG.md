@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [3.1.1](https://github.com/maxgfr/ultraprospect/compare/v3.1.0...v3.1.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **resolve:** a host that turned us away is not a site we could not read ([ab1de47](https://github.com/maxgfr/ultraprospect/commit/ab1de47f5570b71143d0fece454bc8277f382e37))
+* **resolve:** repeat what the search cascade says, instead of an empty result ([3854c7a](https://github.com/maxgfr/ultraprospect/commit/3854c7ad15fa60a4b9b5a51b1f3e8b644a0c098a))
+
 # [3.1.0](https://github.com/maxgfr/ultraprospect/compare/v3.0.1...v3.1.0) (2026-08-21)
 
 
