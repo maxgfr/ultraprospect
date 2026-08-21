@@ -8313,9 +8313,41 @@ var BOARD_PATTERNS = [
   { provider: "recruitee", re: /https?:\/\/([a-z0-9-]+)\.recruitee\.com/gi },
   { provider: "teamtailor", re: /https?:\/\/([a-z0-9-]+)\.teamtailor\.com/gi },
   { provider: "workable", re: /apply\.workable\.com\/([a-z0-9-]+)/gi },
-  { provider: "welcometothejungle", re: /welcometothejungle\.com\/[a-z]{2}\/companies\/([a-z0-9-]+)/gi }
+  { provider: "welcometothejungle", re: /welcometothejungle\.com\/[a-z]{2}\/companies\/([a-z0-9-]+)/gi },
+  // Personio is the ATS most German SMEs run, and it serves the SAME board on
+  // both TLDs: a pattern anchored only on .de missed every company that linked
+  // the .com form, which downstream reads as "no hiring pipeline".
+  { provider: "personio", re: /https?:\/\/([a-z0-9-]+)\.jobs\.personio\.(?:de|com)/gi },
+  { provider: "smartrecruiters", re: /(?:careers|jobs)\.smartrecruiters\.com\/([a-zA-Z0-9_-]+)/gi },
+  // Two hostname forms in the wild, both seen on real Hamburg boards. The
+  // `career.softgarden.de` one must be matched BEFORE the bare `.softgarden.`
+  // alternative or the token comes out as the sub-sub-domain.
+  { provider: "softgarden", re: /https?:\/\/([a-z0-9-]+)\.(?:career\.softgarden\.de|softgarden\.io)/gi },
+  { provider: "join", re: /join\.com\/companies\/([a-z0-9-]+)/gi }
 ];
-var NOT_A_TOKEN = /* @__PURE__ */ new Set(["embed", "www", "api", "jobs", "boards", "app", "help", "blog", "about", "static", "assets", "js", "css"]);
+var NOT_A_TOKEN = /* @__PURE__ */ new Set([
+  "embed",
+  "www",
+  "api",
+  "jobs",
+  "boards",
+  "app",
+  "help",
+  "blog",
+  "about",
+  "static",
+  "assets",
+  "js",
+  "css",
+  // The new providers' own properties. `marketplace.softgarden.io` and
+  // `app.softgarden.io` are softgarden's, not a customer's board.
+  "marketplace",
+  "support",
+  "career",
+  "careers",
+  "portal",
+  "login"
+]);
 function detectBoards(html, sourceUrl) {
   const found = [];
   const seen = /* @__PURE__ */ new Set();
@@ -8340,8 +8372,23 @@ async function getJson(url) {
     return void 0;
   }
 }
+async function getText(url) {
+  try {
+    const res = await httpGet(url, { timeoutMs: 2e4, retries: 1 });
+    return res.ok && res.body ? res.body : void 0;
+  } catch {
+    return void 0;
+  }
+}
 function text(value) {
   return typeof value === "string" && value.trim() ? value.trim() : void 0;
+}
+function xmlTag(fragment, tag) {
+  const m = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "i").exec(fragment);
+  if (!m) return void 0;
+  const raw = m[1] ?? "";
+  const cdata = /^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/.exec(raw);
+  return text(decodeEntities(cdata ? cdata[1] ?? "" : raw));
 }
 async function fetchBoard(board) {
   const via = board.provider;
@@ -8413,6 +8460,37 @@ async function fetchBoard(board) {
         department: text(j.department),
         via
       })) ?? [];
+    }
+    case "personio": {
+      const body = await getText(`https://${board.token}.jobs.personio.de/xml`);
+      if (!body) return [];
+      const out2 = [];
+      for (const m of body.matchAll(/<position>([\s\S]*?)<\/position>/gi)) {
+        const pos = (m[1] ?? "").replace(/<jobDescriptions>[\s\S]*?<\/jobDescriptions>/gi, "");
+        const id = xmlTag(pos, "id");
+        out2.push({
+          title: xmlTag(pos, "name") ?? "(untitled)",
+          url: id ? `https://${board.token}.jobs.personio.de/job/${id}` : void 0,
+          location: xmlTag(pos, "office"),
+          department: xmlTag(pos, "department"),
+          employmentType: xmlTag(pos, "employmentType"),
+          postedAt: xmlTag(pos, "createdAt"),
+          via
+        });
+      }
+      return out2;
+    }
+    case "smartrecruiters": {
+      const data = await getJson(`https://api.smartrecruiters.com/v1/companies/${board.token}/postings?limit=100`);
+      return (data?.content ?? []).map((j) => ({
+        title: text(j.name) ?? "(untitled)",
+        url: j.id ? `https://jobs.smartrecruiters.com/${text(j.company?.identifier) ?? board.token}/${j.id}` : void 0,
+        location: text(j.location?.fullLocation) ?? text(j.location?.city),
+        department: text(j.department?.label),
+        employmentType: text(j.typeOfEmployment?.label),
+        postedAt: text(j.releasedDate),
+        via
+      }));
     }
     default:
       return [];
@@ -8553,6 +8631,47 @@ function extractLanguages(html) {
   for (const m of html.matchAll(/hreflang=["']([a-z]{2})/gi)) langs.add(m[1].toLowerCase());
   return [...langs];
 }
+var FREELANCE_TERMS = [
+  "Freelancer:innen",
+  "Freelancer",
+  "Freelance",
+  "Freiberufler:innen",
+  "Freiberufler",
+  "freiberuflich",
+  "Werkvertrag",
+  "Werkvertr\xE4ge",
+  "auf Projektbasis",
+  "Projektbasis",
+  "externe Unterst\xFCtzung",
+  "externe Dienstleister",
+  "Subunternehmer",
+  "Contractor",
+  "Interim"
+];
+var FREELANCE_RE = new RegExp(
+  `(?<!\\p{L})(?:${[...FREELANCE_TERMS].sort((a, b) => b.length - a.length).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\p{L}{0,3}(?!\\p{L})`,
+  "giu"
+);
+var DEV_ROLE_RE = /\b(?:entwickler|entwicklerin|developer|engineer|ingenieur|programmier|softwarearchitekt|architect|devops|sre|fullstack|full-stack|frontend|front-end|backend|back-end|webentwickl|data\s+engineer|platform\s+engineer|cloud\s+engineer|qa\s+engineer|tech\s+lead)/i;
+function extractFreelanceMentions(text2, pageId) {
+  const out2 = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const m of text2.matchAll(FREELANCE_RE)) {
+    const key = m[0].toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const start = Math.max(0, m.index - 90);
+    const line = text2.slice(start, Math.min(text2.length, m.index + m[0].length + 90)).replace(/\s+/g, " ").trim();
+    out2.push({ value: m[0], from: pageId, lane: "web", note: line });
+  }
+  return out2;
+}
+function oldestRoleDays(jobs, now) {
+  const stamps = jobs.map((j) => j.postedAt ? Date.parse(j.postedAt) : Number.NaN).filter((n) => Number.isFinite(n));
+  if (!stamps.length) return void 0;
+  const ref = now ? Date.parse(now) : Date.now();
+  return Math.max(0, Math.floor((ref - Math.min(...stamps)) / 864e5));
+}
 function buildSignals(input) {
   const html = input.pages.map((p) => p.html ?? "").join("\n");
   const roles = new Set(input.pages.map((p) => p.record.role));
@@ -8575,6 +8694,12 @@ function buildSignals(input) {
     // hiring" and "we could not look" are different facts.
     isHiring: input.atsProviders.length === 0 && !roles.has("careers") ? false : input.jobs.length > 0 || void 0,
     openRoles: input.jobs.length,
+    devRoles: input.jobs.filter((j) => DEV_ROLE_RE.test(j.title)).length,
+    // A role open for a long time is a role the company cannot fill. That is
+    // the closest thing to a measurable freelance opportunity a public source
+    // carries — and it is a COUNT of days, not a conclusion about why.
+    oldestOpenRoleDays: oldestRoleDays(input.jobs, input.now),
+    freelanceMentions: input.pages.flatMap((p) => extractFreelanceMentions(p.text, p.record.id)),
     atsProviders: [...input.atsProviders],
     cms: fingerprints(html, CMS_FINGERPRINTS)[0],
     analytics: fingerprints(html, ANALYTICS_FINGERPRINTS),
@@ -8772,6 +8897,10 @@ async function runEnrich(runDir, places, store, opts) {
           hasWebsite: true,
           pageCount: 0,
           openRoles: 0,
+          // Nothing was readable, so nothing was counted. Zero here means "we
+          // read no openings", which is why `isHiring` stays unset alongside it.
+          devRoles: 0,
+          freelanceMentions: [],
           atsProviders: [],
           analytics: [],
           techStack: [],
@@ -8816,7 +8945,13 @@ var DEFAULT_WEIGHTS = {
   registered: 8,
   contactable: 10,
   ecommerce: 4,
-  pricing: 4
+  pricing: 4,
+  // A dev role weighs more than a role: `perRole` already counted it once, and
+  // this adds the part that is about THIS brief rather than about hiring in
+  // general. Kept modest so it cannot swamp the measured basics.
+  perDevRole: 4,
+  freelanceSignal: 12,
+  staleRole: 8
 };
 function daysSince(iso) {
   if (!iso) return void 0;
@@ -8847,6 +8982,9 @@ function scoreOf(place, weights = DEFAULT_WEIGHTS) {
   if (contactable) parts.contactable = weights.contactable;
   if (s?.hasEcommerce) parts.ecommerce = weights.ecommerce;
   if (s?.hasPricingPage) parts.pricing = weights.pricing;
+  if (s?.devRoles) parts.devRoles = Math.min(weights.perDevRole * 5, weights.perDevRole * s.devRoles);
+  if (s?.freelanceMentions?.length) parts.freelanceSignal = weights.freelanceSignal;
+  if ((s?.oldestOpenRoleDays ?? 0) >= 90) parts.staleRole = weights.staleRole;
   const total = Object.values(parts).reduce((n, v) => n + v, 0);
   return { total, parts, fit: place.score?.fit, why: place.score?.why, angle: place.score?.angle };
 }
@@ -9153,7 +9291,11 @@ function runCheck(input) {
     const items = [
       ...place.contacts.emails.map((c) => ({ ...c, kind: "email" })),
       ...place.contacts.phones.map((c) => ({ ...c, kind: "phone" })),
-      ...place.contacts.people.map((c) => ({ ...c, kind: "person" }))
+      ...place.contacts.people.map((c) => ({ ...c, kind: "person" })),
+      // A freelance mention is a quote from the company's own page, and it is
+      // about to be used as a reason to call them. It gets the same treatment
+      // as a contact: findable in the page it cites, or it does not ship.
+      ...(place.signals?.freelanceMentions ?? []).map((c) => ({ ...c, kind: "freelance mention" }))
     ];
     for (const item of items) {
       contacts++;
@@ -9372,6 +9514,10 @@ var HEADER = [
   "officers",
   "is_hiring",
   "open_roles",
+  "dev_roles",
+  "oldest_open_role_days",
+  "freelance_signal",
+  "freelance_signal_source",
   "ats",
   "cms",
   "last_content_at",
@@ -9458,6 +9604,12 @@ function toCsv(places, opts = {}) {
         // could not be read, which is not the same as "no".
         sg?.isHiring === true ? "yes" : sg?.isHiring === false ? "no" : "",
         sg?.openRoles ?? "",
+        sg?.devRoles ?? "",
+        sg?.oldestOpenRoleDays ?? "",
+        // The terms the company itself used, verbatim, with the page beside
+        // them — so a row can be checked without opening the run.
+        sg?.freelanceMentions?.map((m) => m.value).join(" | ") ?? "",
+        [...new Set(sg?.freelanceMentions?.map((m) => m.from) ?? [])].join(" | "),
         sg?.atsProviders.join(" | ") ?? "",
         sg?.cms ?? "",
         sg?.lastContentAt ?? "",

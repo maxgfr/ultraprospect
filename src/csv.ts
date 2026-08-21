@@ -68,6 +68,10 @@ const HEADER = [
   "officers",
   "is_hiring",
   "open_roles",
+  "dev_roles",
+  "oldest_open_role_days",
+  "freelance_signal",
+  "freelance_signal_source",
   "ats",
   "cms",
   "last_content_at",
@@ -164,6 +168,12 @@ export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
         // could not be read, which is not the same as "no".
         sg?.isHiring === true ? "yes" : sg?.isHiring === false ? "no" : "",
         sg?.openRoles ?? "",
+        sg?.devRoles ?? "",
+        sg?.oldestOpenRoleDays ?? "",
+        // The terms the company itself used, verbatim, with the page beside
+        // them — so a row can be checked without opening the run.
+        sg?.freelanceMentions?.map((m) => m.value).join(" | ") ?? "",
+        [...new Set(sg?.freelanceMentions?.map((m) => m.from) ?? [])].join(" | "),
         sg?.atsProviders.join(" | ") ?? "",
         sg?.cms ?? "",
         sg?.lastContentAt ?? "",

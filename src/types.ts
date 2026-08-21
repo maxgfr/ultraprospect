@@ -150,6 +150,12 @@ export interface Signals {
   sitemapUrls?: number;
   isHiring?: boolean;
   openRoles: number;
+  /** Of `openRoles`, how many are development work. A count, not a judgement. */
+  devRoles: number;
+  /** Days the longest-open dated posting has been open. Absent when none is dated. */
+  oldestOpenRoleDays?: number;
+  /** Verbatim occurrences of contractor vocabulary, each re-readable in its page. */
+  freelanceMentions: SourcedValue[];
   atsProviders: string[];
   cms?: string;
   analytics: string[];

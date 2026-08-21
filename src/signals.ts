@@ -199,6 +199,75 @@ export function extractLanguages(html: string): string[] {
   return [...langs];
 }
 
+/**
+ * Terms by which a company says, in its own words, that it works with people it
+ * has not employed.
+ *
+ * German first, because German law and German usage are precise about it:
+ * `Freiberufler` is a legal status, `Werkvertrag` is a contract form, and
+ * `freiberuflich` on a careers page is a company describing how it buys work.
+ * These are the strongest weak signal a public website carries — far stronger
+ * than the presence of a careers page, and unlike an open role they do not
+ * expire.
+ *
+ * Matched on word boundaries, not as substrings: a blog post about
+ * `Freelancerschutzgesetzgebung` is not a company hiring a contractor.
+ */
+const FREELANCE_TERMS = [
+  "Freelancer:innen",
+  "Freelancer",
+  "Freelance",
+  "Freiberufler:innen",
+  "Freiberufler",
+  "freiberuflich",
+  "Werkvertrag",
+  "Werkverträge",
+  "auf Projektbasis",
+  "Projektbasis",
+  "externe Unterstützung",
+  "externe Dienstleister",
+  "Subunternehmer",
+  "Contractor",
+  "Interim",
+];
+
+/**
+ * The terms, compiled once, longest first, with room for a German case ending.
+ *
+ * Two things this has to get right at the same time, and they pull apart:
+ *
+ *   * German inflects. The careers page says "wir arbeiten mit FREIBERUFLERN",
+ *     not "mit Freiberufler". Demanding a hard word boundary on the right finds
+ *     none of them, and the signal reads as absent on exactly the sites that
+ *     carry it.
+ *   * German also compounds without limit. `Freelancerschutzgesetzgebung` in a
+ *     blog post is not a company buying contract work, and a suffix-tolerant
+ *     match that swallows it turns a legal-news mention into a lead.
+ *
+ * So: up to three trailing letters — enough for -n, -s, -e, -en, -ern, -innen —
+ * and no more. A compound noun adds far more than three. Longest alternative
+ * first, so `Freelancer:innen` wins over `Freelance` on the same span and the
+ * mention is recorded once, at its full length.
+ */
+const FREELANCE_RE = new RegExp(
+  `(?<!\\p{L})(?:${[...FREELANCE_TERMS]
+    .sort((a, b) => b.length - a.length)
+    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|")})\\p{L}{0,3}(?!\\p{L})`,
+  "giu",
+);
+
+/**
+ * Job titles that are development work.
+ *
+ * Deliberately generous on the German side: `Entwickler` is the word, and a run
+ * that only knew "Developer" would read a Hamburg board as having no dev roles
+ * at all. A false positive is a row to discard; a false negative is a mission
+ * nobody learns about.
+ */
+const DEV_ROLE_RE =
+  /\b(?:entwickler|entwicklerin|developer|engineer|ingenieur|programmier|softwarearchitekt|architect|devops|sre|fullstack|full-stack|frontend|front-end|backend|back-end|webentwickl|data\s+engineer|platform\s+engineer|cloud\s+engineer|qa\s+engineer|tech\s+lead)/i;
+
 export interface SignalInput {
   pages: readonly { record: PageRecord; text: string; html?: string }[];
   jobs: readonly JobPosting[];
@@ -208,6 +277,40 @@ export interface SignalInput {
   siteReachable: boolean;
   /** The run's country, so the legal-identifier patterns match the right law. */
   countryCode?: string;
+  /** Injectable clock, so `oldestOpenRoleDays` is testable and reproducible. */
+  now?: string;
+}
+
+/**
+ * Every place a freelance term appears, verbatim, with the page it came from.
+ *
+ * Returns the matched term as the value and the line around it as the note, so
+ * the gate can re-read the value and a human can judge the context. A term that
+ * cannot be found in its own page again does not ship — same rule as a contact.
+ */
+export function extractFreelanceMentions(text: string, pageId: string): SourcedValue[] {
+  const out: SourcedValue[] = [];
+  const seen = new Set<string>();
+  for (const m of text.matchAll(FREELANCE_RE)) {
+    const key = m[0].toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const start = Math.max(0, m.index - 90);
+    const line = text
+      .slice(start, Math.min(text.length, m.index + m[0].length + 90))
+      .replace(/\s+/g, " ")
+      .trim();
+    out.push({ value: m[0], from: pageId, lane: "web", note: line });
+  }
+  return out;
+}
+
+/** Days since the oldest posting that carries a date. Undefined when none do. */
+function oldestRoleDays(jobs: readonly JobPosting[], now?: string): number | undefined {
+  const stamps = jobs.map((j) => (j.postedAt ? Date.parse(j.postedAt) : Number.NaN)).filter((n) => Number.isFinite(n));
+  if (!stamps.length) return undefined;
+  const ref = now ? Date.parse(now) : Date.now();
+  return Math.max(0, Math.floor((ref - Math.min(...stamps)) / 86_400_000));
 }
 
 /** Fold everything measured about a site into one record. */
@@ -234,6 +337,12 @@ export function buildSignals(input: SignalInput): Signals {
     // hiring" and "we could not look" are different facts.
     isHiring: input.atsProviders.length === 0 && !roles.has("careers") ? false : input.jobs.length > 0 || undefined,
     openRoles: input.jobs.length,
+    devRoles: input.jobs.filter((j) => DEV_ROLE_RE.test(j.title)).length,
+    // A role open for a long time is a role the company cannot fill. That is
+    // the closest thing to a measurable freelance opportunity a public source
+    // carries — and it is a COUNT of days, not a conclusion about why.
+    oldestOpenRoleDays: oldestRoleDays(input.jobs, input.now),
+    freelanceMentions: input.pages.flatMap((p) => extractFreelanceMentions(p.text, p.record.id)),
     atsProviders: [...input.atsProviders],
     cms: fingerprints(html, CMS_FINGERPRINTS)[0],
     analytics: fingerprints(html, ANALYTICS_FINGERPRINTS),

@@ -281,6 +281,10 @@ export async function runEnrich(runDir: string, places: Place[], store: PageStor
           hasWebsite: true,
           pageCount: 0,
           openRoles: 0,
+          // Nothing was readable, so nothing was counted. Zero here means "we
+          // read no openings", which is why `isHiring` stays unset alongside it.
+          devRoles: 0,
+          freelanceMentions: [],
           atsProviders: [],
           analytics: [],
           techStack: [],

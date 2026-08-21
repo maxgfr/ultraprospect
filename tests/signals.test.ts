@@ -224,3 +224,80 @@ describe("buildSignals", () => {
     expect(s.openRoles).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The freelance signals.
+//
+// Everything here stays on the file's own rule: a COUNT or a PRESENCE, never a
+// conclusion. "Two dev roles open, the oldest for 840 days, and the word
+// Freiberufler appears on the careers page" is measured. "This company needs a
+// freelancer" is a judgement, and it is the agent's to make, not the engine's.
+// ---------------------------------------------------------------------------
+
+const page = (id: string, role: string, text: string) => ({
+  record: { id, role, url: `https://acme.de/${role}`, fetchedAt: "2026-08-01T00:00:00Z", status: 200, title: "" } as never,
+  text,
+  html: `<html lang="de"><body>${text}</body></html>`,
+});
+
+const base = { jobs: [], atsProviders: [], siteReachable: true, countryCode: "de" as const };
+
+describe("freelanceMentions", () => {
+  it("records a German contractor term verbatim, with the page it came from", () => {
+    const s = buildSignals({ ...base, pages: [page("P2", "careers", "Wir arbeiten regelmäßig mit Freiberuflern zusammen.")] });
+    expect(s.freelanceMentions).toHaveLength(1);
+    expect(s.freelanceMentions[0]).toMatchObject({ from: "P2", lane: "web" });
+    // The value must be re-findable in the page, because `check` re-reads it.
+    expect("Wir arbeiten regelmäßig mit Freiberuflern zusammen.").toContain(s.freelanceMentions[0]!.value);
+  });
+
+  it("carries the surrounding line as the note, so a human can judge the context", () => {
+    const s = buildSignals({ ...base, pages: [page("P2", "careers", "Für Freelancer:innen sind wir aktuell gut aufgestellt.")] });
+    expect(s.freelanceMentions[0]!.note).toContain("aktuell gut aufgestellt");
+  });
+
+  it("is empty, not absent, when a site says nothing about contractors", () => {
+    const s = buildSignals({ ...base, pages: [page("P1", "home", "Wir bauen Software für den Mittelstand.")] });
+    expect(s.freelanceMentions).toEqual([]);
+  });
+
+  it("does not fire on a word that merely contains the term", () => {
+    // "freiberuflich" is a real term; "Freiberuflichkeitsbescheinigung" in a tax
+    // boilerplate is not a hiring signal. Word boundaries, not substrings.
+    const s = buildSignals({ ...base, pages: [page("P1", "home", "Siehe Freelancerschutzgesetzgebungsdebatte im Blog.")] });
+    expect(s.freelanceMentions).toEqual([]);
+  });
+});
+
+describe("devRoles and oldestOpenRoleDays", () => {
+  const jobs = [
+    { title: "Senior Frontend Entwickler (m/w/d)", postedAt: "2024-05-03T00:00:00Z", via: "personio" },
+    { title: "Backend Engineer", postedAt: "2026-08-01T00:00:00Z", via: "personio" },
+    { title: "Buchhalter:in", postedAt: "2026-08-10T00:00:00Z", via: "personio" },
+  ];
+
+  it("counts only the roles that are actually development work", () => {
+    const s = buildSignals({ ...base, jobs, atsProviders: ["personio"], pages: [page("P1", "home", "x")] });
+    expect(s.devRoles).toBe(2);
+    expect(s.openRoles).toBe(3);
+  });
+
+  it("ages the oldest opening, because a role nobody can fill is the signal", () => {
+    const s = buildSignals({ ...base, jobs, atsProviders: ["personio"], pages: [page("P1", "home", "x")], now: "2026-08-21T00:00:00Z" });
+    expect(s.oldestOpenRoleDays).toBe(840);
+  });
+
+  it("leaves the age unset when no posting carries a date", () => {
+    const s = buildSignals({ ...base, jobs: [{ title: "Dev", via: "site" }], atsProviders: ["personio"], pages: [page("P1", "home", "x")] });
+    expect(s.oldestOpenRoleDays).toBeUndefined();
+  });
+
+  it("does not turn an unreadable board into zero dev roles", () => {
+    // softgarden detected, nothing readable. openRoles is 0 because we read
+    // nothing, devRoles likewise — and isHiring stays undefined, which is what
+    // stops any of this being reported as "not hiring".
+    const s = buildSignals({ ...base, atsProviders: ["softgarden"], pages: [page("P2", "careers", "Offene Stellen")] });
+    expect(s.isHiring).toBeUndefined();
+    expect(s.devRoles).toBe(0);
+  });
+});

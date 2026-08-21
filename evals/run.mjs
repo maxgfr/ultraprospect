@@ -227,6 +227,32 @@ async function network() {
     Array.isArray(leverJson) && leverJson.length > 0 && Boolean(leverJson[0]?.text),
     "if this drifts, every company on Lever reads as not hiring",
   );
+
+  // Personio is the ATS most German SMEs run, and the only upstream here that
+  // answers XML. Two things are asserted, because the parser depends on both:
+  // the <position> envelope, and the fact that <name> occurs INSIDE
+  // <jobDescriptions> as well as as the title. If Personio ever flattened that
+  // nesting, every German opening would ship titled after a description block.
+  const personio = await get("https://personio-sog.jobs.personio.de/xml");
+  const positions = [...(personio.body || "").matchAll(/<position>([\s\S]*?)<\/position>/gi)];
+  check(
+    "personio still serves <position> blocks with <name> and <createdAt>",
+    positions.length > 0 && /<name>/.test(positions[0][1]) && /<createdAt>/.test(positions[0][1]),
+    "if this drifts, every company on Personio reads as not hiring — that is most of German SME hiring",
+  );
+  check(
+    "personio still nests a second <name> inside <jobDescriptions>",
+    /<jobDescriptions>[\s\S]*?<name>/i.test(positions[0]?.[1] ?? ""),
+    "the parser strips <jobDescriptions> before reading the title BECAUSE of this nesting; if it is gone the strip is dead code, not a bug",
+  );
+
+  const smart = await get("https://api.smartrecruiters.com/v1/companies/smartrecruiters/postings?limit=1");
+  const smartJson = JSON.parse(smart.body || "{}");
+  check(
+    "smartrecruiters still returns content[] with name and releasedDate",
+    Array.isArray(smartJson?.content) && smartJson.content.length > 0 && Boolean(smartJson.content[0]?.name),
+    "if this drifts, every company on SmartRecruiters reads as not hiring",
+  );
 }
 
 if (suite === "offline") await offline();
