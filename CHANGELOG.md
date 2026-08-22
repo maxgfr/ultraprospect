@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [3.2.0](https://github.com/maxgfr/ultraprospect/compare/v3.1.2...v3.2.0) (2026-08-22)
+
+
+### Features
+
+* **html:** answer the question the run was asked, and carry the evidence ([7dedf8a](https://github.com/maxgfr/ultraprospect/commit/7dedf8a30652cb255c245045ed88e4d6da5e4b3c))
+* **render:** show the run, instead of a summary of it ([536a4f8](https://github.com/maxgfr/ultraprospect/commit/536a4f8262376883ab1525db3db8ae059482419d))
+
 ## [3.1.2](https://github.com/maxgfr/ultraprospect/compare/v3.1.1...v3.1.2) (2026-08-21)
 
 
