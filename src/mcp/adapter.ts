@@ -458,6 +458,7 @@ export function createAdapter(): McpAdapter {
           const runDir = resolveRun(str(args.run, "run"));
           const manifest = requireManifest(runDir);
           const outcome = buildAll(readPlaces(runDir), manifest, {
+            runDir,
             noPeople: args.noPeople === true,
             minScore: typeof args.minScore === "number" ? clampInt(args.minScore, 0, 10_000, 0) : undefined,
             minFit: typeof args.minFit === "string" ? (args.minFit as "strong" | "possible" | "weak") : undefined,

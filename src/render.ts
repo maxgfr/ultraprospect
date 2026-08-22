@@ -6,8 +6,12 @@
 // document, `html.ts` for the page, `csv.ts` for the spreadsheet — and every
 // aggregate any of them prints comes from `summary.ts`, computed once, so the
 // page and the report cannot disagree about a territory.
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { toCsv, type CsvOptions } from "./csv.js";
-import { buildHtml } from "./html.js";
+import { dossierPathFor } from "./dossier.js";
+import { collectQuotes } from "./excerpts.js";
+import { buildHtml, HTML_ROW_CAP } from "./html.js";
 import { buildReport } from "./report.js";
 import { ranked } from "./score.js";
 import type { Place, RunManifest } from "./types.js";
@@ -68,13 +72,47 @@ export interface RenderOutcome {
   files: { path: string; content: string }[];
 }
 
+export interface RenderOptions extends CsvOptions {
+  /**
+   * The run directory, so the page can carry the evidence it cites.
+   *
+   * Optional, and the page is complete without it: absent, a citation renders
+   * as the bare `[P1912]` it always was. Given, the pages some fact actually
+   * points at are read and the passage around each cited value travels in the
+   * file — which is what lets somebody holding only `index.html` do what
+   * `check` does.
+   */
+  runDir?: string;
+}
+
+/**
+ * The dossiers an agent has written for this run, by place id.
+ *
+ * A dossier is the one artifact somebody composed rather than the tool derived,
+ * so where one exists the page shows it instead of asking a reader to open a
+ * second file.
+ */
+function readDossiers(runDir: string, places: readonly Place[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const place of places) {
+    const path = join(runDir, dossierPathFor(place));
+    if (existsSync(path)) out.set(place.id, readFileSync(path, "utf8"));
+  }
+  return out;
+}
+
 /** Everything a run hands over, built from the same places and manifest. */
-export function buildAll(places: readonly Place[], manifest: RunManifest, opts: CsvOptions = {}): RenderOutcome {
+export function buildAll(places: readonly Place[], manifest: RunManifest, opts: RenderOptions = {}): RenderOutcome {
+  // Only the rows the page will show are worth reading evidence for: a quote
+  // attached to a company nobody can scroll to is bytes with no reader.
+  const visible = ranked(places).slice(0, HTML_ROW_CAP);
+  const ctx = opts.runDir ? { quotes: collectQuotes(opts.runDir, visible), dossiers: readDossiers(opts.runDir, visible) } : {};
+
   const files = [
     { path: "PROSPECTS.csv", content: toCsv(places, opts) },
     { path: "prospects.json", content: JSON.stringify(ranked(places), null, 2) + "\n" },
     { path: "REPORT.md", content: buildReport(places, manifest) },
-    { path: "index.html", content: buildHtml(places, manifest) },
+    { path: "index.html", content: buildHtml(places, manifest, ctx) },
   ];
   const privacy = opts.noPeople ? undefined : buildPrivacyNote(places, manifest);
   if (privacy) files.push({ path: "PRIVACY.md", content: privacy });

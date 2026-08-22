@@ -499,6 +499,103 @@ describe("index.html", () => {
     expect(detailed).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|sendBeacon|new WebSocket|EventSource|\bimport\s*\(/i);
   });
 
+  // The brief is `--term` and `--role`: what the caller actually asked. It was
+  // carried on every place, used by the score and written to the CSV, and stated
+  // nowhere a reader would see — so the page reported "termMatches 12" without
+  // ever saying what had been matched.
+  describe("the question the run was asked", () => {
+    const brief = { termLexicon: ["honorarbasis", "freelancer"], roleFilter: ["devops", "engineer"] };
+    const hit = place({
+      name: "No Limit",
+      signals: {
+        ...signals,
+        ...brief,
+        termMentions: [{ value: "Honorarbasis", from: "P6733", lane: "web", note: "auf Honorarbasis oder im festen" }],
+      },
+      pages: ["P6733"],
+    });
+
+    it("states the brief on the page, with its own vocabulary", () => {
+      const html = buildHtml([hit], manifest());
+      expect(html).toContain("The question this run was given");
+      expect(html).toContain("<code>honorarbasis</code>");
+      expect(html).toContain("<code>devops</code>");
+      // …and says nothing at all when no brief was given, rather than an empty box.
+      expect(buildHtml([place()], manifest())).not.toContain("The question this run was given");
+    });
+
+    it("answers it per company, quoting their own words", () => {
+      const html = buildHtml([hit], manifest());
+      expect(html).toContain("their own site uses the words you asked about");
+      expect(html).toContain("“<b>Honorarbasis</b>”");
+      expect(html).toContain("[P6733]");
+    });
+
+    it("does not turn our own reach into a fact about them", () => {
+      // No mentions but the site WAS read: a miss on the pages we read.
+      const read = place({ id: "b", signals: { ...signals, ...brief }, pages: ["P1"] });
+      expect(buildHtml([read], manifest())).toContain("That is a miss on the pages we read, not proof they never use the word");
+      // Site never read: the brief has not been tested against them at all. The
+      // brief has to exist in the run for the question to arise, so `hit`
+      // carries the lexicon and `unread` is the company nobody reached.
+      const unread = place({ id: "c" });
+      expect(buildHtml([hit, unread], manifest())).toContain("terms you asked about have not been looked for here at all");
+      // And a run with no brief says nothing about one, rather than an empty verdict.
+      expect(buildHtml([unread], manifest())).not.toContain("have not been looked for here");
+    });
+
+    it("offers a facet for the companies that answer it", () => {
+      const html = buildHtml([hit, place({ id: "z" })], manifest());
+      expect(html).toContain('data-facet="brief"');
+      expect(html).toContain("answers the brief");
+    });
+  });
+
+  it("lays the panel out the way a dossier is written", () => {
+    // Same headings as DOSSIER_TEMPLATE, so the page and the write-up a person
+    // produces from the same run are the same shape.
+    for (const heading of ["What they do", "Size and shape", "Signals", "Angle", "Contacts", "Gaps"]) {
+      expect(detailed).toContain(`<dt>${heading}</dt>`);
+    }
+  });
+
+  it("names what could not be established instead of leaving a hole", () => {
+    const bare = buildHtml([place()], manifest());
+    expect(bare).toContain("<dt>Gaps</dt>");
+    expect(bare).toContain("an OpenStreetMap point and nothing more");
+    // A place with some of it missing gets the itemised list, not the sentence.
+    const partial = buildHtml([place({ website: { url: "https://a.fr", confidence: "corroborated", evidence: ["P1"] }, signals: { ...signals } })], manifest());
+    expect(partial).toContain("no register record was attached");
+    expect(partial).not.toContain("an OpenStreetMap point and nothing more");
+  });
+
+  it("collapses an officer the register filed twice", () => {
+    const twice = buildHtml(
+      [
+        place({
+          registry: rec({
+            officers: [
+              { nom: "DASSLER", prenoms: "Stephan", qualite: "Geschäftsführer" },
+              { nom: "DASSLER", prenoms: "Stephan", qualite: "Geschäftsführer" },
+            ],
+          }),
+        }),
+      ],
+      manifest(),
+    );
+    expect(twice.match(/Stephan DASSLER/g) ?? []).toHaveLength(1);
+  });
+
+  it("renders a written dossier when one exists, and escapes it", () => {
+    const dossiers = new Map([["osm:n1", "## What they do\n\nThey ship **widgets**. [P1]\n\n- one\n- <script>alert(1)</script>\n"]]);
+    const html = buildHtml([place()], manifest(), { dossiers });
+    expect(html).toContain("<dt>Written dossier</dt>");
+    expect(html).toContain("<h4>What they do</h4>");
+    expect(html).toContain("ship <b>widgets</b>");
+    expect(html).not.toContain("<script>alert(1)</script>");
+    expect(html).toContain("&lt;script&gt;");
+  });
+
   it("does not put a zero under 'hiring now' when no site was read", () => {
     const html = buildHtml([place()], manifest());
     expect(html).toContain("hiring: no site read yet, so unknown rather than none");

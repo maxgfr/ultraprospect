@@ -980,6 +980,7 @@ async function cmdRender(values: Record<string, string>, bools: ReadonlySet<stri
   const manifest = requireManifest(runDir);
 
   const outcome = buildAll(places, manifest, {
+    runDir,
     noPeople: bools.has("no-people"),
     minScore: values["min-score"] ? clampInt(values["min-score"], 0, 10_000, 0) : undefined,
     minFit: (values["min-fit"] as "strong" | "possible" | "weak" | undefined) ?? undefined,

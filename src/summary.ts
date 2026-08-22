@@ -174,7 +174,44 @@ export interface RunSummary {
   byBand: [string, number][];
   /** What the run was asked to look for, in sentences. Empty when nothing narrowed it. */
   filters: string[];
+  /** The question the run was given, and how many companies answer it. */
+  brief: Brief;
   notes: { lines: NoteLine[]; distinct: number; emitted: number };
+}
+
+/**
+ * The question this run was given.
+ *
+ * `--term` and `--role` are the caller's brief: the lexicon whose verbatim
+ * appearance on a company's own site is the finding, and the role titles that
+ * make an opening one they asked about. Both were carried on every place, used
+ * by the score, written to the CSV — and stated nowhere a reader would see, so
+ * a page full of "term matches 12" never said what was being matched.
+ *
+ * Read off the places rather than off the manifest because that is where the
+ * engine records them, beside the counts they produced.
+ */
+export interface Brief {
+  terms: string[];
+  roles: string[];
+  /** True when the run was given either half. A run with no brief states none. */
+  asked: boolean;
+  /** Companies whose own site used one of the terms, verbatim. */
+  termHits: number;
+  /** Companies with at least one opening matching a role term. */
+  roleHits: number;
+}
+
+function briefOf(places: readonly Place[]): Brief {
+  const terms = places.find((p) => p.signals?.termLexicon?.length)?.signals?.termLexicon ?? [];
+  const roles = places.find((p) => p.signals?.roleFilter?.length)?.signals?.roleFilter ?? [];
+  return {
+    terms,
+    roles,
+    asked: terms.length > 0 || roles.length > 0,
+    termHits: places.filter((p) => (p.signals?.termMentions?.length ?? 0) > 0).length,
+    roleHits: places.filter((p) => (p.signals?.matchedRoles ?? 0) > 0).length,
+  };
 }
 
 function tally<T>(items: readonly T[], key: (item: T) => string | undefined): [string, number][] {
@@ -318,6 +355,7 @@ export function summarise(places: readonly Place[], manifest: RunManifest): RunS
     bySection,
     byBand,
     filters: describeFilters(manifest.filters ?? {}),
+    brief: briefOf(places),
     notes: foldNotes(manifest.notes ?? []),
   };
 }

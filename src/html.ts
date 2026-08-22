@@ -16,10 +16,20 @@
 //
 // The panel is markup, not something the script builds, so a browser with
 // JavaScript switched off shows every panel open rather than showing nothing.
+import { quoteKey, type QuoteIndex } from "./excerpts.js";
+import { sizeBandLabel } from "./registry/index.js";
 import { ranked, SCORE_PART_LABELS } from "./score.js";
-import { coverage, summarise, type RunSummary } from "./summary.js";
+import { coverage, summarise, type Brief, type RunSummary } from "./summary.js";
 import type { Place, RunManifest, SourcedValue } from "./types.js";
 import { shortLabel, streetLine } from "./util.js";
+
+/** What the page needs beyond the places: the evidence it can quote. */
+export interface HtmlContext {
+  /** Passages cut from the pages the run cited. Empty when the run dir was not read. */
+  quotes?: QuoteIndex;
+  /** Written dossiers by place id, when an agent has produced any. */
+  dossiers?: Map<string, string>;
+}
 
 const esc = (s: unknown): string =>
   String(s ?? "")
@@ -90,9 +100,37 @@ function mapSvg(order: readonly Place[], manifest: RunManifest): string {
 </figure>`;
 }
 
+const collapse = (s: string): string => s.replace(/\s+/g, " ").trim();
+
 /** One labelled block inside a company's panel. Absent data renders nothing. */
 function block(label: string, body: string): string {
   return body ? `<div class="b"><dt>${esc(label)}</dt><dd>${body}</dd></div>` : "";
+}
+
+/**
+ * A citation you can open.
+ *
+ * The page id is the whole basis of the citation gate: `check` re-opens it and
+ * fails the run when the value is not there. A reader holding only this file
+ * could not do that — the id promised evidence rather than carrying it. Where
+ * the passage was collected, the id becomes a disclosure holding it, dated and
+ * with the URL it came from.
+ *
+ * `<details>` rather than a scripted toggle, so a citation still opens with
+ * JavaScript switched off.
+ */
+function cite(place: Place, pageId: string | undefined, value: string, quotes: QuoteIndex): string {
+  if (!pageId) return "";
+  const quote = quotes.get(quoteKey(place.id, pageId, value));
+  if (!quote) return `<span class="src">[${esc(pageId)}]</span>`;
+  const head = [
+    quote.url ? link(quote.url, quote.url) : "",
+    quote.role ? esc(quote.role) : "",
+    quote.fetchedAt ? `fetched ${esc(quote.fetchedAt.slice(0, 10))}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return `<details class="q"><summary>[${esc(pageId)}]</summary><div class="qt${quote.located ? "" : " miss"}"><p class="src">${head}</p><p>${esc(quote.text)}</p></div></details>`;
 }
 
 /** A contact, always with the page id it was read from. */
@@ -101,13 +139,80 @@ function sourced(items: readonly SourcedValue[], href?: (v: string) => string): 
   return items
     .map((c) => {
       const value = href ? `<a href="${esc(href(c.value))}">${esc(c.value)}</a>` : esc(c.value);
-      // The page id is the whole basis of the citation gate: `check` re-opens it
-      // and fails the run when the value is not there. A contact rendered
-      // without it cannot be audited by whoever ends up emailing it.
       return `<span class="c">${value} <span class="src">[${esc(c.from)}]</span></span>`;
     })
     .join("");
 }
+
+/** The same, with the cited passage attached to each value. */
+function sourcedQuoted(place: Place, items: readonly SourcedValue[], quotes: QuoteIndex, href: (v: string) => string): string {
+  return items.map((c) => `<span class="c"><a href="${esc(href(c.value))}">${esc(c.value)}</a> ${cite(place, c.from, c.value, quotes)}</span>`).join("");
+}
+
+/**
+ * Hiring, in words, in three states.
+ *
+ * A boolean would flatten the one distinction that matters: we looked and found
+ * none, versus we found a board and could not read it. Only the first is a fact
+ * about the company.
+ */
+function hiringLine(place: Place): string {
+  const sg = place.signals;
+  if (!sg) return "";
+  if (sg.isHiring === true) {
+    return `<span class="c">hiring — <b>${sg.openRoles}</b> open role(s) via ${esc(sg.atsProviders.join(", ") || "the site")}</span>`;
+  }
+  if (sg.isHiring === false) return `<span class="c">not hiring — the careers page and the boards were read, and held none</span>`;
+  return `<span class="c warnc">hiring <b>unknown</b> — ${esc(sg.atsProviders.length ? `a board (${sg.atsProviders.join(", ")})` : "a careers page")} was found and its openings could not be read. Not "not hiring".</span>`;
+}
+
+/**
+ * The written dossier, rendered.
+ *
+ * Everything is escaped first and only four constructs are put back — headings,
+ * bold, list items and paragraphs. A dossier is agent-written text about an
+ * untrusted marketing site, so it is treated as content in exactly the way the
+ * packet's preamble tells its reader to treat the pages it quotes.
+ */
+function mdLite(markdown: string): string {
+  const lines = esc(markdown).split(/\r?\n/);
+  const out: string[] = [];
+  let list = false;
+  const closeList = () => {
+    if (list) {
+      out.push("</ul>");
+      list = false;
+    }
+  };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) {
+      closeList();
+      continue;
+    }
+    const heading = line.match(/^#{1,6}\s+(.*)$/);
+    if (heading) {
+      closeList();
+      out.push(`<h4>${heading[1]}</h4>`);
+      continue;
+    }
+    const item = line.match(/^[-*]\s+(.*)$/);
+    if (item) {
+      if (!list) {
+        out.push("<ul>");
+        list = true;
+      }
+      out.push(`<li>${bold(item[1]!)}</li>`);
+      continue;
+    }
+    closeList();
+    out.push(`<p>${bold(line)}</p>`);
+  }
+  closeList();
+  return out.join("");
+}
+
+const bold = (s: string): string => s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
 
 /**
  * The score, broken into the terms that produced it.
@@ -127,39 +232,6 @@ function scoreBreakdown(place: Place): string {
   const bar = parts.map(([, v]) => `<i style="width:${((v / total) * 100).toFixed(1)}%"></i>`).join("");
   const words = parts.map(([k, v]) => `<span class="c">${esc(SCORE_PART_LABELS[k] ?? k)} <b>${v}</b></span>`).join("");
   return `<div class="bar">${bar}</div>${words}<span class="c">total <b>${place.score?.total ?? 0}</b></span>`;
-}
-
-function registerBlock(place: Place): string {
-  const s = place.registry;
-  if (!s) return "";
-  const bits: string[] = [];
-  if (s.legalName && s.legalName !== place.name) bits.push(`<span class="c">legal name <b>${esc(s.legalName)}</b></span>`);
-  bits.push(`<span class="c">${esc(s.connectorId)} <b>${esc(s.id)}</b></span>`);
-  if (s.establishmentId && s.establishmentId !== s.id) bits.push(`<span class="c">establishment <b>${esc(s.establishmentId)}</b></span>`);
-  if (s.legalForm) bits.push(`<span class="c">form <b>${esc(s.legalForm)}</b></span>`);
-  if (s.status && s.status !== "unknown") bits.push(`<span class="c">state <b>${esc(s.status)}</b></span>`);
-  if (s.dateCreated) bits.push(`<span class="c">since <b>${esc(s.dateCreated)}</b></span>`);
-  if (s.isHeadOffice) bits.push(`<span class="c">head office</span>`);
-  if (s.establishmentCount) bits.push(`<span class="c">establishments <b>${s.establishmentCount}</b></span>`);
-  if (s.finances?.revenue)
-    bits.push(`<span class="c">revenue ${s.finances.year ?? ""} <b>${esc(s.finances.revenue)} ${esc(s.finances.currency ?? "")}</b></span>`);
-  if (place.registryEvidence) {
-    const ev = place.registryEvidence;
-    bits.push(
-      `<span class="c">matched <b>${esc(ev.mode)} / ${esc(ev.how)}</b>${ev.legalId ? ` ${esc(ev.legalId)}` : ""}${ev.from ? ` <span class="src">[${esc(ev.from)}]</span>` : ""}</span>`,
-    );
-  }
-  // A record out of a bulk snapshot is a fact about its date. Marked here as
-  // loudly as in the report, because this panel is where somebody decides
-  // whether to act on the identity.
-  if (s.asOf) bits.push(`<span class="c warnc">as of ${esc(s.asOf)} — from a bulk snapshot, not from asking the register</span>`);
-  if (s.officers.length) {
-    bits.push(
-      `<span class="c">officers ${esc(s.officers.map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" — ")).join("; "))}</span>`,
-    );
-  }
-  if (s.sourceUrl) bits.push(`<span class="c">${link(s.sourceUrl, "open on the register")}</span>`);
-  return bits.join("");
 }
 
 function siteBlock(place: Place): string {
@@ -211,39 +283,177 @@ function jobsBlock(place: Place): string {
   return `<ul class="jobs">${rows}${more}</ul>`;
 }
 
-/** Everything known about one company, as the panel under its row. */
-function detail(place: Place, columns: number): string {
+/**
+ * Does this company answer the question the run was asked?
+ *
+ * The first block of the panel, because it is the only one that knows what the
+ * reader came for. `--term` and `--role` are the brief; `termMentions` holds the
+ * verbatim hits with the page each came from. Until now the page reported
+ * "termMatches 12" in a score breakdown and never said what had been matched,
+ * which is a number pretending to be a finding.
+ *
+ * Three answers, never two. A company whose site was never read has not failed
+ * the brief — nobody has tested it — and saying "no" there would turn our own
+ * reach into a fact about them.
+ */
+function answerBlock(place: Place, brief: Brief, quotes: QuoteIndex): string {
+  if (!brief.asked) return "";
+  const mentions = place.signals?.termMentions ?? [];
+  const matched = place.signals?.matchedRoles ?? 0;
+  const bits: string[] = [];
+
+  if (mentions.length) {
+    const distinct = new Set(mentions.map((m) => m.value.toLowerCase())).size;
+    bits.push(`<p class="hit"><b>Yes — their own site uses the words you asked about.</b> ${distinct} of ${brief.terms.length} terms, verbatim:</p>`);
+    bits.push(
+      `<ul class="quotes">${mentions
+        .slice(0, 10)
+        .map((m) => {
+          // `note` carries the line the term was found on. It is the fallback,
+          // not a companion: where the page itself could be quoted, printing
+          // both shows the same sentence twice, the second time shorter and
+          // undated.
+          const quoted = quotes.has(quoteKey(place.id, m.from, m.value));
+          const fallback = !quoted && m.note ? `<br><span class="src">…${esc(collapse(m.note))}…</span>` : "";
+          return `<li>“<b>${esc(m.value)}</b>” ${cite(place, m.from, m.value, quotes)}${fallback}</li>`;
+        })
+        .join("")}</ul>`,
+    );
+  } else if (brief.terms.length && place.signals) {
+    bits.push(
+      `<p>None of the ${brief.terms.length} terms you asked about appears on the ${place.pages.length} page(s) read from their site. That is a miss on the pages we read, not proof they never use the word.</p>`,
+    );
+  } else if (brief.terms.length) {
+    bits.push(`<p>Their site has not been read, so the ${brief.terms.length} terms you asked about have not been looked for here at all.</p>`);
+  }
+
+  if (brief.roles.length) {
+    const sg = place.signals;
+    if (matched > 0) {
+      const age = sg?.oldestOpenRoleDays !== undefined ? `, the oldest open ${Math.round(sg.oldestOpenRoleDays)} days` : "";
+      bits.push(`<p><b>${matched} of ${sg?.openRoles ?? matched} open roles match the titles you asked about</b>${age}. They are listed below.</p>`);
+    } else if (sg?.isHiring === true) {
+      bits.push(`<p>${sg.openRoles} role(s) open, none matching the titles you asked about.</p>`);
+    } else if (sg?.isHiring === undefined && sg) {
+      bits.push(`<p>Their job board could not be read, so whether they are hiring for those titles is <b>unknown, not no</b>.</p>`);
+    }
+  }
+  return bits.join("");
+}
+
+/** What could NOT be established, named rather than left as an absence. */
+function gapsBlock(place: Place): string {
+  // A place OSM mapped and nothing else reached. Five bullets each saying a
+  // different half of "we have not looked yet" is worse writing than the one
+  // sentence that says it, and on a run where half the rows are this row it is
+  // also half a megabyte.
+  if (!place.website && !place.signals && !place.registry && !place.contacts.emails.length && !place.contacts.phones.length) {
+    return `<p class="src">Everything. This company is an OpenStreetMap point and nothing more: no website was found for it, so no page was read, no register record was attached and no contact was published. <code>resolve</code> then <code>enrich</code> is what fills this in.</p>`;
+  }
+  const gaps: string[] = [];
+  if (!place.website) gaps.push("no website found");
+  else if (place.website.confidence !== "corroborated") gaps.push(`website is ${place.website.confidence}, not proved to be theirs`);
+  if (!place.signals) gaps.push("their site was never read");
+  else if (place.signals.isHiring === undefined) gaps.push("a job board was found and could not be read, so hiring is unknown");
+  if (!place.registry) gaps.push("no register record was attached");
+  else {
+    const s = place.registry;
+    if (!s.sizeBand && s.employees === undefined && !s.parent?.sizeBand) gaps.push("the register publishes no headcount");
+    if (!s.finances?.revenue) gaps.push("no accounts filed, or the register does not publish them");
+    if (!s.officers.length) gaps.push("the register names no officers");
+    if (s.asOf) gaps.push(`the register record is from a ${s.asOf.slice(0, 4)} snapshot, not from asking the register today`);
+  }
+  if (!place.contacts.emails.length && !place.contacts.phones.length) gaps.push("no published email or phone");
+  if (!place.score?.fit) gaps.push("nobody has judged them against your brief yet");
+  if (!gaps.length) return "";
+  return `<ul class="gaps">${gaps.map((g) => `<li>${esc(g)}</li>`).join("")}</ul>`;
+}
+
+function whatTheyDo(place: Place): string {
+  const bits: string[] = [];
+  const s = place.registry;
+  if (s?.legalName && s.legalName !== place.name) bits.push(`<span class="c">legal name <b>${esc(s.legalName)}</b></span>`);
+  if (s?.tradingNames?.length) bits.push(`<span class="c">also trades as <b>${esc(s.tradingNames.join(", "))}</b></span>`);
+  if (place.category) bits.push(`<span class="c">OSM <b>${esc(place.category)}</b></span>`);
+  if (s?.activityCode) bits.push(`<span class="c">activity <b>${esc(s.activityCode)}</b>${s.section ? ` (section ${esc(s.section)})` : ""}</span>`);
+  // The legal unit's activity where it differs: every register filter matched on
+  // it, so it is what explains a row that looks off-target.
+  if (s?.parent?.activityCode && s.parent.activityCode !== s.activityCode) {
+    bits.push(`<span class="c">the company as a whole <b>${esc(s.parent.activityCode)}</b> — the register filters matched on this</span>`);
+  }
+  if (s) {
+    bits.push(`<span class="c">${esc(s.connectorId)} <b>${esc(s.id)}</b>${s.sourceUrl ? ` — ${link(s.sourceUrl, "open on the register")}` : ""}</span>`);
+  }
+  return bits.join("");
+}
+
+function sizeAndShape(place: Place): string {
+  const s = place.registry;
+  if (!s) return "";
+  const bits: string[] = [];
+  if (s.legalForm) bits.push(`<span class="c">form <b>${esc(s.legalForm)}</b></span>`);
+  if (s.status && s.status !== "unknown") bits.push(`<span class="c">state <b>${esc(s.status)}</b></span>`);
+  if (s.dateCreated) bits.push(`<span class="c">registered since <b>${esc(s.dateCreated)}</b></span>`);
+  const here = sizeBandLabel(s, s.sizeBand) ?? (s.employees != null ? `${s.employees} employees` : undefined);
+  if (here) bits.push(`<span class="c">headcount <b>${esc(here)}</b>${s.sizeBandYear ? ` <span class="src">(${esc(s.sizeBandYear)})</span>` : ""}</span>`);
+  const whole = sizeBandLabel(s, s.parent?.sizeBand) ?? (s.parent?.employees != null ? `${s.parent.employees} employees` : undefined);
+  if (whole && whole !== here) bits.push(`<span class="c">the company as a whole <b>${esc(whole)}</b></span>`);
+  if (s.establishmentCount) bits.push(`<span class="c">establishments <b>${s.establishmentCount}</b></span>`);
+  if (s.isHeadOffice) bits.push(`<span class="c">this is the head office</span>`);
+  if (s.finances?.revenue) {
+    bits.push(`<span class="c">revenue ${esc(s.finances.year ?? "")} <b>${esc(s.finances.revenue)} ${esc(s.finances.currency ?? "")}</b></span>`);
+  }
+  if (s.officers.length) {
+    // Identical entries are collapsed: a register that files the same person
+    // twice tells a reader nothing the first entry did not, and printing it
+    // twice reads as a rendering fault rather than as the filing it is.
+    const named = [...new Set(s.officers.map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" — ")))];
+    bits.push(`<span class="c">officers ${esc(named.join("; "))}</span>`);
+  }
+  if (place.registryEvidence) {
+    const ev = place.registryEvidence;
+    bits.push(
+      `<span class="c">attached <b>${esc(ev.mode)} / ${esc(ev.how)}</b>${ev.legalId ? ` ${esc(ev.legalId)}` : ""}${ev.from ? ` <span class="src">[${esc(ev.from)}]</span>` : ""}</span>`,
+    );
+  }
+  if (s.asOf) bits.push(`<span class="c warnc">as of ${esc(s.asOf)} — from a bulk snapshot, not from asking the register</span>`);
+  return bits.join("");
+}
+
+/** Everything known about one company, in the shape a dossier is written in. */
+function detail(place: Place, columns: number, brief: Brief, quotes: QuoteIndex, dossier?: string): string {
+  const hiring = hiringLine(place);
   const blocks = [
-    // The verdict first: it is the only thing in the run a person wrote, and
-    // verbatim, because a judgement paraphrased by the tool carrying it is no
-    // longer that person's judgement.
-    block("Why", place.score?.why ? esc(place.score.why) : ""),
-    block("Angle", place.score?.angle ? esc(place.score.angle) : ""),
+    block("Answer", answerBlock(place, brief, quotes)),
+    // A dossier somebody wrote outranks anything derived. Shown verbatim, and
+    // labelled as written rather than measured.
+    block("Written dossier", dossier ? `<div class="dossier">${mdLite(dossier)}</div>` : ""),
+    block("What they do", whatTheyDo(place)),
+    block("Size and shape", sizeAndShape(place)),
+    block("Signals", [hiring, siteBlock(place)].filter(Boolean).join("")),
+    block(`Open roles (${place.jobs.length})`, jobsBlock(place)),
+    // The verdict: the only thing in the run a person wrote, verbatim, because a
+    // judgement paraphrased by the tool carrying it is no longer that person's.
+    block("Angle", [place.score?.why ? `<p>${esc(place.score.why)}</p>` : "", place.score?.angle ? `<p><b>${esc(place.score.angle)}</b></p>` : ""].join("")),
     block("Score", scoreBreakdown(place)),
     block(
-      "Emails",
-      sourced(place.contacts.emails, (v) => `mailto:${v}`),
+      "Contacts",
+      [
+        sourcedQuoted(place, place.contacts.emails, quotes, (v) => `mailto:${v}`),
+        sourcedQuoted(place, place.contacts.phones, quotes, (v) => `tel:${v.replace(/[^\d+]/g, "")}`),
+        sourced(place.contacts.socials),
+        place.contacts.people
+          .map((p) => `<span class="c">${esc(p.value)}${p.role ? ` — ${esc(p.role)}` : ""} ${cite(place, p.from, p.value, quotes)}</span>`)
+          .join(""),
+      ].join(""),
     ),
-    block(
-      "Phones",
-      sourced(place.contacts.phones, (v) => `tel:${v.replace(/[^\d+]/g, "")}`),
-    ),
-    block("Socials", sourced(place.contacts.socials)),
-    block(
-      "People named on the site",
-      place.contacts.people
-        .map((p) => `<span class="c">${esc(p.value)}${p.role ? ` — ${esc(p.role)}` : ""} <span class="src">[${esc(p.from)}]</span></span>`)
-        .join(""),
-    ),
-    block(`Open roles (${place.jobs.length})`, jobsBlock(place)),
-    block("Register", registerBlock(place)),
-    block("Legal identifiers", legalIdBlock(place)),
-    block("Site", siteBlock(place)),
+    block("Identifiers", legalIdBlock(place)),
     block(
       "Where",
       [streetLine(place.address), place.address.codePostal, place.address.commune, place.address.pays].filter(Boolean).map(esc).join(", ") +
         (typeof place.lat === "number" ? ` <span class="src">${place.lat.toFixed(5)}, ${place.lon?.toFixed(5)}</span>` : ""),
     ),
+    block("Gaps", gapsBlock(place)),
     block(
       "Provenance",
       `<span class="c">id <b>${esc(place.id)}</b></span><span class="c">lanes <b>${esc(place.sources.join(" + "))}</b></span>` +
@@ -256,12 +466,14 @@ function detail(place: Place, columns: number): string {
     .filter(Boolean)
     .join("");
 
-  const empty = `<p class="src">Nothing beyond the row above: no site was corroborated for this company, so no page was fetched and nothing was read from one.</p>`;
-  return `<tr class="d" id="d${esc(place.id)}"><td colspan="${columns}"><dl>${blocks || empty}</dl></td></tr>`;
+  return `<tr class="d" id="d${esc(place.id)}"><td colspan="${columns}"><dl>${blocks}</dl></td></tr>`;
 }
 
 /** The facet tokens a row answers to. Only facets that match anything are shown. */
 const FACETS: { key: string; label: string; of: (p: Place) => boolean }[] = [
+  // First, because it is the one facet that is about the caller's question
+  // rather than about the data in general.
+  { key: "brief", label: "answers the brief", of: (p) => (p.signals?.termMentions?.length ?? 0) > 0 || (p.signals?.matchedRoles ?? 0) > 0 },
   { key: "hiring", label: "hiring", of: (p) => p.signals?.isHiring === true },
   { key: "site", label: "website proved", of: (p) => p.website?.confidence === "corroborated" },
   { key: "contact", label: "contactable", of: (p) => p.contacts.emails.length > 0 || p.contacts.phones.length > 0 },
@@ -314,11 +526,12 @@ function coverageTable(manifest: RunManifest, s: RunSummary): string {
 ${under.map((x) => `<p class="cap">${x}</p>`).join("")}</details>`;
 }
 
-export function buildHtml(places: readonly Place[], manifest: RunManifest): string {
+export function buildHtml(places: readonly Place[], manifest: RunManifest, ctx: HtmlContext = {}): string {
   const s = summarise(places, manifest);
   const order = ranked(places);
   const shown = Math.min(order.length, HTML_ROW_CAP);
   const visible = order.slice(0, HTML_ROW_CAP);
+  const quotes: QuoteIndex = ctx.quotes ?? new Map();
   const COLUMNS = 10;
 
   const rows = visible
@@ -345,7 +558,7 @@ export function buildHtml(places: readonly Place[], manifest: RunManifest): stri
       const contact = [p.contacts.emails.length ? "✉" : "", p.contacts.phones.length ? "☎" : ""].filter(Boolean).join(" ");
       const reg = p.registry ? `${p.registry.id}` : "";
       return `<tr class="r" id="r${i}" data-h="${esc(hay)}" data-f="${esc(facets)}"><td class="n">${i + 1}</td><td><button type="button" class="tog" aria-expanded="false" aria-controls="d${esc(p.id)}">${esc(p.name)}</button></td><td class="n">${p.score?.total ?? 0}</td><td>${esc(p.score?.fit ?? "")}</td><td class="n">${h}</td><td>${esc(p.registry?.activityCode ?? p.category ?? "")}</td><td>${esc(p.address.commune ?? "")}</td><td>${contact}</td><td>${esc(reg)}</td><td>${site}</td></tr>
-${detail(p, COLUMNS)}`;
+${detail(p, COLUMNS, s.brief, quotes, ctx.dossiers?.get(p.id))}`;
     })
     .join("\n");
 
@@ -370,6 +583,23 @@ ${detail(p, COLUMNS)}`;
     banners.push(
       `<div class="note"><strong>What this run looked for:</strong> ${esc(s.filters.join(" · "))}. A company outside that is absent from this list because it was not asked for, not because it is not there.</div>`,
     );
+  }
+  // The brief, stated once at the top. A page reporting "term matches" without
+  // ever naming the terms is a number pretending to be a finding, and a reader
+  // who did not launch the run has no way to recover what was asked.
+  if (s.brief.asked) {
+    const halves: string[] = [];
+    if (s.brief.terms.length) {
+      halves.push(
+        `<p><strong>Words looked for on each company's own site</strong> (${s.brief.terms.length}): ${s.brief.terms.map((t) => `<code>${esc(t)}</code>`).join(" ")} — <b>${s.brief.termHits}</b> ${s.brief.termHits === 1 ? "company uses" : "companies use"} at least one, verbatim.</p>`,
+      );
+    }
+    if (s.brief.roles.length) {
+      halves.push(
+        `<p><strong>Role titles that make an opening one you asked about</strong> (${s.brief.roles.length}): ${s.brief.roles.map((t) => `<code>${esc(t)}</code>`).join(" ")} — <b>${s.brief.roleHits}</b> ${s.brief.roleHits === 1 ? "company has" : "companies have"} a matching opening.</p>`,
+      );
+    }
+    banners.push(`<div class="brief"><strong>The question this run was given</strong>${halves.join("")}</div>`);
   }
 
   const activeFacets = FACETS.map((f) => ({ ...f, n: places.filter(f.of).length })).filter((f) => f.n > 0 && f.n < places.length);
@@ -446,6 +676,25 @@ tr.d dt{color:var(--muted);font-size:.82rem;padding:.3rem 0;text-transform:upper
 tr.d dd{margin:0;padding:.3rem 0;min-width:0}
 .c{display:inline-block;margin:0 .7rem .2rem 0}
 .c b{font-weight:600}
+.brief{background:var(--notebg);color:var(--notefg);border-radius:8px;padding:.85rem 1rem;margin:0 0 .75rem}
+.brief p{margin:.45rem 0 0}
+.brief code{background:var(--bg);border-radius:4px;padding:.05rem .3rem;font-size:.85em}
+tr.d dd .hit{margin:0 0 .35rem}
+ul.quotes,ul.gaps{margin:.1rem 0;padding-left:1.1rem}
+ul.quotes li{margin:.2rem 0}
+ul.gaps li{margin:.1rem 0;color:var(--muted)}
+details.q{display:inline-block;vertical-align:top}
+details.q summary{cursor:pointer;color:var(--muted);font-size:.85em;list-style:none}
+details.q summary::-webkit-details-marker{display:none}
+details.q summary:hover{color:var(--accent)}
+details.q[open] summary{color:var(--accent)}
+.qt{border-left:2px solid var(--accent);background:var(--bg);border-radius:0 6px 6px 0;padding:.5rem .75rem;margin:.35rem 0;max-width:46rem}
+.qt.miss{border-left-color:var(--warnfg)}
+.qt p{margin:.2rem 0}
+.dossier{max-width:46rem}
+.dossier h4{margin:.7rem 0 .2rem;font-size:.9rem}
+.dossier p{margin:.3rem 0}
+.dossier ul{margin:.3rem 0;padding-left:1.1rem}
 .warnc{color:var(--warnfg)}
 .tag{border:1px solid var(--line);border-radius:4px;padding:0 .3rem;font-size:.78rem;text-transform:uppercase;letter-spacing:.03em}
 .tag.verified{color:var(--strong);border-color:currentColor}

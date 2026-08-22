@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // src/cli.ts
-import { readFileSync as readFileSync9 } from "fs";
-import { join as join15 } from "path";
+import { readFileSync as readFileSync11 } from "fs";
+import { join as join17 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 
 // src/vendor/webindex-engine.mjs
@@ -9615,6 +9615,10 @@ function formatReport(report) {
   return lines.join("\n");
 }
 
+// src/render.ts
+import { existsSync as existsSync11, readFileSync as readFileSync10 } from "fs";
+import { join as join15 } from "path";
+
 // src/csv.ts
 var HEADER = [
   "id",
@@ -9762,6 +9766,98 @@ function toCsv(places, opts = {}) {
   return rows.join("\n") + "\n";
 }
 
+// src/excerpts.ts
+import { existsSync as existsSync10, readFileSync as readFileSync9 } from "fs";
+import { join as join14 } from "path";
+function quoteKey(placeId, pageId, value) {
+  return `${placeId}\0${pageId}\0${value}`;
+}
+var CONTEXT = 170;
+var QUOTES_PER_PLACE = 10;
+var QUOTES_TOTAL = 6e3;
+function parsePage(raw) {
+  const cut = raw.indexOf("\n---\n");
+  const head = cut === -1 ? raw : raw.slice(0, cut);
+  const body = cut === -1 ? "" : raw.slice(cut + 5);
+  const field = (name) => head.match(new RegExp(`^- ${name}: (.+)$`, "m"))?.[1]?.trim();
+  return { url: field("url"), role: field("role"), fetchedAt: field("fetched"), body };
+}
+var collapse = (s) => s.replace(/\s+/g, " ").trim();
+function locate(body, value) {
+  const direct = body.toLowerCase().indexOf(value.toLowerCase());
+  if (direct !== -1) return direct;
+  const digits = value.replace(/\D/g, "");
+  if (digits.length < 6) return -1;
+  const positions = [];
+  let bodyDigits = "";
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] >= "0" && body[i] <= "9") {
+      bodyDigits += body[i];
+      positions.push(i);
+    }
+  }
+  for (const probe of [digits, digits.slice(-9), digits.slice(-8)]) {
+    if (probe.length < 6) continue;
+    const at = bodyDigits.indexOf(probe);
+    if (at !== -1) return positions[at];
+  }
+  return -1;
+}
+function excerpt(page, value, pageId) {
+  const at = locate(page.body, value);
+  const meta = { pageId, url: page.url, role: page.role, fetchedAt: page.fetchedAt };
+  if (at === -1) {
+    return {
+      ...meta,
+      located: false,
+      text: `\u201C${value}\u201D does not appear in the stored extract of this page. The page is still the source recorded for it \u2014 read the whole extract rather than trusting a passage here.`
+    };
+  }
+  const from = Math.max(0, at - CONTEXT);
+  const to = Math.min(page.body.length, at + value.length + CONTEXT);
+  const lead = from > 0 ? "\u2026" : "";
+  const tail = to < page.body.length ? "\u2026" : "";
+  return { ...meta, located: true, text: `${lead}${collapse(page.body.slice(from, to))}${tail}` };
+}
+function citationsOf(place) {
+  const out2 = [];
+  const add = (pageId, value) => {
+    if (pageId && /^P\d+$/.test(pageId)) out2.push({ pageId, value });
+  };
+  for (const m of place.signals?.termMentions ?? []) add(m.from, m.value);
+  for (const e of place.contacts.emails) add(e.from, e.value);
+  for (const p of place.contacts.phones) add(p.from, p.value);
+  for (const p of place.contacts.people) add(p.from, p.value);
+  const seen = /* @__PURE__ */ new Set();
+  return out2.filter((c) => {
+    const k = `${c.pageId}\0${c.value}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+function collectQuotes(runDir, places) {
+  const index = /* @__PURE__ */ new Map();
+  const pages = /* @__PURE__ */ new Map();
+  let budget = QUOTES_TOTAL;
+  for (const place of places) {
+    if (budget <= 0) break;
+    const slug = place.id.replace(/[^a-zA-Z0-9._-]/g, "_");
+    for (const { pageId, value } of citationsOf(place).slice(0, QUOTES_PER_PLACE)) {
+      if (budget <= 0) break;
+      const path = join14(runDir, "pages", slug, `${pageId}.md`);
+      if (!pages.has(path)) {
+        pages.set(path, existsSync10(path) ? parsePage(readFileSync9(path, "utf8")) : void 0);
+      }
+      const page = pages.get(path);
+      if (!page) continue;
+      index.set(quoteKey(place.id, pageId, value), excerpt(page, value, pageId));
+      budget--;
+    }
+  }
+  return index;
+}
+
 // src/summary.ts
 function activityLabel(place) {
   const rec = place.registry;
@@ -9830,6 +9926,17 @@ var EVIDENCE_LABELS = {
   "name-lookup": "by a name lookup",
   "sweep-match": "by enumerating the territory"
 };
+function briefOf(places) {
+  const terms = places.find((p) => p.signals?.termLexicon?.length)?.signals?.termLexicon ?? [];
+  const roles = places.find((p) => p.signals?.roleFilter?.length)?.signals?.roleFilter ?? [];
+  return {
+    terms,
+    roles,
+    asked: terms.length > 0 || roles.length > 0,
+    termHits: places.filter((p) => (p.signals?.termMentions?.length ?? 0) > 0).length,
+    roleHits: places.filter((p) => (p.signals?.matchedRoles ?? 0) > 0).length
+  };
+}
 function tally(items, key) {
   const counts = /* @__PURE__ */ new Map();
   for (const item of items) {
@@ -9941,6 +10048,7 @@ function summarise(places, manifest) {
     bySection,
     byBand,
     filters: describeFilters(manifest.filters ?? {}),
+    brief: briefOf(places),
     notes: foldNotes(manifest.notes ?? [])
   };
 }
@@ -9987,8 +10095,20 @@ function mapSvg(order, manifest) {
 <figcaption>${pts.length} located companies. Larger is a higher measured score. <b class="k strong"></b> judged a strong fit \xB7 <b class="k possible"></b> possible \xB7 <b class="k sited"></b> a corroborated website \xB7 <b class="k plain"></b> everything else. Click a point to open its row.</figcaption>
 </figure>`;
 }
+var collapse2 = (s) => s.replace(/\s+/g, " ").trim();
 function block(label, body) {
   return body ? `<div class="b"><dt>${esc(label)}</dt><dd>${body}</dd></div>` : "";
+}
+function cite(place, pageId, value, quotes) {
+  if (!pageId) return "";
+  const quote = quotes.get(quoteKey(place.id, pageId, value));
+  if (!quote) return `<span class="src">[${esc(pageId)}]</span>`;
+  const head = [
+    quote.url ? link(quote.url, quote.url) : "",
+    quote.role ? esc(quote.role) : "",
+    quote.fetchedAt ? `fetched ${esc(quote.fetchedAt.slice(0, 10))}` : ""
+  ].filter(Boolean).join(" \xB7 ");
+  return `<details class="q"><summary>[${esc(pageId)}]</summary><div class="qt${quote.located ? "" : " miss"}"><p class="src">${head}</p><p>${esc(quote.text)}</p></div></details>`;
 }
 function sourced(items, href) {
   if (!items.length) return "";
@@ -9997,6 +10117,56 @@ function sourced(items, href) {
     return `<span class="c">${value} <span class="src">[${esc(c.from)}]</span></span>`;
   }).join("");
 }
+function sourcedQuoted(place, items, quotes, href) {
+  return items.map((c) => `<span class="c"><a href="${esc(href(c.value))}">${esc(c.value)}</a> ${cite(place, c.from, c.value, quotes)}</span>`).join("");
+}
+function hiringLine(place) {
+  const sg = place.signals;
+  if (!sg) return "";
+  if (sg.isHiring === true) {
+    return `<span class="c">hiring \u2014 <b>${sg.openRoles}</b> open role(s) via ${esc(sg.atsProviders.join(", ") || "the site")}</span>`;
+  }
+  if (sg.isHiring === false) return `<span class="c">not hiring \u2014 the careers page and the boards were read, and held none</span>`;
+  return `<span class="c warnc">hiring <b>unknown</b> \u2014 ${esc(sg.atsProviders.length ? `a board (${sg.atsProviders.join(", ")})` : "a careers page")} was found and its openings could not be read. Not "not hiring".</span>`;
+}
+function mdLite(markdown) {
+  const lines = esc(markdown).split(/\r?\n/);
+  const out2 = [];
+  let list2 = false;
+  const closeList = () => {
+    if (list2) {
+      out2.push("</ul>");
+      list2 = false;
+    }
+  };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) {
+      closeList();
+      continue;
+    }
+    const heading = line.match(/^#{1,6}\s+(.*)$/);
+    if (heading) {
+      closeList();
+      out2.push(`<h4>${heading[1]}</h4>`);
+      continue;
+    }
+    const item = line.match(/^[-*]\s+(.*)$/);
+    if (item) {
+      if (!list2) {
+        out2.push("<ul>");
+        list2 = true;
+      }
+      out2.push(`<li>${bold(item[1])}</li>`);
+      continue;
+    }
+    closeList();
+    out2.push(`<p>${bold(line)}</p>`);
+  }
+  closeList();
+  return out2.join("");
+}
+var bold = (s) => s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
 function scoreBreakdown(place) {
   const parts = Object.entries(place.score?.parts ?? {}).filter(([, v]) => v > 0);
   if (!parts.length) return "";
@@ -10004,35 +10174,6 @@ function scoreBreakdown(place) {
   const bar = parts.map(([, v]) => `<i style="width:${(v / total * 100).toFixed(1)}%"></i>`).join("");
   const words = parts.map(([k, v]) => `<span class="c">${esc(SCORE_PART_LABELS[k] ?? k)} <b>${v}</b></span>`).join("");
   return `<div class="bar">${bar}</div>${words}<span class="c">total <b>${place.score?.total ?? 0}</b></span>`;
-}
-function registerBlock(place) {
-  const s = place.registry;
-  if (!s) return "";
-  const bits = [];
-  if (s.legalName && s.legalName !== place.name) bits.push(`<span class="c">legal name <b>${esc(s.legalName)}</b></span>`);
-  bits.push(`<span class="c">${esc(s.connectorId)} <b>${esc(s.id)}</b></span>`);
-  if (s.establishmentId && s.establishmentId !== s.id) bits.push(`<span class="c">establishment <b>${esc(s.establishmentId)}</b></span>`);
-  if (s.legalForm) bits.push(`<span class="c">form <b>${esc(s.legalForm)}</b></span>`);
-  if (s.status && s.status !== "unknown") bits.push(`<span class="c">state <b>${esc(s.status)}</b></span>`);
-  if (s.dateCreated) bits.push(`<span class="c">since <b>${esc(s.dateCreated)}</b></span>`);
-  if (s.isHeadOffice) bits.push(`<span class="c">head office</span>`);
-  if (s.establishmentCount) bits.push(`<span class="c">establishments <b>${s.establishmentCount}</b></span>`);
-  if (s.finances?.revenue)
-    bits.push(`<span class="c">revenue ${s.finances.year ?? ""} <b>${esc(s.finances.revenue)} ${esc(s.finances.currency ?? "")}</b></span>`);
-  if (place.registryEvidence) {
-    const ev = place.registryEvidence;
-    bits.push(
-      `<span class="c">matched <b>${esc(ev.mode)} / ${esc(ev.how)}</b>${ev.legalId ? ` ${esc(ev.legalId)}` : ""}${ev.from ? ` <span class="src">[${esc(ev.from)}]</span>` : ""}</span>`
-    );
-  }
-  if (s.asOf) bits.push(`<span class="c warnc">as of ${esc(s.asOf)} \u2014 from a bulk snapshot, not from asking the register</span>`);
-  if (s.officers.length) {
-    bits.push(
-      `<span class="c">officers ${esc(s.officers.map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" \u2014 ")).join("; "))}</span>`
-    );
-  }
-  if (s.sourceUrl) bits.push(`<span class="c">${link(s.sourceUrl, "open on the register")}</span>`);
-  return bits.join("");
 }
 function siteBlock(place) {
   const sg = place.signals;
@@ -10070,44 +10211,148 @@ function jobsBlock(place) {
   const more = place.jobs.length > 25 ? `<li class="src">\u2026and ${place.jobs.length - 25} more</li>` : "";
   return `<ul class="jobs">${rows}${more}</ul>`;
 }
-function detail(place, columns) {
+function answerBlock(place, brief, quotes) {
+  if (!brief.asked) return "";
+  const mentions = place.signals?.termMentions ?? [];
+  const matched = place.signals?.matchedRoles ?? 0;
+  const bits = [];
+  if (mentions.length) {
+    const distinct = new Set(mentions.map((m) => m.value.toLowerCase())).size;
+    bits.push(`<p class="hit"><b>Yes \u2014 their own site uses the words you asked about.</b> ${distinct} of ${brief.terms.length} terms, verbatim:</p>`);
+    bits.push(
+      `<ul class="quotes">${mentions.slice(0, 10).map((m) => {
+        const quoted = quotes.has(quoteKey(place.id, m.from, m.value));
+        const fallback = !quoted && m.note ? `<br><span class="src">\u2026${esc(collapse2(m.note))}\u2026</span>` : "";
+        return `<li>\u201C<b>${esc(m.value)}</b>\u201D ${cite(place, m.from, m.value, quotes)}${fallback}</li>`;
+      }).join("")}</ul>`
+    );
+  } else if (brief.terms.length && place.signals) {
+    bits.push(
+      `<p>None of the ${brief.terms.length} terms you asked about appears on the ${place.pages.length} page(s) read from their site. That is a miss on the pages we read, not proof they never use the word.</p>`
+    );
+  } else if (brief.terms.length) {
+    bits.push(`<p>Their site has not been read, so the ${brief.terms.length} terms you asked about have not been looked for here at all.</p>`);
+  }
+  if (brief.roles.length) {
+    const sg = place.signals;
+    if (matched > 0) {
+      const age = sg?.oldestOpenRoleDays !== void 0 ? `, the oldest open ${Math.round(sg.oldestOpenRoleDays)} days` : "";
+      bits.push(`<p><b>${matched} of ${sg?.openRoles ?? matched} open roles match the titles you asked about</b>${age}. They are listed below.</p>`);
+    } else if (sg?.isHiring === true) {
+      bits.push(`<p>${sg.openRoles} role(s) open, none matching the titles you asked about.</p>`);
+    } else if (sg?.isHiring === void 0 && sg) {
+      bits.push(`<p>Their job board could not be read, so whether they are hiring for those titles is <b>unknown, not no</b>.</p>`);
+    }
+  }
+  return bits.join("");
+}
+function gapsBlock(place) {
+  if (!place.website && !place.signals && !place.registry && !place.contacts.emails.length && !place.contacts.phones.length) {
+    return `<p class="src">Everything. This company is an OpenStreetMap point and nothing more: no website was found for it, so no page was read, no register record was attached and no contact was published. <code>resolve</code> then <code>enrich</code> is what fills this in.</p>`;
+  }
+  const gaps = [];
+  if (!place.website) gaps.push("no website found");
+  else if (place.website.confidence !== "corroborated") gaps.push(`website is ${place.website.confidence}, not proved to be theirs`);
+  if (!place.signals) gaps.push("their site was never read");
+  else if (place.signals.isHiring === void 0) gaps.push("a job board was found and could not be read, so hiring is unknown");
+  if (!place.registry) gaps.push("no register record was attached");
+  else {
+    const s = place.registry;
+    if (!s.sizeBand && s.employees === void 0 && !s.parent?.sizeBand) gaps.push("the register publishes no headcount");
+    if (!s.finances?.revenue) gaps.push("no accounts filed, or the register does not publish them");
+    if (!s.officers.length) gaps.push("the register names no officers");
+    if (s.asOf) gaps.push(`the register record is from a ${s.asOf.slice(0, 4)} snapshot, not from asking the register today`);
+  }
+  if (!place.contacts.emails.length && !place.contacts.phones.length) gaps.push("no published email or phone");
+  if (!place.score?.fit) gaps.push("nobody has judged them against your brief yet");
+  if (!gaps.length) return "";
+  return `<ul class="gaps">${gaps.map((g) => `<li>${esc(g)}</li>`).join("")}</ul>`;
+}
+function whatTheyDo(place) {
+  const bits = [];
+  const s = place.registry;
+  if (s?.legalName && s.legalName !== place.name) bits.push(`<span class="c">legal name <b>${esc(s.legalName)}</b></span>`);
+  if (s?.tradingNames?.length) bits.push(`<span class="c">also trades as <b>${esc(s.tradingNames.join(", "))}</b></span>`);
+  if (place.category) bits.push(`<span class="c">OSM <b>${esc(place.category)}</b></span>`);
+  if (s?.activityCode) bits.push(`<span class="c">activity <b>${esc(s.activityCode)}</b>${s.section ? ` (section ${esc(s.section)})` : ""}</span>`);
+  if (s?.parent?.activityCode && s.parent.activityCode !== s.activityCode) {
+    bits.push(`<span class="c">the company as a whole <b>${esc(s.parent.activityCode)}</b> \u2014 the register filters matched on this</span>`);
+  }
+  if (s) {
+    bits.push(`<span class="c">${esc(s.connectorId)} <b>${esc(s.id)}</b>${s.sourceUrl ? ` \u2014 ${link(s.sourceUrl, "open on the register")}` : ""}</span>`);
+  }
+  return bits.join("");
+}
+function sizeAndShape(place) {
+  const s = place.registry;
+  if (!s) return "";
+  const bits = [];
+  if (s.legalForm) bits.push(`<span class="c">form <b>${esc(s.legalForm)}</b></span>`);
+  if (s.status && s.status !== "unknown") bits.push(`<span class="c">state <b>${esc(s.status)}</b></span>`);
+  if (s.dateCreated) bits.push(`<span class="c">registered since <b>${esc(s.dateCreated)}</b></span>`);
+  const here = sizeBandLabel(s, s.sizeBand) ?? (s.employees != null ? `${s.employees} employees` : void 0);
+  if (here) bits.push(`<span class="c">headcount <b>${esc(here)}</b>${s.sizeBandYear ? ` <span class="src">(${esc(s.sizeBandYear)})</span>` : ""}</span>`);
+  const whole = sizeBandLabel(s, s.parent?.sizeBand) ?? (s.parent?.employees != null ? `${s.parent.employees} employees` : void 0);
+  if (whole && whole !== here) bits.push(`<span class="c">the company as a whole <b>${esc(whole)}</b></span>`);
+  if (s.establishmentCount) bits.push(`<span class="c">establishments <b>${s.establishmentCount}</b></span>`);
+  if (s.isHeadOffice) bits.push(`<span class="c">this is the head office</span>`);
+  if (s.finances?.revenue) {
+    bits.push(`<span class="c">revenue ${esc(s.finances.year ?? "")} <b>${esc(s.finances.revenue)} ${esc(s.finances.currency ?? "")}</b></span>`);
+  }
+  if (s.officers.length) {
+    const named = [...new Set(s.officers.map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" \u2014 ")))];
+    bits.push(`<span class="c">officers ${esc(named.join("; "))}</span>`);
+  }
+  if (place.registryEvidence) {
+    const ev = place.registryEvidence;
+    bits.push(
+      `<span class="c">attached <b>${esc(ev.mode)} / ${esc(ev.how)}</b>${ev.legalId ? ` ${esc(ev.legalId)}` : ""}${ev.from ? ` <span class="src">[${esc(ev.from)}]</span>` : ""}</span>`
+    );
+  }
+  if (s.asOf) bits.push(`<span class="c warnc">as of ${esc(s.asOf)} \u2014 from a bulk snapshot, not from asking the register</span>`);
+  return bits.join("");
+}
+function detail(place, columns, brief, quotes, dossier) {
+  const hiring = hiringLine(place);
   const blocks = [
-    // The verdict first: it is the only thing in the run a person wrote, and
-    // verbatim, because a judgement paraphrased by the tool carrying it is no
-    // longer that person's judgement.
-    block("Why", place.score?.why ? esc(place.score.why) : ""),
-    block("Angle", place.score?.angle ? esc(place.score.angle) : ""),
+    block("Answer", answerBlock(place, brief, quotes)),
+    // A dossier somebody wrote outranks anything derived. Shown verbatim, and
+    // labelled as written rather than measured.
+    block("Written dossier", dossier ? `<div class="dossier">${mdLite(dossier)}</div>` : ""),
+    block("What they do", whatTheyDo(place)),
+    block("Size and shape", sizeAndShape(place)),
+    block("Signals", [hiring, siteBlock(place)].filter(Boolean).join("")),
+    block(`Open roles (${place.jobs.length})`, jobsBlock(place)),
+    // The verdict: the only thing in the run a person wrote, verbatim, because a
+    // judgement paraphrased by the tool carrying it is no longer that person's.
+    block("Angle", [place.score?.why ? `<p>${esc(place.score.why)}</p>` : "", place.score?.angle ? `<p><b>${esc(place.score.angle)}</b></p>` : ""].join("")),
     block("Score", scoreBreakdown(place)),
     block(
-      "Emails",
-      sourced(place.contacts.emails, (v) => `mailto:${v}`)
+      "Contacts",
+      [
+        sourcedQuoted(place, place.contacts.emails, quotes, (v) => `mailto:${v}`),
+        sourcedQuoted(place, place.contacts.phones, quotes, (v) => `tel:${v.replace(/[^\d+]/g, "")}`),
+        sourced(place.contacts.socials),
+        place.contacts.people.map((p) => `<span class="c">${esc(p.value)}${p.role ? ` \u2014 ${esc(p.role)}` : ""} ${cite(place, p.from, p.value, quotes)}</span>`).join("")
+      ].join("")
     ),
-    block(
-      "Phones",
-      sourced(place.contacts.phones, (v) => `tel:${v.replace(/[^\d+]/g, "")}`)
-    ),
-    block("Socials", sourced(place.contacts.socials)),
-    block(
-      "People named on the site",
-      place.contacts.people.map((p) => `<span class="c">${esc(p.value)}${p.role ? ` \u2014 ${esc(p.role)}` : ""} <span class="src">[${esc(p.from)}]</span></span>`).join("")
-    ),
-    block(`Open roles (${place.jobs.length})`, jobsBlock(place)),
-    block("Register", registerBlock(place)),
-    block("Legal identifiers", legalIdBlock(place)),
-    block("Site", siteBlock(place)),
+    block("Identifiers", legalIdBlock(place)),
     block(
       "Where",
       [streetLine(place.address), place.address.codePostal, place.address.commune, place.address.pays].filter(Boolean).map(esc).join(", ") + (typeof place.lat === "number" ? ` <span class="src">${place.lat.toFixed(5)}, ${place.lon?.toFixed(5)}</span>` : "")
     ),
+    block("Gaps", gapsBlock(place)),
     block(
       "Provenance",
       `<span class="c">id <b>${esc(place.id)}</b></span><span class="c">lanes <b>${esc(place.sources.join(" + "))}</b></span>` + (place.matchConfidence !== void 0 ? `<span class="c">match confidence <b>${place.matchConfidence}</b>${place.matchedBy ? ` on ${esc(place.matchedBy)}` : ""}</span>` : "") + (place.website ? `<span class="c">website <b>${esc(place.website.confidence)}</b> \u2014 ${esc(place.website.evidence.join(", "))}</span>` : "")
     )
   ].filter(Boolean).join("");
-  const empty = `<p class="src">Nothing beyond the row above: no site was corroborated for this company, so no page was fetched and nothing was read from one.</p>`;
-  return `<tr class="d" id="d${esc(place.id)}"><td colspan="${columns}"><dl>${blocks || empty}</dl></td></tr>`;
+  return `<tr class="d" id="d${esc(place.id)}"><td colspan="${columns}"><dl>${blocks}</dl></td></tr>`;
 }
 var FACETS = [
+  // First, because it is the one facet that is about the caller's question
+  // rather than about the data in general.
+  { key: "brief", label: "answers the brief", of: (p) => (p.signals?.termMentions?.length ?? 0) > 0 || (p.signals?.matchedRoles ?? 0) > 0 },
   { key: "hiring", label: "hiring", of: (p) => p.signals?.isHiring === true },
   { key: "site", label: "website proved", of: (p) => p.website?.confidence === "corroborated" },
   { key: "contact", label: "contactable", of: (p) => p.contacts.emails.length > 0 || p.contacts.phones.length > 0 },
@@ -10144,11 +10389,12 @@ function coverageTable(manifest, s) {
 <div class="scroll"><table><thead><tr><th>Lane</th><th>Mode</th><th class="n">Returned</th><th>Complete</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div>
 ${under.map((x) => `<p class="cap">${x}</p>`).join("")}</details>`;
 }
-function buildHtml(places, manifest) {
+function buildHtml(places, manifest, ctx = {}) {
   const s = summarise(places, manifest);
   const order = ranked(places);
   const shown = Math.min(order.length, HTML_ROW_CAP);
   const visible = order.slice(0, HTML_ROW_CAP);
+  const quotes = ctx.quotes ?? /* @__PURE__ */ new Map();
   const COLUMNS = 10;
   const rows = visible.map((p, i) => {
     const h = p.signals?.isHiring === true ? `${p.signals.openRoles}` : p.signals?.isHiring === false ? "\u2014" : "?";
@@ -10168,7 +10414,7 @@ function buildHtml(places, manifest) {
     const contact = [p.contacts.emails.length ? "\u2709" : "", p.contacts.phones.length ? "\u260E" : ""].filter(Boolean).join(" ");
     const reg = p.registry ? `${p.registry.id}` : "";
     return `<tr class="r" id="r${i}" data-h="${esc(hay)}" data-f="${esc(facets)}"><td class="n">${i + 1}</td><td><button type="button" class="tog" aria-expanded="false" aria-controls="d${esc(p.id)}">${esc(p.name)}</button></td><td class="n">${p.score?.total ?? 0}</td><td>${esc(p.score?.fit ?? "")}</td><td class="n">${h}</td><td>${esc(p.registry?.activityCode ?? p.category ?? "")}</td><td>${esc(p.address.commune ?? "")}</td><td>${contact}</td><td>${esc(reg)}</td><td>${site}</td></tr>
-${detail(p, COLUMNS)}`;
+${detail(p, COLUMNS, s.brief, quotes, ctx.dossiers?.get(p.id))}`;
   }).join("\n");
   const banners = [];
   if (manifest.truncated) {
@@ -10185,6 +10431,20 @@ ${detail(p, COLUMNS)}`;
     banners.push(
       `<div class="note"><strong>What this run looked for:</strong> ${esc(s.filters.join(" \xB7 "))}. A company outside that is absent from this list because it was not asked for, not because it is not there.</div>`
     );
+  }
+  if (s.brief.asked) {
+    const halves = [];
+    if (s.brief.terms.length) {
+      halves.push(
+        `<p><strong>Words looked for on each company's own site</strong> (${s.brief.terms.length}): ${s.brief.terms.map((t) => `<code>${esc(t)}</code>`).join(" ")} \u2014 <b>${s.brief.termHits}</b> ${s.brief.termHits === 1 ? "company uses" : "companies use"} at least one, verbatim.</p>`
+      );
+    }
+    if (s.brief.roles.length) {
+      halves.push(
+        `<p><strong>Role titles that make an opening one you asked about</strong> (${s.brief.roles.length}): ${s.brief.roles.map((t) => `<code>${esc(t)}</code>`).join(" ")} \u2014 <b>${s.brief.roleHits}</b> ${s.brief.roleHits === 1 ? "company has" : "companies have"} a matching opening.</p>`
+      );
+    }
+    banners.push(`<div class="brief"><strong>The question this run was given</strong>${halves.join("")}</div>`);
   }
   const activeFacets = FACETS.map((f) => ({ ...f, n: places.filter(f.of).length })).filter((f) => f.n > 0 && f.n < places.length);
   const chips = activeFacets.map((f) => `<button type="button" class="chip" data-facet="${esc(f.key)}" aria-pressed="false">${esc(f.label)} <span class="src">${f.n}</span></button>`).join("");
@@ -10254,6 +10514,25 @@ tr.d dt{color:var(--muted);font-size:.82rem;padding:.3rem 0;text-transform:upper
 tr.d dd{margin:0;padding:.3rem 0;min-width:0}
 .c{display:inline-block;margin:0 .7rem .2rem 0}
 .c b{font-weight:600}
+.brief{background:var(--notebg);color:var(--notefg);border-radius:8px;padding:.85rem 1rem;margin:0 0 .75rem}
+.brief p{margin:.45rem 0 0}
+.brief code{background:var(--bg);border-radius:4px;padding:.05rem .3rem;font-size:.85em}
+tr.d dd .hit{margin:0 0 .35rem}
+ul.quotes,ul.gaps{margin:.1rem 0;padding-left:1.1rem}
+ul.quotes li{margin:.2rem 0}
+ul.gaps li{margin:.1rem 0;color:var(--muted)}
+details.q{display:inline-block;vertical-align:top}
+details.q summary{cursor:pointer;color:var(--muted);font-size:.85em;list-style:none}
+details.q summary::-webkit-details-marker{display:none}
+details.q summary:hover{color:var(--accent)}
+details.q[open] summary{color:var(--accent)}
+.qt{border-left:2px solid var(--accent);background:var(--bg);border-radius:0 6px 6px 0;padding:.5rem .75rem;margin:.35rem 0;max-width:46rem}
+.qt.miss{border-left-color:var(--warnfg)}
+.qt p{margin:.2rem 0}
+.dossier{max-width:46rem}
+.dossier h4{margin:.7rem 0 .2rem;font-size:.9rem}
+.dossier p{margin:.3rem 0}
+.dossier ul{margin:.3rem 0;padding-left:1.1rem}
 .warnc{color:var(--warnfg)}
 .tag{border:1px solid var(--line);border-radius:4px;padding:0 .3rem;font-size:.78rem;text-transform:uppercase;letter-spacing:.03em}
 .tag.verified{color:var(--strong);border-color:currentColor}
@@ -10686,12 +10965,22 @@ against the page it came from and fails the run when one does not appear there.
 ${manifest.licences.map((x) => `- ${x}`).join("\n")}
 `;
 }
+function readDossiers(runDir, places) {
+  const out2 = /* @__PURE__ */ new Map();
+  for (const place of places) {
+    const path = join15(runDir, dossierPathFor(place));
+    if (existsSync11(path)) out2.set(place.id, readFileSync10(path, "utf8"));
+  }
+  return out2;
+}
 function buildAll(places, manifest, opts = {}) {
+  const visible = ranked(places).slice(0, HTML_ROW_CAP);
+  const ctx = opts.runDir ? { quotes: collectQuotes(opts.runDir, visible), dossiers: readDossiers(opts.runDir, visible) } : {};
   const files = [
     { path: "PROSPECTS.csv", content: toCsv(places, opts) },
     { path: "prospects.json", content: JSON.stringify(ranked(places), null, 2) + "\n" },
     { path: "REPORT.md", content: buildReport(places, manifest) },
-    { path: "index.html", content: buildHtml(places, manifest) }
+    { path: "index.html", content: buildHtml(places, manifest, ctx) }
   ];
   const privacy = opts.noPeople ? void 0 : buildPrivacyNote(places, manifest);
   if (privacy) files.push({ path: "PRIVACY.md", content: privacy });
@@ -10826,7 +11115,7 @@ function buildDelta(delta, before, after) {
 }
 
 // src/mcp/adapter.ts
-import { join as join14 } from "path";
+import { join as join16 } from "path";
 var envKeys = () => Object.fromEntries(CONNECTORS.filter((c) => c.needsKey?.env).map((c) => [c.id, process.env[c.needsKey.env]]));
 var str = (v, name) => {
   if (typeof v !== "string" || !v.trim()) throw new ToolError(`${name} must be a non-empty string`);
@@ -11192,16 +11481,17 @@ ${JSON.stringify({ ok: report.ok, errors: report.errors, warnings: report.warnin
           const runDir = resolveRun(str(args.run, "run"));
           const manifest = requireManifest(runDir);
           const outcome = buildAll(readPlaces(runDir), manifest, {
+            runDir,
             noPeople: args.noPeople === true,
             minScore: typeof args.minScore === "number" ? clampInt(args.minScore, 0, 1e4, 0) : void 0,
             minFit: typeof args.minFit === "string" ? args.minFit : void 0
           });
-          for (const file of outcome.files) writeArtifact(join14(runDir, file.path), file.content);
+          for (const file of outcome.files) writeArtifact(join16(runDir, file.path), file.content);
           return {
             text: JSON.stringify(
               {
                 run: runDir,
-                files: outcome.files.map((f) => join14(runDir, f.path)),
+                files: outcome.files.map((f) => join16(runDir, f.path)),
                 truncated: manifest.truncated,
                 privacy: outcome.files.some((f) => f.path === "PRIVACY.md")
               },
@@ -11216,7 +11506,7 @@ ${JSON.stringify({ ok: report.ok, errors: report.errors, warnings: report.warnin
           const before = resolveRun(str(args.since, "since"));
           const delta = diffRuns(readPlaces(before), readPlaces(after));
           const markdown = buildDelta(delta, requireManifest(before), requireManifest(after));
-          writeArtifact(join14(after, "DELTA.md"), markdown);
+          writeArtifact(join16(after, "DELTA.md"), markdown);
           return { text: markdown, artifact: after };
         }
         case "ultraprospect_doctor": {
@@ -12006,7 +12296,7 @@ async function cmdMatch(values, bools) {
   if (!values.run) throw new UsageError("match needs --run <dir>");
   if (!values.apply) throw new UsageError('match needs --apply <file> (a JSON array of {osmId, registryId, merge}), or "-" for stdin');
   const runDir = resolveRun(values.run);
-  const raw = values.apply === "-" ? readFileSync9(0, "utf8") : readFileSync9(values.apply, "utf8");
+  const raw = values.apply === "-" ? readFileSync11(0, "utf8") : readFileSync11(values.apply, "utf8");
   let verdicts;
   try {
     const parsedJson = JSON.parse(raw);
@@ -12054,7 +12344,7 @@ async function cmdResolve(values, bools) {
     else for (const item of plan) for (const q of item.queries) out(q);
     say("");
     say(`resolve: ${plan.length} place(s) need a website, ${plan.reduce((n, p) => n + p.queries.length, 0)} quer(y|ies) to run.`);
-    say(`  worklist: ${join15(runDir, "RESOLVE.todo.json")}`);
+    say(`  worklist: ${join17(runDir, "RESOLVE.todo.json")}`);
     say("  Run your own WebSearch once per query. Pool EVERY hit into ONE JSON array,");
     say('  duplicates and all: [{"url": "\u2026", "title": "\u2026", "snippet": "\u2026", "placeId": "\u2026"}]');
     say(`next: ultraprospect resolve --run ${runDir} --web-results <file>`);
@@ -12063,7 +12353,7 @@ async function cmdResolve(values, bools) {
   }
   let webResults;
   if (values["web-results"]) {
-    const raw = values["web-results"] === "-" ? readFileSync9(0, "utf8") : readFileSync9(values["web-results"], "utf8");
+    const raw = values["web-results"] === "-" ? readFileSync11(0, "utf8") : readFileSync11(values["web-results"], "utf8");
     try {
       const parsed = JSON.parse(raw);
       webResults = Array.isArray(parsed) ? parsed : parsed?.hits ?? [];
@@ -12157,7 +12447,7 @@ async function cmdEnrich(values, bools) {
   return outcome.enriched > 0 ? EXIT_OK : EXIT_FAILURE;
 }
 function readJsonArg(value, what) {
-  const raw = value === "-" ? readFileSync9(0, "utf8") : readFileSync9(value, "utf8");
+  const raw = value === "-" ? readFileSync11(0, "utf8") : readFileSync11(value, "utf8");
   try {
     return JSON.parse(raw);
   } catch (e) {
@@ -12226,7 +12516,7 @@ async function cmdDossier(values, bools) {
   const packet = buildDossierPacket(runDir, place, requireManifest(runDir));
   out(packet.markdown);
   say("");
-  say(`write your dossier to ${join15(runDir, dossierPathFor(place))}`);
+  say(`write your dossier to ${join17(runDir, dossierPathFor(place))}`);
   say(`next: ultraprospect check --run ${runDir}`);
   return EXIT_OK;
 }
@@ -12251,20 +12541,21 @@ async function cmdRender(values, bools) {
   const places = readPlaces(runDir);
   const manifest = requireManifest(runDir);
   const outcome = buildAll(places, manifest, {
+    runDir,
     noPeople: bools.has("no-people"),
     minScore: values["min-score"] ? clampInt(values["min-score"], 0, 1e4, 0) : void 0,
     minFit: values["min-fit"] ?? void 0
   });
-  for (const file of outcome.files) writeArtifact(join15(runDir, file.path), file.content);
-  if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join15(runDir, f.path)) }));
-  else for (const file of outcome.files) out(join15(runDir, file.path));
+  for (const file of outcome.files) writeArtifact(join17(runDir, file.path), file.content);
+  if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join17(runDir, f.path)) }));
+  else for (const file of outcome.files) out(join17(runDir, file.path));
   say("");
   if (manifest.truncated) {
     say("  \u26A0 this run is TRUNCATED \u2014 the report and the page both lead with that, and so must you.");
   }
   const privacy = outcome.files.some((f) => f.path === "PRIVACY.md");
   if (privacy) say("  PRIVACY.md was written: this run holds named individuals. Read it before sharing the CSV.");
-  say(`next: open ${join15(runDir, "index.html")}`);
+  say(`next: open ${join17(runDir, "index.html")}`);
   return EXIT_OK;
 }
 async function cmdWatch(values, bools) {
@@ -12275,7 +12566,7 @@ async function cmdWatch(values, bools) {
   if (afterDir === beforeDir) throw new UsageError("--run and --since resolve to the same run; there is nothing to compare");
   const delta = diffRuns(readPlaces(beforeDir), readPlaces(afterDir));
   const markdown = buildDelta(delta, requireManifest(beforeDir), requireManifest(afterDir));
-  writeArtifact(join15(afterDir, "DELTA.md"), markdown);
+  writeArtifact(join17(afterDir, "DELTA.md"), markdown);
   if (bools.has("json")) {
     out(
       jsonLine({
@@ -12290,7 +12581,7 @@ async function cmdWatch(values, bools) {
       })
     );
   } else {
-    out(join15(afterDir, "DELTA.md"));
+    out(join17(afterDir, "DELTA.md"));
   }
   say("");
   say(
