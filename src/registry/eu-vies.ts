@@ -220,7 +220,9 @@ export const euVies: RegistryConnector = {
       countryCode: answer.countryCode,
       status: "active",
       activityScheme: "none",
-      sourceUrl: "https://ec.europa.eu/taxation_customs/vies/",
+      // No sourceUrl. VIES is a form: it answers a VAT number, it does not host
+      // a page for one, so there is nothing to link a reader to. The check
+      // itself is the provenance, and `confirm` records which authority made it.
       national: { vatNumber: answer.vatNumber, viesDisclosesIdentity: true },
     };
   },

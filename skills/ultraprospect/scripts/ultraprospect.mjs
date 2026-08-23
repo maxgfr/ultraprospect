@@ -3069,7 +3069,9 @@ var euVies = {
       countryCode: answer.countryCode,
       status: "active",
       activityScheme: "none",
-      sourceUrl: "https://ec.europa.eu/taxation_customs/vies/",
+      // No sourceUrl. VIES is a form: it answers a VAT number, it does not host
+      // a page for one, so there is nothing to link a reader to. The check
+      // itself is the provenance, and `confirm` records which authority made it.
       national: { vatNumber: answer.vatNumber, viesDisclosesIdentity: true }
     };
   },
@@ -5365,7 +5367,11 @@ var offeneRegisterSnapshot = {
       status: statusOf2(row2.current_status),
       // No activity code: the Handelsregister files none. Declaring a section
       // would invent a classification the register does not publish.
-      sourceUrl: "https://offeneregister.de/",
+      // No sourceUrl. offeneregister.de publishes bulk files and nothing else —
+      // no page per company, and the SQL API that once served one is gone. A
+      // link to its homepage answered "open on the register" with a download
+      // site, which is a promise the record cannot keep. Where the record came
+      // from is said in words instead, with its `asOf`.
       asOf,
       // Only what is NOT already derivable from the fields beside it. At 5.3
       // million rows every repetition is measured in gigabytes: storing
@@ -10318,7 +10324,8 @@ function whatTheyDo(place) {
     bits.push(`<span class="c">the company as a whole <b>${esc(s.parent.activityCode)}</b> \u2014 the register filters matched on this</span>`);
   }
   if (s) {
-    bits.push(`<span class="c">${esc(s.connectorId)} <b>${esc(s.id)}</b>${s.sourceUrl ? ` \u2014 ${link(s.sourceUrl, "open on the register")}` : ""}</span>`);
+    const provenance = s.sourceUrl ? ` \u2014 ${link(s.sourceUrl, "open on the register")}` : s.asOf ? ` <span class="src">read from a bulk open-data export as of ${esc(s.asOf.slice(0, 10))}; this register publishes no page per company</span>` : ` <span class="src">answered by the authority directly; this register publishes no page per company</span>`;
+    bits.push(`<span class="c">${esc(s.connectorId)} <b>${esc(s.id)}</b>${provenance}</span>`);
   }
   return bits.join("");
 }
