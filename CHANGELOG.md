@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [3.3.1](https://github.com/maxgfr/ultraprospect/compare/v3.3.0...v3.3.1) (2026-08-23)
+
+
+### Bug Fixes
+
+* **ats:** personio serves two feeds, and /xml is not the one every board has ([0207e07](https://github.com/maxgfr/ultraprospect/commit/0207e07cff8d2164dd2e4152745587d94293d544))
+* **html:** map points drawn below the visibility threshold, in both themes ([512f24a](https://github.com/maxgfr/ultraprospect/commit/512f24af15aaaa717c964bc1bd270e4959e68630)), closes [#6b7688](https://github.com/maxgfr/ultraprospect/issues/6b7688) [#79839a](https://github.com/maxgfr/ultraprospect/issues/79839a)
+
 # [3.3.0](https://github.com/maxgfr/ultraprospect/compare/v3.2.0...v3.3.0) (2026-08-23)
 
 
