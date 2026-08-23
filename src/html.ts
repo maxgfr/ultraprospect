@@ -423,7 +423,14 @@ function sizeAndShape(place: Place): string {
     // twice tells a reader nothing the first entry did not, and printing it
     // twice reads as a rendering fault rather than as the filing it is.
     const named = [...new Set(s.officers.map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" — ")))];
-    bits.push(`<span class="c">officers ${esc(named.join("; "))}</span>`);
+    // Who filed, and WHEN. An officer out of a bulk snapshot is who held the
+    // post on that date; writing it in the present tense is the same class of
+    // claim as calling a confirmed territory a swept one. Germany's export
+    // stops in 2019, so this is not a detail.
+    const when = s.asOf
+      ? ` <span class="src">as filed with ${esc(s.connectorId)}, ${esc(s.asOf.slice(0, 10))} — who held the post then, not necessarily now</span>`
+      : ` <span class="src">as filed with ${esc(s.connectorId)}</span>`;
+    bits.push(`<span class="c">officers ${esc(named.join("; "))}${when}</span>`);
   }
   if (place.registryEvidence) {
     const ev = place.registryEvidence;
