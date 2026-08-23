@@ -284,6 +284,43 @@ function jobsBlock(place: Place): string {
 }
 
 /**
+ * Every opening in the run, in one list.
+ *
+ * The per-company panel already held these, and that is the wrong shape for the
+ * question a reader actually arrives with: not "is this company hiring" — which
+ * a count answers — but "what is open, anywhere in this territory". Reaching
+ * that meant opening one panel at a time and holding the answer in your head.
+ *
+ * So the openings are pooled and sorted the way they are read: freelance and
+ * contract first, because a company stating a non-permanent engagement in a
+ * structured field is the strongest thing this run can find, then by employer
+ * so a reader scanning for a name still finds them together.
+ */
+function openingsSection(order: readonly Place[]): string {
+  const rows = order
+    .flatMap((p) => p.jobs.map((j) => ({ p, j })))
+    .sort((a, b) => {
+      const rank = (t?: string) => (t && /freelance|contract|freiberuf|werkvertrag/i.test(t) ? 0 : 1);
+      return rank(a.j.employmentType) - rank(b.j.employmentType) || a.p.name.localeCompare(b.p.name);
+    });
+  if (!rows.length) return "";
+  const items = rows
+    .map(({ p, j }) => {
+      const where = [j.location, j.department, j.employmentType].filter(Boolean).join(" · ");
+      const title = j.url ? link(j.url, j.title) : esc(j.title);
+      const when = j.postedAt ? ` <span class="src">posted ${esc(j.postedAt.slice(0, 10))}</span>` : "";
+      return `<li><b>${esc(p.name)}</b> — ${title}${where ? ` <span class="src">${esc(where)}</span>` : ""}${when} <span class="src">via ${esc(j.via)}</span></li>`;
+    })
+    .join("");
+  const employers = new Set(rows.map(({ p }) => p.id)).size;
+  return `<section id="openings">
+<h2>Open roles — ${rows.length} across ${employers} ${employers === 1 ? "company" : "companies"}</h2>
+<p class="cap">Every opening the run could read, pooled. Each was read from the company's own applicant-tracking system, not from its careers page — the ones whose board could not be read are absent, and that is unknown rather than nothing.</p>
+<ul class="jobs">${items}</ul>
+</section>`;
+}
+
+/**
  * Does this company answer the question the run was asked?
  *
  * The first block of the panel, because it is the only one that knows what the
@@ -721,6 +758,7 @@ ${banners.join("\n")}
 ${statCards(s, manifest)}
 ${coverageTable(manifest, s)}
 ${mapSvg(visible, manifest)}
+${openingsSection(order)}
 <div class="tools">
 <input id="q" type="search" placeholder="Filter — name, legal name, register id, activity, town, domain, verdict" autocomplete="off" aria-label="Filter the table">
 ${chips}

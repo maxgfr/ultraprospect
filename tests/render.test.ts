@@ -411,6 +411,29 @@ describe("index.html", () => {
     expect(html.indexOf("<th>Lane</th>")).toBeLessThan(html.indexOf(`<table id="${id}">`));
   });
 
+  it("lists every opening in one place, not just a count per company", () => {
+    // A count tells you a company is hiring. It does not tell you what for,
+    // which is the only thing a reader can act on — and reaching the titles
+    // meant opening one company panel at a time.
+    const hiring = (id: string, name: string, titles: string[]) =>
+      place({
+        id,
+        name,
+        jobs: titles.map((t) => ({ title: t, url: `https://x/${t}`, location: "Hamburg", employmentType: "freelance", via: "personio" })),
+        signals: { ...signals, isHiring: true, openRoles: titles.length },
+      });
+    const page = buildHtml([hiring("osm:n1", "Acme", ["Backend Entwickler", "DevOps Engineer"]), hiring("osm:n2", "Beta", ["Datenanalyst"])], manifest());
+
+    const board = page.slice(page.indexOf('id="openings"'));
+    expect(board).toBeTruthy();
+    for (const t of ["Backend Entwickler", "DevOps Engineer", "Datenanalyst"]) expect(board).toContain(t);
+    // Each opening names the company it belongs to: a title with no employer is
+    // not a lead, and the list is sorted across companies rather than grouped.
+    expect(board).toContain("Acme");
+    expect(board).toContain("Beta");
+    expect(board).toContain("freelance");
+  });
+
   it("draws map points a human can actually see, in both themes", () => {
     // Measured on a real Hamburg run: the default point rendered at 1.68:1
     // against the light background and 1.65:1 against the dark one, and 94% of
