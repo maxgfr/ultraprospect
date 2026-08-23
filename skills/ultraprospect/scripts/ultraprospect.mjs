@@ -10231,6 +10231,25 @@ function jobsBlock(place) {
   const more = place.jobs.length > 25 ? `<li class="src">\u2026and ${place.jobs.length - 25} more</li>` : "";
   return `<ul class="jobs">${rows}${more}</ul>`;
 }
+function openingsSection(order) {
+  const rows = order.flatMap((p) => p.jobs.map((j) => ({ p, j }))).sort((a, b) => {
+    const rank = (t) => t && /freelance|contract|freiberuf|werkvertrag/i.test(t) ? 0 : 1;
+    return rank(a.j.employmentType) - rank(b.j.employmentType) || a.p.name.localeCompare(b.p.name);
+  });
+  if (!rows.length) return "";
+  const items = rows.map(({ p, j }) => {
+    const where = [j.location, j.department, j.employmentType].filter(Boolean).join(" \xB7 ");
+    const title = j.url ? link(j.url, j.title) : esc(j.title);
+    const when = j.postedAt ? ` <span class="src">posted ${esc(j.postedAt.slice(0, 10))}</span>` : "";
+    return `<li><b>${esc(p.name)}</b> \u2014 ${title}${where ? ` <span class="src">${esc(where)}</span>` : ""}${when} <span class="src">via ${esc(j.via)}</span></li>`;
+  }).join("");
+  const employers = new Set(rows.map(({ p }) => p.id)).size;
+  return `<section id="openings">
+<h2>Open roles \u2014 ${rows.length} across ${employers} ${employers === 1 ? "company" : "companies"}</h2>
+<p class="cap">Every opening the run could read, pooled. Each was read from the company's own applicant-tracking system, not from its careers page \u2014 the ones whose board could not be read are absent, and that is unknown rather than nothing.</p>
+<ul class="jobs">${items}</ul>
+</section>`;
+}
 function answerBlock(place, brief, quotes) {
   if (!brief.asked) return "";
   const mentions = place.signals?.termMentions ?? [];
@@ -10579,6 +10598,7 @@ ${banners.join("\n")}
 ${statCards(s, manifest)}
 ${coverageTable(manifest, s)}
 ${mapSvg(visible, manifest)}
+${openingsSection(order)}
 <div class="tools">
 <input id="q" type="search" placeholder="Filter \u2014 name, legal name, register id, activity, town, domain, verdict" autocomplete="off" aria-label="Filter the table">
 ${chips}
