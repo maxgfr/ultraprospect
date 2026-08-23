@@ -10109,6 +10109,7 @@ function citationsOf(place) {
   for (const e of place.contacts.emails) add(e.from, e.value);
   for (const p of place.contacts.phones) add(p.from, p.value);
   for (const p of place.contacts.people) add(p.from, p.value);
+  for (const s of place.contacts.socials) add(s.from, s.value);
   const seen = /* @__PURE__ */ new Set();
   return out2.filter((c) => {
     const k = `${c.pageId}\0${c.value}`;
@@ -10450,12 +10451,12 @@ function siteBlock(place) {
   if (sg.siteReachable === false) bits.push(`<span class="c warnc">the site did not respond</span>`);
   return bits.join("");
 }
-function legalIdBlock(place) {
+function legalIdBlock(place, ev) {
   if (!place.legalIds?.length) return "";
   return place.legalIds.map((x) => {
     const note = x.note ? ` \u2014 ${esc(x.note)}` : "";
     const who = x.authority ? ` (${esc(x.authority)})` : "";
-    return `<span class="c"><b>${esc(x.kind)} ${esc(x.value)}</b> <span class="tag ${esc(x.status)}">${esc(x.status)}</span>${who}${note}${x.from ? ` <span class="src">[${esc(x.from)}]</span>` : ""}</span>`;
+    return `<span class="c"><b>${esc(x.kind)} ${esc(x.value)}</b> <span class="tag ${esc(x.status)}">${esc(x.status)}</span>${who}${note}${x.from ? ` ${cite(place, x.from, x.value, ev)}` : ""}</span>`;
   }).join("");
 }
 function jobsBlock(place) {
@@ -10561,7 +10562,7 @@ function whatTheyDo(place) {
   }
   return bits.join("");
 }
-function sizeAndShape(place) {
+function sizeAndShape(place, ev) {
   const s = place.registry;
   if (!s) return "";
   const bits = [];
@@ -10583,9 +10584,9 @@ function sizeAndShape(place) {
     bits.push(`<span class="c">officers ${esc(named.join("; "))}${when}</span>`);
   }
   if (place.registryEvidence) {
-    const ev = place.registryEvidence;
+    const ev2 = place.registryEvidence;
     bits.push(
-      `<span class="c">attached <b>${esc(ev.mode)} / ${esc(ev.how)}</b>${ev.legalId ? ` ${esc(ev.legalId)}` : ""}${ev.from ? ` <span class="src">[${esc(ev.from)}]</span>` : ""}</span>`
+      `<span class="c">attached <b>${esc(ev2.mode)} / ${esc(ev2.how)}</b>${ev2.legalId ? ` ${esc(ev2.legalId)}` : ""}${ev2.from ? ` ${cite(place, ev2.from, ev2.legalId ?? "", ev)}` : ""}</span>`
     );
   }
   if (s.asOf) bits.push(`<span class="c warnc">as of ${esc(s.asOf)} \u2014 from a bulk snapshot, not from asking the register</span>`);
@@ -10599,7 +10600,7 @@ function detail(place, columns, brief, ev, dossier) {
     // labelled as written rather than measured.
     block("Written dossier", dossier ? `<div class="dossier">${mdLite(dossier)}</div>` : ""),
     block("What they do", whatTheyDo(place)),
-    block("Size and shape", sizeAndShape(place)),
+    block("Size and shape", sizeAndShape(place, ev)),
     block("Signals", [hiring, siteBlock(place)].filter(Boolean).join("")),
     block(`Open roles (${place.jobs.length})`, jobsBlock(place)),
     // The verdict: the only thing in the run a person wrote, verbatim, because a
@@ -10615,7 +10616,7 @@ function detail(place, columns, brief, ev, dossier) {
         place.contacts.people.map((p) => `<span class="c">${esc(p.value)}${p.role ? ` \u2014 ${esc(p.role)}` : ""} ${cite(place, p.from, p.value, ev)}</span>`).join("")
       ].join("")
     ),
-    block("Identifiers", legalIdBlock(place)),
+    block("Identifiers", legalIdBlock(place, ev)),
     block(
       "Where",
       [streetLine(place.address), place.address.codePostal, place.address.commune, place.address.pays].filter(Boolean).map(esc).join(", ") + (typeof place.lat === "number" ? ` <span class="src">${place.lat.toFixed(5)}, ${place.lon?.toFixed(5)}</span>` : "")
