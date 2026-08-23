@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [3.4.0](https://github.com/maxgfr/ultraprospect/compare/v3.3.1...v3.4.0) (2026-08-23)
+
+
+### Bug Fixes
+
+* **html:** the page bound its script to the Coverage table, so nothing responded ([056704c](https://github.com/maxgfr/ultraprospect/commit/056704c2cd7de636778decc9b01157552bd5ebd8))
+
+
+### Features
+
+* **html:** pool every opening into one list instead of a count per company ([a180bda](https://github.com/maxgfr/ultraprospect/commit/a180bda27c0e8ad32096ab4c09d0f32ae32e226c))
+
 ## [3.3.1](https://github.com/maxgfr/ultraprospect/compare/v3.3.0...v3.3.1) (2026-08-23)
 
 
