@@ -107,6 +107,7 @@ ultraprospect scan --where "Berlin" --no-registry             # skip the registe
 ultraprospect match --run <dir> --apply verdicts.json         # fold your adjudication back in
 ultraprospect resolve --run <dir> --queries                   # the queries for YOU to search
 ultraprospect resolve --run <dir> --web-results hits.json     # ingest your hits, fetch, corroborate
+ultraprospect resolve --run <dir> --only <id,id,id>           # aim the lane: the ids you care about, not the first N
 ultraprospect enrich --run <dir> --tier 1                     # home + legal notice on every site
 ultraprospect enrich --run <dir> --tier 2 --limit 20          # a page per role + the ATS APIs
 ultraprospect score --run <dir>                               # rank by measured signals
@@ -196,6 +197,15 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    only if the page carries the company's registration number, its street address or the
    distinctive part of its name; a domain that ranked first and corroborates
    nothing is recorded as `unverified`, never as the website.
+
+   **Aim the lane on a big territory.** It is sequential and fetches per place,
+   so a two-thousand-place sweep is a long run. `--limit` takes a PREFIX of the
+   file; `--only <ids>` takes the places you actually want, which is what you
+   need when the ones worth searching for are scattered through the sweep — the
+   IT companies in a city of offices, the manufacturers in a mixed high street.
+   Read `category` (and `registry.activityCode`, where a register answered) out
+   of `places.json` to pick them. `--only` narrows `--queries` too, so a fanned
+   out worklist matches the fold that follows it.
 
    With many places, fan it out: `orchestrate --run <dir> --phase resolve`.
 

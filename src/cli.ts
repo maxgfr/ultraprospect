@@ -50,7 +50,7 @@ import {
   unreadableSnapshots,
   type SnapshotSource,
 } from "./snapshot.js";
-import { buildResolveTodo, needsResolving, runResolve, type WebHit } from "./resolve.js";
+import { buildResolveTodo, resolveTargets, runResolve, type WebHit } from "./resolve.js";
 import { newPageStore } from "./pages.js";
 import { enrichable, persistEnrich, runEnrich } from "./enrich.js";
 import { applyFit, ranked, scoreAll } from "./score.js";
@@ -231,6 +231,9 @@ WEBSITE DISCOVERY (resolve)
   --web-results <file>   Hits from your own WebSearch: [{url,title,snippet,placeId?}]. "-" reads stdin.
   --engine-search        Fall back to the keyless engines: every query, pooled and rank-fused.
   --limit <n>            Only resolve this many places.
+  --only <ids>           Resolve just these place ids, comma-separated. --limit takes a
+                         prefix; this takes the ones you actually care about. Narrows
+                         --queries too, so the fanned-out worklist matches the fold.
 
 ENRICHMENT (enrich)
   --tier <1|2>           1: home + legal notice on every site. 2: a page per role + the ATS APIs.
@@ -723,7 +726,8 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
   const runDir = resolveRun(values.run);
   const places = readPlaces(runDir);
   const limit = values.limit ? clampInt(values.limit, 1, 100_000, 50) : undefined;
-  const targets = needsResolving(places).slice(0, limit ?? Number.POSITIVE_INFINITY);
+  const selection = { only: list(values.only), limit };
+  const targets = resolveTargets(places, selection);
 
   // The queries lane: the engine sizes the sweep, the agent runs its own
   // WebSearch, and the hits come back through --web-results. The engine never
@@ -733,8 +737,8 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
     // most OSM nodes have no addr:city, and a bare shop name is not a query.
     const manifest = requireManifest(runDir);
     const town = shortLabel(manifest.target.label);
-    const todo = buildResolveTodo(places, town, manifest.target.countryCode);
-    const plan = limit ? todo.items.slice(0, limit) : todo.items;
+    const todo = buildResolveTodo(places, town, manifest.target.countryCode, selection);
+    const plan = todo.items;
     // Written as a worklist, not just printed: that is what makes the lane
     // fannable by `orchestrate`, and website discovery is the stage that
     // decides whether a run has any content at all.
@@ -787,7 +791,7 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
     town: shortLabel(runManifest.target.label),
     countryCode: runManifest.target.countryCode,
     lang: values.lang,
-    limit,
+    ...selection,
     useEngineSearch: bools.has("engine-search"),
     onNote: (n) => say(`  ${n}`),
     onProgress: (done, total, name) => {
