@@ -858,6 +858,11 @@ async function cmdEnrich(values: Record<string, string>, bools: ReadonlySet<stri
     roleFilter: list(values.roles),
     termLexicon: list(values.terms),
     termRoles: list(values["terms-on"]) as PageRole[] | undefined,
+    // From the run's own manifest, so the role labels that name a person are
+    // the ones this territory's sites are written in — and so the town is
+    // never mistaken for a surname.
+    countryCode: requireManifest(runDir).target.countryCode,
+    town: shortLabel(requireManifest(runDir).target.label),
     maxPages: values["max-pages"] ? clampInt(values["max-pages"], 1, 40, 9) : undefined,
     concurrency: values.concurrency ? clampInt(values.concurrency, 1, 12, 4) : undefined,
     onNote: (n) => say(`  ${n}`),

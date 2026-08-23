@@ -8642,6 +8642,210 @@ async function fetchAllBoards(boards) {
   });
 }
 
+// src/people.ts
+var PER_PAGE2 = 12;
+var ROLES = {
+  de: [
+    "Vertreten durch",
+    "Gesch\xE4ftsf\xFChrerin",
+    "Gesch\xE4ftsf\xFChrer",
+    "Gesch\xE4ftsleitung",
+    "Vorstandsvorsitzender",
+    "Vorstand",
+    "Inhaberin",
+    "Inhaber",
+    "Prokuristin",
+    "Prokurist",
+    "Gr\xFCnderin",
+    "Gr\xFCnder",
+    "Verantwortlich f\xFCr den Inhalt",
+    "Ansprechpartnerin",
+    "Ansprechpartner",
+    "Leiterin",
+    "Leiter"
+  ],
+  fr: [
+    "Repr\xE9sent\xE9e par",
+    "Directrice g\xE9n\xE9rale",
+    "Directeur g\xE9n\xE9ral",
+    "G\xE9rante",
+    "G\xE9rant",
+    "Pr\xE9sidente",
+    "Pr\xE9sident",
+    "Fondatrice",
+    "Fondateur",
+    "Responsable de la publication",
+    "Responsable"
+  ],
+  es: ["Administradora", "Administrador", "Directora general", "Director general", "Gerente", "Fundadora", "Fundador", "Responsable"],
+  it: ["Amministratore delegato", "Amministratore", "Direttore", "Titolare", "Fondatore"],
+  nl: ["Vertegenwoordigd door", "Bestuurder", "Zaakvoerder", "Directeur", "Oprichter"],
+  pt: ["Administrador", "Diretor", "Gerente", "Fundador"],
+  pl: ["Prezes zarz\u0105du", "Prezes", "Dyrektor", "W\u0142a\u015Bciciel"],
+  cs: ["Jednatel", "\u0158editel", "Majitel"],
+  da: ["Direkt\xF8r", "Indehaver", "Stifter"],
+  sv: ["Verkst\xE4llande direkt\xF6r", "Grundare", "\xC4gare"],
+  fi: ["Toimitusjohtaja", "Perustaja", "Omistaja"],
+  no: ["Daglig leder", "Gr\xFCnder", "Eier"]
+};
+var NEUTRAL_ROLES = [
+  "Chief Executive Officer",
+  "Chief Technology Officer",
+  "Chief Operating Officer",
+  "Chief Financial Officer",
+  "Managing Director",
+  // "Head of X" is how a team page names the person who runs a function, in
+  // English, on sites in every language. The label is kept at "Head of" — what
+  // follows is the department, and inventing a canonical department name from
+  // it would be a taxonomy this tool does not have.
+  "Head of",
+  "Co-Founder",
+  "Cofounder",
+  "Founder",
+  "Owner",
+  "Partner",
+  "CEO",
+  "CTO",
+  "COO",
+  "CFO",
+  "CMO"
+];
+var LANGUAGE_OF = {
+  de: "de",
+  at: "de",
+  ch: "de",
+  li: "de",
+  fr: "fr",
+  be: "fr",
+  lu: "fr",
+  mc: "fr",
+  es: "es",
+  it: "it",
+  nl: "nl",
+  pt: "pt",
+  pl: "pl",
+  cz: "cs",
+  dk: "da",
+  se: "sv",
+  fi: "fi",
+  no: "no"
+};
+function rolesFor(countryCode) {
+  const lang = LANGUAGE_OF[(countryCode ?? "").toLowerCase()];
+  const local = lang ? ROLES[lang] ?? [] : [];
+  return [...local, ...NEUTRAL_ROLES].sort((a, b) => b.length - a.length);
+}
+var LEGAL_FORM = /\b(gmbh|mbh|ug|ag|kg|ohg|gbr|kgaa|e\.?\s?k|e\.?\s?v|ltd|limited|llc|inc|corp|plc|llp|sas|sasu|sarl|sa|sci|eurl|bv|nv|cv|oy|oyj|ab|as|asa|aps|a\/s|spa|srl|snc|sl|slu|sp\.?\s?z\.?\s?o\.?\s?o|s\.?r\.?o|a\.?s|d\.?o\.?o|oü|as|zrt|kft)\b/i;
+var FURNITURE = new Set(
+  [
+    "impressum",
+    "kontakt",
+    "datenschutz",
+    "datenschutzerkl\xE4rung",
+    "team",
+    "karriere",
+    "jobs",
+    "home",
+    "startseite",
+    "unternehmen",
+    "leistungen",
+    "mentions",
+    "l\xE9gales",
+    "contact",
+    "accueil",
+    "\xE9quipe",
+    "aviso",
+    "legal",
+    "privacy",
+    "imprint",
+    "about",
+    "careers",
+    "services",
+    "products",
+    "news",
+    "blog",
+    "cookie",
+    "cookies",
+    "sitemap",
+    "newsletter",
+    "telefon",
+    "telephone",
+    "email",
+    "e-mail",
+    "fax",
+    "adresse",
+    "address",
+    "stra\xDFe",
+    "strasse",
+    "street",
+    "postfach",
+    "gesch\xE4ftsf\xFChrer",
+    "vorstand",
+    "inhaber",
+    "g\xE9rant",
+    "director",
+    "manager",
+    "lead",
+    "bord",
+    "handel"
+  ].map((s) => s.toLowerCase())
+);
+var PARTICLES = /* @__PURE__ */ new Set(["von", "van", "de", "der", "den", "del", "della", "di", "da", "dos", "du", "la", "le", "el", "bin", "ter", "ten", "af", "zu"]);
+var LETTERS = "A-Za-z\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0141\u0142\u015A\u015B\u017B\u017C\u0179\u017A\u0106\u0107\u0143\u0144\u0104\u0105\u0118\u0119\xD6\xF6\xC4\xE4\xDC\xFC\xDF\xC5\xE5\xD8\xF8\xC6\xE6\xC7\xE7";
+var TOKEN = new RegExp(`^[${LETTERS}][${LETTERS}'\u2019.-]*$`);
+function isName(raw, opts) {
+  const s = raw.trim().replace(/[.,;:•·|–—-]+$/, "").trim();
+  if (!s || s.length < 4 || s.length > 70) return false;
+  if (/[0-9@/\\]/.test(s)) return false;
+  if (LEGAL_FORM.test(s)) return false;
+  const tokens = s.split(/\s+/);
+  if (tokens.length < 2 || tokens.length > 4) return false;
+  if (tokens.every((t) => t === t.toUpperCase() && t.length > 1)) return false;
+  for (const t of tokens) {
+    if (!TOKEN.test(t)) return false;
+    const lower = t.toLowerCase();
+    if (FURNITURE.has(lower)) return false;
+    if (!PARTICLES.has(lower) && t[0] !== t[0].toUpperCase()) return false;
+  }
+  const norm = (x) => x.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (opts.town && norm(s).includes(norm(opts.town))) return false;
+  if (opts.companyName) {
+    const company = new Set(
+      norm(opts.companyName).split(" ").filter((w) => w.length > 2 && !LEGAL_FORM.test(w))
+    );
+    const overlap = tokens.filter((t) => company.has(norm(t))).length;
+    if (overlap >= Math.min(2, company.size) && company.size > 0) return false;
+  }
+  return true;
+}
+function extractPeople(text2, opts = {}) {
+  const roles = rolesFor(opts.countryCode);
+  const found = [];
+  const seen = /* @__PURE__ */ new Set();
+  const add = (value, role) => {
+    const clean = value.trim().replace(/[.,;:•·|–—-]+$/, "").trim();
+    const key = clean.toLowerCase();
+    if (seen.has(key) || found.length >= PER_PAGE2) return;
+    seen.add(key);
+    found.push({ value: clean, role });
+  };
+  for (const role of roles) {
+    const escaped = role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    for (const m of text2.matchAll(new RegExp(`${escaped}\\s*[:\uFF1A]\\s*([^\\n]{3,120})`, "gi"))) {
+      for (const candidate of m[1].split(/\s*(?:,|;|\bund\b|\band\b|&|\bet\b|\by\b)\s*/i)) {
+        if (isName(candidate, opts)) add(candidate, role);
+      }
+    }
+    for (const m of text2.matchAll(new RegExp(`(^|\\n)\\s*([^\\n]{4,70})\\s*\\n\\s*[^\\n]{0,20}${escaped}`, "gi"))) {
+      if (isName(m[2], opts)) add(m[2], role);
+    }
+  }
+  return found;
+}
+function peopleFrom(text2, pageId, opts = {}) {
+  return extractPeople(text2, opts).map((p) => ({ value: p.value, role: p.role, from: pageId, lane: "web" }));
+}
+
 // src/signals.ts
 var ROLE_PATTERNS = [
   {
@@ -8988,10 +9192,12 @@ async function enrichOne(runDir, place, store, opts) {
     place.contacts.emails.push(...extractEmails(page.text, page.html ?? "", page.record.id));
     place.contacts.phones.push(...extractPhones(page.html ?? "", page.record.id));
     place.contacts.socials.push(...extractSocials(page.html ?? "", page.record.id));
+    place.contacts.people.push(...peopleFrom(page.text, page.record.id, { countryCode: opts.countryCode, companyName: place.name, town: opts.town }));
   }
   place.contacts.emails = uniqueBy(place.contacts.emails, (e) => e.value);
   place.contacts.phones = uniqueBy(place.contacts.phones, (p) => p.value);
   place.contacts.socials = uniqueBy(place.contacts.socials, (s) => s.value);
+  place.contacts.people = uniqueBy(place.contacts.people, (p) => p.value.toLowerCase());
   place.jobs = jobs;
   place.pages = [.../* @__PURE__ */ new Set([...place.pages, ...fetched.map((f) => f.record.id)])];
   place.signals = buildSignals({
@@ -10327,7 +10533,8 @@ function sizeAndShape(place) {
   }
   if (s.officers.length) {
     const named = [...new Set(s.officers.map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" \u2014 ")))];
-    bits.push(`<span class="c">officers ${esc(named.join("; "))}</span>`);
+    const when = s.asOf ? ` <span class="src">as filed with ${esc(s.connectorId)}, ${esc(s.asOf.slice(0, 10))} \u2014 who held the post then, not necessarily now</span>` : ` <span class="src">as filed with ${esc(s.connectorId)}</span>`;
+    bits.push(`<span class="c">officers ${esc(named.join("; "))}${when}</span>`);
   }
   if (place.registryEvidence) {
     const ev = place.registryEvidence;
@@ -12468,6 +12675,11 @@ async function cmdEnrich(values, bools) {
     roleFilter: list(values.roles),
     termLexicon: list(values.terms),
     termRoles: list(values["terms-on"]),
+    // From the run's own manifest, so the role labels that name a person are
+    // the ones this territory's sites are written in — and so the town is
+    // never mistaken for a surname.
+    countryCode: requireManifest(runDir).target.countryCode,
+    town: shortLabel(requireManifest(runDir).target.label),
     maxPages: values["max-pages"] ? clampInt(values["max-pages"], 1, 40, 9) : void 0,
     concurrency: values.concurrency ? clampInt(values.concurrency, 1, 12, 4) : void 0,
     onNote: (n) => say(`  ${n}`),

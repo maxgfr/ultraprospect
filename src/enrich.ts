@@ -23,6 +23,7 @@
 import { fetchSitemap, isAllowed, mapLimit, fetchRobots } from "./engine.js";
 import { detectBoards, fetchAllBoards, type AtsBoard } from "./ats.js";
 import { fetchPage, type FetchedPage, type PageStore } from "./pages.js";
+import { peopleFrom } from "./people.js";
 import { buildSignals, extractEmails, extractPhones, extractSocials, roleOf, sameOriginLinks } from "./signals.js";
 import type { JobPosting, PageRecord, PageRole, Place } from "./types.js";
 import { requireManifest, writePlaces, writeRunManifest } from "./run.js";
@@ -79,6 +80,15 @@ export interface EnrichOptions {
   termLexicon?: readonly string[];
   /** Page roles the lexicon may be read on. Defaults to careers. */
   termRoles?: readonly PageRole[];
+  /**
+   * The run's country, which decides whose role labels name a person.
+   *
+   * "Geschäftsführer" marks the person beside it in Germany and nothing at all
+   * in Spain. Same table shape as `legalNoticeTerms`.
+   */
+  countryCode?: string;
+  /** The run's territory, so a district is never read as somebody's surname. */
+  town?: string;
   /** How many pages a tier-2 walk may fetch per site. */
   maxPages?: number;
   /** Sites to work on concurrently. Per-HOST pacing is separate and always on. */
@@ -226,10 +236,16 @@ async function enrichOne(
     place.contacts.emails.push(...extractEmails(page.text, page.html ?? "", page.record.id));
     place.contacts.phones.push(...extractPhones(page.html ?? "", page.record.id));
     place.contacts.socials.push(...extractSocials(page.html ?? "", page.record.id));
+    // EVERY page, not a whitelist of page roles: the discipline is that a name
+    // is only taken when a role label sits beside it, so the page does not have
+    // to be trusted. The company and the town are passed in because both are
+    // capitalised word pairs that a naive reading would file as people.
+    place.contacts.people.push(...peopleFrom(page.text, page.record.id, { countryCode: opts.countryCode, companyName: place.name, town: opts.town }));
   }
   place.contacts.emails = uniqueBy(place.contacts.emails, (e) => e.value);
   place.contacts.phones = uniqueBy(place.contacts.phones, (p) => p.value);
   place.contacts.socials = uniqueBy(place.contacts.socials, (s) => s.value);
+  place.contacts.people = uniqueBy(place.contacts.people, (p) => p.value.toLowerCase());
   place.jobs = jobs;
   place.pages = [...new Set([...place.pages, ...fetched.map((f) => f.record.id)])];
   place.signals = buildSignals({
