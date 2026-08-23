@@ -11979,7 +11979,7 @@ CHANGE (watch)
   --since <dir>          The earlier run to compare against.
 
 FAN-OUT (orchestrate)
-  --phase <name>         Emit just one phase: match or dossier.
+  --phase <name>         Emit just one phase: resolve, match or dossier.
   --eco                  Emit only the RUNBOOK and the contracts \u2014 the sequential path.
   --list                 Report which phases are ready, as JSON, and emit nothing.
 
