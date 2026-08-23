@@ -1,10 +1,15 @@
 // The page: one file, no requests, everything the run knows.
 //
-// THE PAGE MAKES NO REQUESTS. No tiles, no CDN, no font, no analytics. The map
-// is projected SVG points drawn from coordinates already in the run. Partly
+// THE PAGE MAKES NO REQUESTS. No tiles, no CDN, no font, no analytics. Partly
 // that is so the file works from a USB stick in a meeting room, and partly
 // because a page about who a company's prospects are should not phone anybody
 // while it is being read.
+//
+// There is no map. There was one — projected SVG points, no tiles, no network —
+// and it was removed rather than improved, because points on white with no
+// coastline and no street tell a prospector nothing they can act on. A basemap
+// worth reading needs tiles, and tiles need the network this page refuses. The
+// coordinates are still on every row.
 //
 // EVERY ROW OPENS. The table is for scanning; the panel underneath each row is
 // where the run actually lives — the verdict somebody wrote, the score broken
@@ -54,51 +59,6 @@ function hostOf(url: string): string {
 
 /** How many rows the table holds before a browser starts to struggle. */
 export const HTML_ROW_CAP = 2000;
-
-/**
- * The map, as SVG points.
- *
- * An equirectangular projection with a cos(lat) correction, which is accurate
- * enough at the scale of a town and needs no library, no tiles and no network.
- * A real basemap would be prettier and would make the page phone a tile server
- * every time somebody opens it.
- *
- * Each point carries the index of its row, so clicking a dot opens that
- * company's panel instead of only showing a tooltip.
- */
-function mapSvg(order: readonly Place[], manifest: RunManifest): string {
-  const pts = order.map((p, i) => ({ p, i })).filter(({ p }) => typeof p.lat === "number" && typeof p.lon === "number");
-  if (pts.length === 0) return "";
-  const lats = pts.map(({ p }) => p.lat!);
-  const lons = pts.map(({ p }) => p.lon!);
-  const [s, n] = [Math.min(...lats), Math.max(...lats)];
-  const [w, e] = [Math.min(...lons), Math.max(...lons)];
-  const midLat = (s + n) / 2;
-  const kx = Math.cos((midLat * Math.PI) / 180);
-  const width = 900;
-  const spanX = Math.max(1e-6, (e - w) * kx);
-  const spanY = Math.max(1e-6, n - s);
-  const height = Math.max(220, Math.min(620, Math.round((width * spanY) / spanX)));
-  const x = (lon: number) => ((lon - w) * kx * (width - 24)) / spanX + 12;
-  const y = (lat: number) => height - 12 - ((lat - s) * (height - 24)) / spanY;
-
-  const max = Math.max(1, ...pts.map(({ p }) => p.score?.total ?? 0));
-  const circles = pts
-    .map(({ p, i }) => {
-      const t = (p.score?.total ?? 0) / max;
-      const r = 2.5 + t * 5;
-      const fit = p.score?.fit;
-      const cls = fit === "strong" || fit === "possible" ? `pt ${fit}` : fit === "no" ? "pt no" : p.website?.confidence === "corroborated" ? "pt sited" : "pt";
-      const hiring = p.signals?.isHiring === true ? ` — ${p.signals.openRoles} open role(s)` : "";
-      return `<circle class="${cls}" data-i="${i}" cx="${x(p.lon!).toFixed(1)}" cy="${y(p.lat!).toFixed(1)}" r="${r.toFixed(1)}"><title>${esc(p.name)} — ${p.score?.total ?? 0}${esc(hiring)}</title></circle>`;
-    })
-    .join("");
-
-  return `<figure class="map">
-<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Every company in ${esc(manifest.target.label)}, positioned by coordinate and sized by score">${circles}</svg>
-<figcaption>${pts.length} located companies. Larger is a higher measured score. <b class="k strong"></b> judged a strong fit · <b class="k possible"></b> possible · <b class="k sited"></b> a corroborated website · <b class="k plain"></b> everything else. Click a point to open its row.</figcaption>
-</figure>`;
-}
 
 const collapse = (s: string): string => s.replace(/\s+/g, " ").trim();
 
@@ -680,16 +640,6 @@ h1{font-size:1.7rem;margin:0 0 .25rem;letter-spacing:-.01em}
 .cov{border:1px solid var(--line);border-radius:8px;padding:.6rem .9rem;margin:0 0 1.25rem;background:var(--soft)}
 .cov summary{cursor:pointer;font-weight:600}
 .cov .scroll{margin-top:.6rem;background:var(--bg)}
-.map{margin:0 0 1.25rem}
-.map svg{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;background:transparent}
-.map figcaption{color:var(--muted);font-size:.82rem;margin-top:.4rem}
-circle.pt{fill:var(--pt);opacity:.85;cursor:pointer}
-circle.sited{fill:var(--sited);opacity:.75}
-circle.possible{fill:var(--possible);opacity:.95}
-circle.strong{fill:var(--strong);opacity:.95}
-circle.no{fill:var(--no);opacity:.5}
-b.k{display:inline-block;width:.62rem;height:.62rem;border-radius:50%;background:var(--pt);vertical-align:baseline}
-b.k.strong{background:var(--strong)}b.k.possible{background:var(--possible)}b.k.sited{background:var(--sited)}
 .tools{display:flex;gap:.5rem;align-items:center;margin:0 0 .5rem;flex-wrap:wrap}
 #q{flex:1 1 18rem;min-width:12rem;padding:.5rem .7rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
 .chip{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:999px;padding:.35rem .75rem;font:inherit;font-size:.85rem;cursor:pointer}
@@ -766,7 +716,6 @@ footer li{margin:.1rem 0}
 ${banners.join("\n")}
 ${statCards(s, manifest)}
 ${coverageTable(manifest, s)}
-${mapSvg(visible, manifest)}
 ${openingsSection(order)}
 <div class="tools">
 <input id="q" type="search" placeholder="Filter — name, legal name, register id, activity, town, domain, verdict" autocomplete="off" aria-label="Filter the table">
@@ -846,18 +795,6 @@ ${
     var b=e.target.closest ? e.target.closest(".tog") : null;
     if(!b) return;
     open(b.parentNode.parentNode);
-  });
-
-  // A point on the map is a row. Clicking one opens it rather than only
-  // naming it, which is the difference between a picture and an index.
-  [].forEach.call(document.querySelectorAll("circle[data-i]"), function(dot){
-    dot.addEventListener("click", function(){
-      var r=document.getElementById("r"+dot.dataset.i);
-      if(!r) return;
-      if(r.hidden){ if(q) q.value=""; [].forEach.call(document.querySelectorAll(".chip"), function(ch){ ch.setAttribute("aria-pressed","false"); on[ch.dataset.facet]=false; }); apply(); }
-      open(r, true);
-      r.scrollIntoView({block:"center"});
-    });
   });
 
   var heads=[].slice.call(document.querySelectorAll("th[data-sort]"));

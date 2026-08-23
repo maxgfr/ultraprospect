@@ -139,16 +139,20 @@ describe("applyFit", () => {
 });
 
 describe("ranked", () => {
-  it("puts the agent's verdict ahead of the measurement", () => {
+  it("ranks by the measured score, not by the verdict", () => {
+    // The verdict used to come first, which produced a column of scores that
+    // read 67, 65, 78, 77 down the page — sorted, but visibly not by the number
+    // beside it. The measurement is the one column nobody had to be trusted
+    // for, so it is the one that orders the list.
     const judged = place({ id: "a", score: { total: 5, parts: {}, fit: "strong" } });
     const measured = place({ id: "b", score: { total: 90, parts: {} } });
-    expect(ranked([measured, judged]).map((p) => p.id)).toEqual(["a", "b"]);
+    expect(ranked([measured, judged]).map((p) => p.id)).toEqual(["b", "a"]);
   });
 
-  it("falls back to the measured total within the same verdict", () => {
-    const lo = place({ id: "a", score: { total: 5, parts: {}, fit: "possible" } });
-    const hi = place({ id: "b", score: { total: 40, parts: {}, fit: "possible" } });
-    expect(ranked([lo, hi]).map((p) => p.id)).toEqual(["b", "a"]);
+  it("breaks a tie on the verdict, so judgement still counts for something", () => {
+    const judged = place({ id: "a", score: { total: 40, parts: {}, fit: "strong" } });
+    const unjudged = place({ id: "b", score: { total: 40, parts: {} } });
+    expect(ranked([unjudged, judged]).map((p) => p.id)).toEqual(["a", "b"]);
   });
 
   it("ranks an explicit `no` below an unjudged place", () => {

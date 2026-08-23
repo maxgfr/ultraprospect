@@ -206,22 +206,30 @@ export function applyFit(places: Place[], verdicts: readonly FitVerdict[]): Appl
 }
 
 /**
- * Rank order: the agent's verdict first when there is one, then the measurement.
+ * Rank order: the measured score, with one exception and one tiebreak.
  *
- * An explicit `no` sits BELOW an unjudged place (-1), not above it. A company
- * somebody read and rejected should not outrank one nobody has looked at yet —
- * otherwise working through the list actively promotes the rejects, and the
- * highest-scoring rows become the ones already ruled out.
+ * The score leads because it is the only column nobody had to be trusted for.
+ * Ordering by verdict first produced a page whose Score column read 67, 65, 78,
+ * 77 — correctly sorted by something, and visibly not by the number printed
+ * beside it, which reads as a broken table rather than as a second criterion.
+ *
+ * THE EXCEPTION: an explicit `no` sinks below everything, however well it
+ * scored. A company somebody read and rejected should not outrank one nobody
+ * has looked at yet — otherwise working down the list actively promotes the
+ * rejects. That was true when the verdict led and it is still true now.
+ *
+ * THE TIEBREAK: at equal score, a judged place comes first, so reading and
+ * judging a company still moves it.
  */
 const FIT_RANK: Record<string, number> = { strong: 3, possible: 2, weak: 1, no: -2 };
 /** A place with no verdict yet: better than a rejection, worse than a maybe. */
 const UNJUDGED = -1;
 
 export function ranked(places: readonly Place[]): Place[] {
+  const rank = (p: Place) => (p.score?.fit ? FIT_RANK[p.score.fit]! : UNJUDGED);
   return [...places].sort((a, b) => {
-    const fa = a.score?.fit ? FIT_RANK[a.score.fit]! : UNJUDGED;
-    const fb = b.score?.fit ? FIT_RANK[b.score.fit]! : UNJUDGED;
-    if (fa !== fb) return fb - fa;
-    return (b.score?.total ?? 0) - (a.score?.total ?? 0);
+    const rejected = (p: Place) => (p.score?.fit === "no" ? 1 : 0);
+    if (rejected(a) !== rejected(b)) return rejected(a) - rejected(b);
+    return (b.score?.total ?? 0) - (a.score?.total ?? 0) || rank(b) - rank(a);
   });
 }
