@@ -224,7 +224,7 @@ function siteBlock(place: Place): string {
   return bits.join("");
 }
 
-function legalIdBlock(place: Place): string {
+function legalIdBlock(place: Place, ev: Evidence): string {
   if (!place.legalIds?.length) return "";
   return place.legalIds
     .map((x) => {
@@ -232,7 +232,7 @@ function legalIdBlock(place: Place): string {
       // authority said this number is live and refused to say whose it is.
       const note = x.note ? ` — ${esc(x.note)}` : "";
       const who = x.authority ? ` (${esc(x.authority)})` : "";
-      return `<span class="c"><b>${esc(x.kind)} ${esc(x.value)}</b> <span class="tag ${esc(x.status)}">${esc(x.status)}</span>${who}${note}${x.from ? ` <span class="src">[${esc(x.from)}]</span>` : ""}</span>`;
+      return `<span class="c"><b>${esc(x.kind)} ${esc(x.value)}</b> <span class="tag ${esc(x.status)}">${esc(x.status)}</span>${who}${note}${x.from ? ` ${cite(place, x.from, x.value, ev)}` : ""}</span>`;
     })
     .join("");
 }
@@ -402,7 +402,7 @@ function whatTheyDo(place: Place): string {
   return bits.join("");
 }
 
-function sizeAndShape(place: Place): string {
+function sizeAndShape(place: Place, ev: Evidence): string {
   const s = place.registry;
   if (!s) return "";
   const bits: string[] = [];
@@ -433,9 +433,9 @@ function sizeAndShape(place: Place): string {
     bits.push(`<span class="c">officers ${esc(named.join("; "))}${when}</span>`);
   }
   if (place.registryEvidence) {
-    const ev = place.registryEvidence;
+    const ev2 = place.registryEvidence;
     bits.push(
-      `<span class="c">attached <b>${esc(ev.mode)} / ${esc(ev.how)}</b>${ev.legalId ? ` ${esc(ev.legalId)}` : ""}${ev.from ? ` <span class="src">[${esc(ev.from)}]</span>` : ""}</span>`,
+      `<span class="c">attached <b>${esc(ev2.mode)} / ${esc(ev2.how)}</b>${ev2.legalId ? ` ${esc(ev2.legalId)}` : ""}${ev2.from ? ` ${cite(place, ev2.from, ev2.legalId ?? "", ev)}` : ""}</span>`,
     );
   }
   if (s.asOf) bits.push(`<span class="c warnc">as of ${esc(s.asOf)} — from a bulk snapshot, not from asking the register</span>`);
@@ -451,7 +451,7 @@ function detail(place: Place, columns: number, brief: Brief, ev: Evidence, dossi
     // labelled as written rather than measured.
     block("Written dossier", dossier ? `<div class="dossier">${mdLite(dossier)}</div>` : ""),
     block("What they do", whatTheyDo(place)),
-    block("Size and shape", sizeAndShape(place)),
+    block("Size and shape", sizeAndShape(place, ev)),
     block("Signals", [hiring, siteBlock(place)].filter(Boolean).join("")),
     block(`Open roles (${place.jobs.length})`, jobsBlock(place)),
     // The verdict: the only thing in the run a person wrote, verbatim, because a
@@ -469,7 +469,7 @@ function detail(place: Place, columns: number, brief: Brief, ev: Evidence, dossi
           .join(""),
       ].join(""),
     ),
-    block("Identifiers", legalIdBlock(place)),
+    block("Identifiers", legalIdBlock(place, ev)),
     block(
       "Where",
       [streetLine(place.address), place.address.codePostal, place.address.commune, place.address.pays].filter(Boolean).map(esc).join(", ") +
