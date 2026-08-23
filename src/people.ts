@@ -218,6 +218,77 @@ const LETTERS = "A-Za-zÀ-ÖØ-öø-ÿŁłŚśŻżŹźĆćŃńĄąĘęÖöÄäÜ
 const TOKEN = new RegExp(`^[${LETTERS}][${LETTERS}'’.-]*$`);
 
 /**
+ * Business nouns that form capitalised pairs and are nobody.
+ *
+ * Measured: "Partner • Corporate Planning Cloud" and "CTO Public Sector" both
+ * sat beside a real role label on a real page. They read exactly like a name
+ * and are a product and a department. Any of these in a token disqualifies the
+ * whole string — a surname lost to this list costs one contact, and a
+ * department shipped as a person costs the reader's trust in every other row.
+ */
+const BUSINESS_NOUN = new Set([
+  "cloud",
+  "sector",
+  "public",
+  "corporate",
+  "planning",
+  "digital",
+  "solutions",
+  "solution",
+  "systems",
+  "system",
+  "group",
+  "consulting",
+  "media",
+  "software",
+  "technology",
+  "technologies",
+  "marketing",
+  "sales",
+  "finance",
+  "support",
+  "service",
+  "services",
+  "development",
+  "management",
+  "operations",
+  "product",
+  "products",
+  "design",
+  "data",
+  "security",
+  "engineering",
+  "international",
+  "global",
+  "partner",
+  "partners",
+  "office",
+  "agency",
+  "studio",
+  "labs",
+  "ventures",
+]);
+
+/**
+ * Anchor text a page wraps a name in, stripped before the name is judged.
+ *
+ * "Gründer: LinkedIn-Profil von Martin Hammer" was observed verbatim. Rejecting
+ * the whole string loses a real person; keeping it ships a contact called
+ * "LinkedIn". An explicit, short list of prefixes is the honest middle: it
+ * recovers the name only where the wrapper is one this file already knows.
+ */
+const LINK_PREFIX = /^(?:\S*-?(?:Profil|Profile)\s+(?:von|of|de)\s+|(?:LinkedIn|Xing|Twitter|Facebook|Instagram|GitHub|Mastodon)\s*[:–-]?\s*)/i;
+
+/** Trim the punctuation and the link furniture a page wraps a name in. */
+function cleanName(raw: string): string {
+  return raw
+    .trim()
+    .replace(LINK_PREFIX, "")
+    .replace(/[.,;:•·|–—-]+$/, "")
+    .trim();
+}
+
+/**
  * Is this string a person's name?
  *
  * Every rule here removed something a real page produced. A false contact is
@@ -225,10 +296,7 @@ const TOKEN = new RegExp(`^[${LETTERS}][${LETTERS}'’.-]*$`);
  * somebody will email it.
  */
 function isName(raw: string, opts: { companyName?: string; town?: string }): boolean {
-  const s = raw
-    .trim()
-    .replace(/[.,;:•·|–—-]+$/, "")
-    .trim();
+  const s = cleanName(raw);
   if (!s || s.length < 4 || s.length > 70) return false;
   if (/[0-9@/\\]/.test(s)) return false;
   if (LEGAL_FORM.test(s)) return false;
@@ -242,7 +310,7 @@ function isName(raw: string, opts: { companyName?: string; town?: string }): boo
   for (const t of tokens) {
     if (!TOKEN.test(t)) return false;
     const lower = t.toLowerCase();
-    if (FURNITURE.has(lower)) return false;
+    if (FURNITURE.has(lower) || BUSINESS_NOUN.has(lower)) return false;
     // Every token starts uppercase, except the particles a surname may carry.
     if (!PARTICLES.has(lower) && t[0] !== t[0]!.toUpperCase()) return false;
   }
@@ -294,10 +362,7 @@ export function extractPeople(text: string, opts: PeopleOptions = {}): FoundPers
   const seen = new Set<string>();
 
   const add = (value: string, role: string) => {
-    const clean = value
-      .trim()
-      .replace(/[.,;:•·|–—-]+$/, "")
-      .trim();
+    const clean = cleanName(value);
     const key = clean.toLowerCase();
     if (seen.has(key) || found.length >= PER_PAGE) return;
     seen.add(key);

@@ -8793,8 +8793,54 @@ var FURNITURE = new Set(
 var PARTICLES = /* @__PURE__ */ new Set(["von", "van", "de", "der", "den", "del", "della", "di", "da", "dos", "du", "la", "le", "el", "bin", "ter", "ten", "af", "zu"]);
 var LETTERS = "A-Za-z\xC0-\xD6\xD8-\xF6\xF8-\xFF\u0141\u0142\u015A\u015B\u017B\u017C\u0179\u017A\u0106\u0107\u0143\u0144\u0104\u0105\u0118\u0119\xD6\xF6\xC4\xE4\xDC\xFC\xDF\xC5\xE5\xD8\xF8\xC6\xE6\xC7\xE7";
 var TOKEN = new RegExp(`^[${LETTERS}][${LETTERS}'\u2019.-]*$`);
+var BUSINESS_NOUN = /* @__PURE__ */ new Set([
+  "cloud",
+  "sector",
+  "public",
+  "corporate",
+  "planning",
+  "digital",
+  "solutions",
+  "solution",
+  "systems",
+  "system",
+  "group",
+  "consulting",
+  "media",
+  "software",
+  "technology",
+  "technologies",
+  "marketing",
+  "sales",
+  "finance",
+  "support",
+  "service",
+  "services",
+  "development",
+  "management",
+  "operations",
+  "product",
+  "products",
+  "design",
+  "data",
+  "security",
+  "engineering",
+  "international",
+  "global",
+  "partner",
+  "partners",
+  "office",
+  "agency",
+  "studio",
+  "labs",
+  "ventures"
+]);
+var LINK_PREFIX = /^(?:\S*-?(?:Profil|Profile)\s+(?:von|of|de)\s+|(?:LinkedIn|Xing|Twitter|Facebook|Instagram|GitHub|Mastodon)\s*[:–-]?\s*)/i;
+function cleanName(raw) {
+  return raw.trim().replace(LINK_PREFIX, "").replace(/[.,;:•·|–—-]+$/, "").trim();
+}
 function isName(raw, opts) {
-  const s = raw.trim().replace(/[.,;:•·|–—-]+$/, "").trim();
+  const s = cleanName(raw);
   if (!s || s.length < 4 || s.length > 70) return false;
   if (/[0-9@/\\]/.test(s)) return false;
   if (LEGAL_FORM.test(s)) return false;
@@ -8804,7 +8850,7 @@ function isName(raw, opts) {
   for (const t of tokens) {
     if (!TOKEN.test(t)) return false;
     const lower = t.toLowerCase();
-    if (FURNITURE.has(lower)) return false;
+    if (FURNITURE.has(lower) || BUSINESS_NOUN.has(lower)) return false;
     if (!PARTICLES.has(lower) && t[0] !== t[0].toUpperCase()) return false;
   }
   const norm = (x) => x.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -8823,7 +8869,7 @@ function extractPeople(text2, opts = {}) {
   const found = [];
   const seen = /* @__PURE__ */ new Set();
   const add = (value, role) => {
-    const clean = value.trim().replace(/[.,;:•·|–—-]+$/, "").trim();
+    const clean = cleanName(value);
     const key = clean.toLowerCase();
     if (seen.has(key) || found.length >= PER_PAGE2) return;
     seen.add(key);
