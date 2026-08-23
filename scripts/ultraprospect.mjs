@@ -10475,8 +10475,8 @@ ${detail(p, COLUMNS, s.brief, quotes, ctx.dossiers?.get(p.id))}`;
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(shortLabel(manifest.target.label || manifest.slug))} \u2014 ultraprospect</title>
 <style>
-:root{--bg:#fff;--fg:#16181d;--muted:#5b6270;--line:#e3e6ec;--soft:#f6f7fa;--accent:#1c6dd0;--warnbg:#fff4e5;--warnfg:#7a4b00;--notebg:#eef4fd;--notefg:#1c4a80;--pt:#9aa3b2;--sited:#1c6dd0;--strong:#0a7d4f;--possible:#b7791f;--no:#c0392b}
-@media (prefers-color-scheme:dark){:root{--bg:#11131a;--fg:#e8eaf0;--muted:#98a0b0;--line:#252a35;--soft:#171a22;--accent:#6aa9ff;--warnbg:#3a2a06;--warnfg:#ffd68a;--notebg:#12233a;--notefg:#a9ccf5;--pt:#4c5566;--sited:#6aa9ff;--strong:#3ddc9a;--possible:#e0b357;--no:#e77f72}}
+:root{--bg:#fff;--fg:#16181d;--muted:#5b6270;--line:#e3e6ec;--soft:#f6f7fa;--accent:#1c6dd0;--warnbg:#fff4e5;--warnfg:#7a4b00;--notebg:#eef4fd;--notefg:#1c4a80;--pt:#6b7688;--sited:#1c6dd0;--strong:#0a7d4f;--possible:#b7791f;--no:#c0392b}
+@media (prefers-color-scheme:dark){:root{--bg:#11131a;--fg:#e8eaf0;--muted:#98a0b0;--line:#252a35;--soft:#171a22;--accent:#6aa9ff;--warnbg:#3a2a06;--warnfg:#ffd68a;--notebg:#12233a;--notefg:#a9ccf5;--pt:#79839a;--sited:#6aa9ff;--strong:#3ddc9a;--possible:#e0b357;--no:#e77f72}}
 *{box-sizing:border-box}
 body{margin:0;padding:2rem 1.25rem 4rem;background:var(--bg);color:var(--fg);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 main{max-width:1240px;margin:0 auto}
@@ -10495,7 +10495,7 @@ h1{font-size:1.7rem;margin:0 0 .25rem;letter-spacing:-.01em}
 .map{margin:0 0 1.25rem}
 .map svg{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;background:transparent}
 .map figcaption{color:var(--muted);font-size:.82rem;margin-top:.4rem}
-circle.pt{fill:var(--pt);opacity:.6;cursor:pointer}
+circle.pt{fill:var(--pt);opacity:.85;cursor:pointer}
 circle.sited{fill:var(--sited);opacity:.75}
 circle.possible{fill:var(--possible);opacity:.95}
 circle.strong{fill:var(--strong);opacity:.95}
