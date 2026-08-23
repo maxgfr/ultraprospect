@@ -195,6 +195,38 @@ const PERSONIO_XML = `<?xml version="1.0" encoding="UTF-8"?>
 </position>
 </workzag-jobs>`;
 
+/** Captured from https://megacad-gmbh.jobs.personio.com/search.json, trimmed to two. */
+const PERSONIO_SEARCH_JSON = [
+  {
+    id: 2505736,
+    name: "Junior Sales Manager / Outbound Sales (m/w/d) – B2B CAD-Software (Hamburg)",
+    employment_type: "Festanstellung",
+    seniority: "Berufseinstieg",
+    keywords: "Sales,CAD,Telefonvertrieb,Outbound,Software,Vertrieb",
+    description: "",
+    office: "Hamburg",
+    offices: ["Hamburg"],
+    schedule: "Vollzeit",
+    category: "3 Interviews",
+    department: "02 Sales",
+    subcompany: "MegaCAD Deutschland GmbH",
+  },
+  {
+    id: 2729221,
+    name: "Werkstudent:in IT (m/w/d)",
+    employment_type: "Praktikum/Werkstudium",
+    seniority: "Studierende/Mitarbeitende im Praktikum/Auszubildende",
+    keywords: "",
+    description: "",
+    office: "Wiesbaden",
+    offices: ["Wiesbaden"],
+    schedule: "Teilzeit",
+    category: "Standard Recruiting",
+    department: "12 IT - OPS",
+    subcompany: "MegaCAD Deutschland GmbH",
+  },
+];
+
 describe("Personio", () => {
   it("maps a position, and takes the position's own <name> rather than a jobDescription's", async () => {
     // The trap: <name> appears twice per position — once as the job title and
@@ -240,7 +272,37 @@ describe("Personio", () => {
     expect(jobs[0]!.title).toBe("Consultant & Entwickler");
   });
 
-  it("returns nothing rather than throwing when the feed 404s", async () => {
+  it("falls back to search.json when the XML feed is not served for that board", async () => {
+    // Measured on a Hamburg run: `megacad-gmbh.jobs.personio.de/xml` and its
+    // `.com` twin both answer 404, while `search.json` answers 200 with four
+    // real openings. Both endpoints exist in the wild — personio-sog serves
+    // BOTH — so a board that 404s on /xml is not a board with no openings, and
+    // reporting it as unreadable hides hiring that is one keyless request away.
+    payloads["megacad-gmbh.jobs.personio.de/search.json"] = PERSONIO_SEARCH_JSON;
+    const jobs = await fetchBoard({ provider: "personio", token: "megacad-gmbh", sourceUrl: "s" });
+    expect(jobs).toHaveLength(2);
+    expect(jobs[0]).toMatchObject({
+      title: "Junior Sales Manager / Outbound Sales (m/w/d) – B2B CAD-Software (Hamburg)",
+      location: "Hamburg",
+      department: "02 Sales",
+      employmentType: "Festanstellung",
+      via: "personio",
+    });
+    expect(jobs[0]!.url).toBe("https://megacad-gmbh.jobs.personio.de/job/2505736");
+  });
+
+  it("prefers the XML feed and does not spend a second request when it answers", async () => {
+    // /xml carries what search.json does not: the canonical employmentType
+    // vocabulary — `freelance`, the one that says a company hires contractors —
+    // and createdAt. It stays the first choice; the fallback is a fallback.
+    bodies["personio-sog.jobs.personio.de/xml"] = PERSONIO_XML;
+    payloads["personio-sog.jobs.personio.de/search.json"] = PERSONIO_SEARCH_JSON;
+    const jobs = await fetchBoard({ provider: "personio", token: "personio-sog", sourceUrl: "s" });
+    expect(jobs.map((j) => j.employmentType)).toEqual(["permanent", "freelance"]);
+    expect(requested.filter((u) => u.includes("search.json"))).toHaveLength(0);
+  });
+
+  it("returns nothing rather than throwing when neither endpoint is served", async () => {
     expect(await fetchBoard({ provider: "personio", token: "nope", sourceUrl: "s" })).toEqual([]);
   });
 });
