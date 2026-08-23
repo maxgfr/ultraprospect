@@ -8259,15 +8259,23 @@ ${pageText}`).toLowerCase();
   }
   return { ok: true, evidence };
 }
-function buildResolveTodo(places, town, countryCode) {
+function buildResolveTodo(places, town, countryCode, selection = {}) {
   return {
     version: 1,
     generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    items: needsResolving(places).map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town, countryCode) }))
+    items: resolveTargets(places, selection).map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town, countryCode) }))
   };
 }
 function needsResolving(places) {
   return places.filter((p) => !p.website || p.website.confidence === "declared");
+}
+function resolveTargets(places, opts = {}) {
+  let targets = needsResolving(places);
+  if (opts.only?.length) {
+    const wanted = new Set(opts.only);
+    targets = targets.filter((p) => wanted.has(p.id));
+  }
+  return opts.limit ? targets.slice(0, opts.limit) : targets;
 }
 function candidateUrlsFor(place, hits) {
   const urls = [];
@@ -8342,7 +8350,7 @@ async function runResolve(runDir, places, store, opts = {}) {
   if (opts.useEngineSearch && locale) note(`resolve: the keyless fallback will search in ${locale}`);
   const shared = sharedAddressesIn(places);
   if (shared.size) note(`resolve: ${shared.size} address(es) hold more than one company in this run \u2014 an address alone will not corroborate a site for those`);
-  const targets = needsResolving(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
+  const targets = resolveTargets(places, opts);
   const grouped = groupHits(targets, opts.webResults ?? []);
   if (opts.webResults?.length) note(`resolve: ${opts.webResults.length} supplied web result(s) attributed to ${grouped.size} place(s)`);
   else note("resolve: no --web-results supplied; only OSM-declared sites and the keyless fallback will be tried");
@@ -11959,6 +11967,9 @@ WEBSITE DISCOVERY (resolve)
   --web-results <file>   Hits from your own WebSearch: [{url,title,snippet,placeId?}]. "-" reads stdin.
   --engine-search        Fall back to the keyless engines: every query, pooled and rank-fused.
   --limit <n>            Only resolve this many places.
+  --only <ids>           Resolve just these place ids, comma-separated. --limit takes a
+                         prefix; this takes the ones you actually care about. Narrows
+                         --queries too, so the fanned-out worklist matches the fold.
 
 ENRICHMENT (enrich)
   --tier <1|2>           1: home + legal notice on every site. 2: a page per role + the ATS APIs.
@@ -12362,12 +12373,13 @@ async function cmdResolve(values, bools) {
   const runDir = resolveRun(values.run);
   const places = readPlaces(runDir);
   const limit = values.limit ? clampInt(values.limit, 1, 1e5, 50) : void 0;
-  const targets = needsResolving(places).slice(0, limit ?? Number.POSITIVE_INFINITY);
+  const selection = { only: list(values.only), limit };
+  const targets = resolveTargets(places, selection);
   if (bools.has("queries")) {
     const manifest2 = requireManifest(runDir);
     const town = shortLabel(manifest2.target.label);
-    const todo = buildResolveTodo(places, town, manifest2.target.countryCode);
-    const plan = limit ? todo.items.slice(0, limit) : todo.items;
+    const todo = buildResolveTodo(places, town, manifest2.target.countryCode, selection);
+    const plan = todo.items;
     writeJson(runDir, "RESOLVE.todo.json", { ...todo, items: plan });
     if (bools.has("json")) out(jsonLine(plan));
     else for (const item of plan) for (const q of item.queries) out(q);
@@ -12407,7 +12419,7 @@ async function cmdResolve(values, bools) {
     town: shortLabel(runManifest.target.label),
     countryCode: runManifest.target.countryCode,
     lang: values.lang,
-    limit,
+    ...selection,
     useEngineSearch: bools.has("engine-search"),
     onNote: (n) => say(`  ${n}`),
     onProgress: (done, total, name) => {

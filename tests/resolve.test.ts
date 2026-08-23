@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyHost, corroborate, groupHits, needsResolving, queriesFor, searchLocaleFor } from "../src/resolve.js";
+import { classifyHost, corroborate, groupHits, needsResolving, queriesFor, resolveTargets, searchLocaleFor } from "../src/resolve.js";
 import type { Place } from "../src/types.js";
 import { rec } from "./factories.js";
 
@@ -298,6 +298,31 @@ describe("needsResolving", () => {
     const declared = place({ id: "2", website: { url: "https://x", confidence: "declared", evidence: ["osm"] } });
     const proven = place({ id: "3", website: { url: "https://y", confidence: "corroborated", evidence: ["P1"] } });
     expect(needsResolving([none, declared, proven]).map((p) => p.id)).toEqual(["1", "2"]);
+  });
+});
+
+describe("resolveTargets", () => {
+  it("selects by id, which is what --limit alone cannot do", () => {
+    // The asymmetry this closes: `enrich` has always taken `--only`, and
+    // `resolve` — the slower lane, and the one the whole run rests on — could
+    // only take the first N in file order. On a territory of two thousand
+    // places that is not a choice, it is a prefix, and the twenty companies
+    // worth searching for are scattered through it.
+    const places = [place({ id: "1" }), place({ id: "2" }), place({ id: "3" }), place({ id: "4" })];
+    expect(resolveTargets(places, { only: ["3", "1"] }).map((p) => p.id)).toEqual(["1", "3"]);
+  });
+
+  it("still refuses a place that already has a corroborated site", () => {
+    // `only` narrows the work; it does not widen it. A site already proven is
+    // not re-resolved just because the caller named it.
+    const proven = place({ id: "1", website: { url: "https://y", confidence: "corroborated", evidence: ["P1"] } });
+    expect(resolveTargets([proven, place({ id: "2" })], { only: ["1", "2"] }).map((p) => p.id)).toEqual(["2"]);
+  });
+
+  it("applies the limit after the selection, like enrich does", () => {
+    const places = [place({ id: "1" }), place({ id: "2" }), place({ id: "3" })];
+    expect(resolveTargets(places, { only: ["2", "3"], limit: 1 }).map((p) => p.id)).toEqual(["2"]);
+    expect(resolveTargets(places, { limit: 2 }).map((p) => p.id)).toEqual(["1", "2"]);
   });
 });
 

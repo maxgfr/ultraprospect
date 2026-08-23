@@ -449,6 +449,8 @@ export interface ResolveOptions {
   lang?: string;
   /** Only work on this many places. */
   limit?: number;
+  /** Only work on these place ids. See `resolveTargets`. */
+  only?: readonly string[];
   /** Fall back to the engine's keyless search when no hits were supplied. */
   useEngineSearch?: boolean;
   onNote?: (note: string) => void;
@@ -475,17 +477,56 @@ export interface ResolveOutcome {
   notes: string[];
 }
 
-/** Places that still need a website, or whose website is only a mapper's claim. */
-export function buildResolveTodo(places: readonly Place[], town?: string, countryCode?: string): ResolveTodo {
+/**
+ * Places that still need a website, or whose website is only a mapper's claim.
+ *
+ * The selection is applied HERE rather than by the caller slicing the result,
+ * because this worklist is what `orchestrate --phase resolve` fans out over. A
+ * todo listing places the fold will then refuse to work on dispatches subagents
+ * at searches nobody will use.
+ */
+export function buildResolveTodo(places: readonly Place[], town?: string, countryCode?: string, selection: ResolveSelection = {}): ResolveTodo {
   return {
     version: 1,
     generatedAt: new Date().toISOString(),
-    items: needsResolving(places).map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town, countryCode) })),
+    items: resolveTargets(places, selection).map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town, countryCode) })),
   };
 }
 
 export function needsResolving(places: readonly Place[]): Place[] {
   return places.filter((p) => !p.website || p.website.confidence === "declared");
+}
+
+/** Which ids the caller narrowed the lane to, and how many of them to take. */
+export interface ResolveSelection {
+  /** Place ids to resolve. Empty or absent means every place that needs one. */
+  only?: readonly string[];
+  /** Ceiling, applied AFTER the selection — the same order `enrich` uses. */
+  limit?: number;
+}
+
+/**
+ * The places this lane will actually work on.
+ *
+ * `only` exists because `limit` alone is not a choice, it is a prefix. This
+ * lane is sequential and fetches per place, so on a territory of any size it
+ * has to be pointed somewhere — and the companies worth pointing it at are
+ * scattered through `places.json` in whatever order the sweep returned. A
+ * Hamburg run holds 2504 offices; the 97 tagged `office=it` are not the first
+ * 97. `enrich` has taken `--only` since it existed; the slower lane, and the
+ * one the whole run rests on, could not be aimed at all.
+ *
+ * Narrowing only ever removes work: a place with a corroborated site is not
+ * re-resolved because the caller named it. That keeps the flag from being a
+ * way to re-run a lane over settled evidence.
+ */
+export function resolveTargets(places: readonly Place[], opts: ResolveSelection = {}): Place[] {
+  let targets = needsResolving(places);
+  if (opts.only?.length) {
+    const wanted = new Set(opts.only);
+    targets = targets.filter((p) => wanted.has(p.id));
+  }
+  return opts.limit ? targets.slice(0, opts.limit) : targets;
 }
 
 function candidateUrlsFor(place: Place, hits: readonly WebHit[]): string[] {
@@ -626,7 +667,7 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
   const shared = sharedAddressesIn(places);
   if (shared.size) note(`resolve: ${shared.size} address(es) hold more than one company in this run — an address alone will not corroborate a site for those`);
 
-  const targets = needsResolving(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
+  const targets = resolveTargets(places, opts);
   const grouped = groupHits(targets, opts.webResults ?? []);
   if (opts.webResults?.length) note(`resolve: ${opts.webResults.length} supplied web result(s) attributed to ${grouped.size} place(s)`);
   else note("resolve: no --web-results supplied; only OSM-declared sites and the keyless fallback will be tried");
