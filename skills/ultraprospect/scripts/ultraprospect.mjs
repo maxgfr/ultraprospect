@@ -10110,6 +10110,8 @@ function citationsOf(place) {
   for (const p of place.contacts.phones) add(p.from, p.value);
   for (const p of place.contacts.people) add(p.from, p.value);
   for (const s of place.contacts.socials) add(s.from, s.value);
+  for (const id of place.legalIds ?? []) add(id.from, id.value);
+  if (place.registryEvidence?.legalId) add(place.registryEvidence.from, place.registryEvidence.legalId);
   const seen = /* @__PURE__ */ new Set();
   return out2.filter((c) => {
     const k = `${c.pageId}\0${c.value}`;
