@@ -49,6 +49,21 @@ be qualified; a registered company with no address on the street cannot be
 visited. The value is the join — and the join is where a tool like this usually
 starts lying, so it is where most of the care went.
 
+Then a third pass reads what the company says about itself. `resolve` finds its
+website and proves it is theirs; `enrich` reads the site and comes back with the
+things you actually call somebody about: **who runs it and what they are called**,
+the published email and phone, the open roles read out of the applicant-tracking
+API rather than guessed from a page, and any words you asked it to look for.
+
+People are found by ANCHORING ON THE ROLE, never on the name. Looking for
+capitalised word pairs finds every street and product on the page; so a name is
+only taken when a job title sits beside it — `Geschäftsführer`, `Gérant`,
+`Head of …` — which is what makes it safe to read every page rather than a
+whitelist. Measured on a Hamburg sweep: `Geschäftsführer • AFFILITIX Services
+GmbH` names a company, `CTO Public Sector` names a department, and
+`Geschäftsführer an Bord, wodurch…` is prose. All three are refused, and the gate
+re-reads every surviving name against the page it came from.
+
 ## What the register lane can actually do, per country
 
 Measured against the live services, and the single most important thing to
@@ -175,6 +190,15 @@ that date, not about today, and the gate will not let one found a present-tense
 claim. That is what makes a seven-year-old German register export usable instead of
 misleading.
 
+**It refuses to link to a register page that does not exist.** A record's
+`sourceUrl` opens THAT record or the connector emits none. Two registers here
+publish no page per company — offeneregister.de is a bulk-file site whose SQL API
+is gone, and VIES is a form with no permalink for a VAT number — so their records
+carry no link and the output says where they came from instead. A gate holds the
+rule across the whole connector table, because "open on the register" landing on
+a homepage is the same kind of empty promise as a search result presented as a
+company's website.
+
 **It refuses to invent a contact.** Every email, phone number and person must
 appear verbatim in a fetched page or an open-data record. No address is ever
 derived from a `firstname.lastname@` pattern — and this is enforced rather than
@@ -224,6 +248,13 @@ documentation says:
   Originates from an Undeclared Automated Tool", and serves a bare
   `name email`. It is the one upstream here that rejects this tool's polite
   identifying string.
+- **Personio serves two public feeds and not every board has both.** The German
+  SME's usual ATS answers `/<token>.jobs.personio.de/xml` on one board and 404s
+  on another — on both its `.de` and `.com` hostnames — while `search.json`
+  answers on both. Reading the 404 as "no openings" reported a company with four
+  live roles as a board that could not be read. `/xml` is still asked first: it
+  carries the canonical `employmentType`, including `freelance`, which is a
+  company saying in a structured field that it hires contractors.
 - **`overpass-api.de` answers a browser User-Agent with HTTP 406** — deliberate
   anti-scraping. And several public Overpass endpoints serve a *regional
   extract* while speaking the same protocol: `overpass.osm.ch` answers a query
@@ -254,14 +285,14 @@ node scripts/ultraprospect.mjs --help
 | `scan` | Sweep OSM over the area, and the register too where one can be swept. |
 | `match --apply` | Fold an adjudication of `MATCH.todo.json` back into the run. |
 | `confirm` | Attach a register identity company by company, where no sweep exists. |
-| `resolve` | Find each company's website and prove it is theirs. |
-| `enrich --tier 1\|2` | Read those sites; tier 2 also reads the openings from the ATS APIs. |
+| `resolve` | Find each company's website and prove it is theirs. `--only <ids>` aims the lane: `--limit` takes a prefix of the sweep, this takes the companies you actually want. |
+| `enrich --tier 1\|2` | Read those sites: what they do, who runs it, how to reach them. Tier 2 also reads the openings from the ATS APIs. |
 | `score` | Rank by measured signals; fold your ICP verdicts in with `--apply`. |
 | `dossier --id` | The grounding packet for one company: fact sheet plus every page, in full. |
 | `check` | The gate. Exit 1 means do not present the output. |
 | `render` | `PROSPECTS.csv`, `prospects.json`, `REPORT.md`, a self-contained `index.html`. |
 | `watch --since` | What moved: who opened, closed, started hiring, gained a site. |
-| `orchestrate` | Fan the search and judgement phases out across subagents. |
+| `orchestrate` | Fan the search and judgement phases out across subagents, each phase on the model its failure mode deserves — see below. |
 | `mcp` | Serve it over MCP: where, ingest, scan, places, confirm, enrich, score, dossier, check, render, watch, doctor. The two `--apply` folds and `resolve` stay CLI-only, on purpose. |
 | `doctor` | Check every upstream. `--country` narrows the register probes. |
 
@@ -300,6 +331,23 @@ scheme.
 
 `--help` is the full surface and a build gate keeps it in sync with the code.
 
+## Fanning it out
+
+Three phases spread across subagents — `resolve`, `match` and `dossier`. Each
+gets the model its failure mode deserves, and the question that settles it is
+what still catches the mistake afterwards:
+
+| Phase | Model | Because |
+|---|---|---|
+| `resolve` | haiku | Search plus bookkeeping. A mis-tagged hit cannot ship: the engine fetches every URL and keeps it only if the page corroborates THAT place. It is also the phase that fans out widest. |
+| `match` | sonnet | Nothing downstream re-checks a merge. A wrong `merge: true` ships one plausible company holding somebody else's registration, and no gate can see it. |
+| `dossier` | sonnet | `check` catches a citation that does not resolve; it cannot catch a packet that was skimmed. |
+
+`enrich` is deliberately NOT a phase. It is I/O against other people's servers,
+and parallelising it multiplies the request rate while the per-host pacing only
+governs one process. **Fan-out is an optimisation for thinking, never for
+fetching.**
+
 ## The run
 
 ```
@@ -308,8 +356,24 @@ scheme.
   osm.json           raw OSM lane output, kept beside the fused result
   registry.json      raw register output, whichever connectors answered
   places.json        the fused entities
+  pages/<id>/P*.md   every page fetched, with its URL and date — what a citation points at
+  RESOLVE.todo.json  the companies still needing a website, and the queries for them
   MATCH.todo.json    pairs the matcher would not decide alone
+  orchestration/     the fan-out: a runbook, one contract per role, one workflow per phase
 ```
+
+`render` then writes four more beside them, and they are not the same
+deliverable: `index.html` to look (self-contained, makes no network request,
+sorts and facets in place, every company opens a panel and every citation opens
+its page), `REPORT.md` to judge the coverage, `PROSPECTS.csv` to work, and
+`prospects.json` to pipe. Rows are ordered by the measured score — the one column
+nobody had to be trusted for — with an explicit `no` sunk below everything.
+
+There is no map. There was one, drawn from the coordinates already in the run,
+and it was removed rather than improved: points on white with no coastline and no
+street tell a prospector nothing they can act on, and a basemap worth reading
+needs tiles, which need the network this page refuses. The coordinates stay on
+every row.
 
 ## Licensing of the data
 
@@ -345,7 +409,9 @@ generated from the French register's own validation error by
 
 Adding a country is one file under `src/registry/` and one entry in
 `CONNECTORS`. That table is read by the sweep lane, `confirm`, `doctor`,
-`manifest.licences` and the weekly canary, so a new connector arrives with its
-own drift detection and nothing to remember.
+`manifest.licences`, the weekly canary and the gate that refuses a `sourceUrl`
+which cannot address a single record — so a new connector arrives with its own
+drift detection and nothing to remember. The role labels that name a person live
+in `src/people.ts`, keyed by language the same way the legal-notice terms are.
 
 MIT.
