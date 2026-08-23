@@ -74,6 +74,47 @@ const DOSSIER_SCHEMA = {
   },
 };
 
+/**
+ * Which head each phase gets.
+ *
+ * The batch sizes below decide HOW MANY agents a phase runs; this decides WHICH
+ * MODEL. It is the same line the file's header draws — mechanics against
+ * judgement — read through one further question: what still catches the mistake
+ * afterwards.
+ *
+ *   resolve  — the cheap head. Running a WebSearch and tagging each hit with
+ *              its placeId is search plus bookkeeping, and the failure it
+ *              invites is caught by construction: the engine fetches every
+ *              candidate and keeps it only if the page corroborates THAT place,
+ *              so a mis-tagged hit is dropped rather than shipped. This is also
+ *              the phase that fans out widest, so it is where the choice pays.
+ *   match    — the better head. A wrong `merge: true` produces one plausible
+ *              company holding somebody else's registration number, and nothing
+ *              downstream ever flags it. No gate sits under this one.
+ *   dossier  — the better head. `check` re-opens every citation and re-reads
+ *              every contact against its page; what it cannot catch is a packet
+ *              read shallowly, which is precisely what this phase is paid for.
+ *
+ * Country-agnostic, like everything else here: a phase is a kind of judgement,
+ * not a jurisdiction. The same tiering holds for a French sweep and a German
+ * confirm — what changes per country is the searcher's language and legal
+ * notice term, and those come from `searchLocaleFor` and `legalNoticeTerms`.
+ *
+ * A model name is a harness token, so it is spliced as source through
+ * `agentOpts` — the same hook worktree isolation uses — and it is repeated in
+ * each contract below, because only ONE of the three harnesses `orchestrate`
+ * serves ever reads the emitted workflow.
+ */
+const MODELS = { resolve: "haiku", match: "sonnet", dossier: "sonnet" } as const;
+
+/**
+ * A model choice, as the literal source the workflow emitter splices in.
+ *
+ * Single-quoted to match the `agentType: 'general-purpose'` the emitter writes
+ * on the line above it — the emitted file is read by humans debugging a fan-out.
+ */
+const modelOpt = (model: string): string => `\n    model: '${model}',`;
+
 const PHASES: PhaseDefinition<any>[] = [
   {
     name: "resolve",
@@ -84,6 +125,7 @@ const PHASES: PhaseDefinition<any>[] = [
     // Twelve companies is two or three searches each — enough work to be worth
     // a subagent, small enough that the pooled result stays readable.
     batchSize: 12,
+    agentOpts: modelOpt(MODELS.resolve),
     ids: (parsed: { items?: { placeId: string }[] } | undefined) => (Array.isArray(parsed?.items) ? parsed.items.map((i) => i.placeId) : undefined),
     prerequisite: (run, engineAbs) => `node ${engineAbs} resolve --run ${run} --queries`,
     description: (n) => `Search the web for ${n} companies' own websites`,
@@ -103,6 +145,7 @@ const PHASES: PhaseDefinition<any>[] = [
     // Twenty pairs is about a page of evidence: enough to be worth a subagent,
     // small enough that one bad batch is cheap to redo.
     batchSize: 20,
+    agentOpts: modelOpt(MODELS.match),
     ids: (parsed: MatchTodo | undefined) => (Array.isArray(parsed?.pairs) ? parsed.pairs.map((p) => `${p.osmId}|${p.connectorId}:${p.registryId}`) : undefined),
     prerequisite: (run, engineAbs) => `node ${engineAbs} scan --where "<place>" --out ${run}`,
     description: (n) => `Decide ${n} OSM-to-register pairs the matcher would not merge on its own`,
@@ -123,6 +166,7 @@ const PHASES: PhaseDefinition<any>[] = [
     // page fetched for that company, so two of them in one context is mostly a
     // way to run out of room halfway through the second.
     batchSize: 1,
+    agentOpts: modelOpt(MODELS.dossier),
     // The engine collapses a small worklist into a single batch, which is the
     // right default nearly everywhere and wrong here: "only three companies"
     // still means three full page dumps. Opting out is the whole reason the
@@ -163,6 +207,16 @@ const PREAMBLE = [
   "",
   "Subagents never write to the run. They return a fragment; you fold it.",
   "",
+  `Each phase names the model it wants, and the emitted workflow already carries`,
+  `it. Dispatching them yourself, use the same one:`,
+  "",
+  `  resolve  ${MODELS.resolve}   search plus bookkeeping, and a mis-tagged hit cannot ship:`,
+  `                  the engine keeps a URL only if the page corroborates THAT place.`,
+  `  match    ${MODELS.match}  no gate sits downstream. A wrong merge ships one plausible`,
+  `                  company holding somebody else's registration, forever unflagged.`,
+  `  dossier  ${MODELS.dossier}  \`check\` catches a citation that does not resolve; it cannot`,
+  `                  catch a packet that was skimmed.`,
+  "",
 ];
 
 export interface OrchestrateInput extends OrchestrateOptions {
@@ -201,6 +255,11 @@ function searcherContract(run: string, engineAbs: string, countryCode?: string):
 You find the websites. **This is the stage the whole run rests on** — everything
 the enrichment stage learns about a company comes from the URL you find, and a
 sweep that skips this reports a town with no web presence.
+
+**Model: \`${MODELS.resolve}\`.** This is search plus bookkeeping, not judgement, and the
+one mistake it invites cannot reach the deliverable: the engine fetches every
+URL you return and keeps it only if the page corroborates THAT place. The cheap
+head is the right head here, and this is the phase that fans out widest.
 
 ## Read
 
@@ -259,6 +318,10 @@ You decide whether an OSM shopfront and a register establishment are the same
 business. The matcher already merged everything it was sure about; these are the
 pairs it refused to decide, and refusing was the right call.
 
+**Model: \`${MODELS.match}\`.** Nothing downstream re-checks this. A wrong \`merge: true\`
+ships one plausible company holding somebody else's registration number, and no
+gate in the pipeline can see it. Spend the better head here.
+
 ## Read
 
 \`${run}/MATCH.todo.json\` — ${phase?.items ?? 0} pair(s). Each carries:
@@ -295,6 +358,10 @@ function writerContract(run: string, engineAbs: string): string {
   return `# Writer
 
 You write one company's dossier from its grounding packet.
+
+**Model: \`${MODELS.dossier}\`.** \`check\` will catch a citation that does not resolve and a
+contact that was never observed. What it cannot catch is a packet you skimmed,
+which is the whole of what this phase is paid for.
 
 ## Read
 

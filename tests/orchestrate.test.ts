@@ -147,6 +147,39 @@ describe("emitOrchestration", () => {
     expect(text).toContain("usually NOT the legal name");
   });
 
+  it("sends each phase to the model its failure mode deserves", () => {
+    // The fan-out decides HOW MANY agents; this decides WHICH HEAD. It is the
+    // line this file's header already draws, pushed one notch: a searcher runs
+    // WebSearch and drops each hit in a basket, and a mis-tagged hit cannot
+    // reach the deliverable — the engine fetches the page and keeps it only if
+    // it corroborates THAT place. The adjudicator and the writer have no such
+    // net under them, and a wrong merge is invisible forever.
+    writeRun(45, 5);
+    emitOrchestration(runDir, ENGINE);
+    const read = (p: string) => readFileSync(join(runDir, "orchestration", `${p}.workflow.mjs`), "utf8");
+    expect(read("resolve")).toContain("model: 'haiku'");
+    expect(read("match")).toContain("model: 'sonnet'");
+    expect(read("dossier")).toContain("model: 'sonnet'");
+  });
+
+  it("names the model in every contract and in the runbook, not only in the workflow", () => {
+    // `orchestrate` serves three harnesses and only ONE of them reads the
+    // emitted workflow. A tiering that lives solely in the .workflow.mjs is
+    // absent from the subagent-dispatch path and from --eco — which is exactly
+    // where a rule stops applying without anyone noticing.
+    writeRun(2, 1);
+    emitOrchestration(runDir, ENGINE);
+    for (const [role, model] of [
+      ["searcher", "haiku"],
+      ["adjudicator", "sonnet"],
+      ["writer", "sonnet"],
+    ]) {
+      const text = readFileSync(join(runDir, "orchestration", "agents", `${role}.md`), "utf8");
+      expect(text.toLowerCase()).toContain(model);
+    }
+    expect(readFileSync(join(runDir, "orchestration", "RUNBOOK.md"), "utf8").toLowerCase()).toContain("haiku");
+  });
+
   it("under --eco emits the runbook and contracts but no workflows", () => {
     writeRun(2, 1);
     const result = emitOrchestration(runDir, ENGINE, { eco: true });

@@ -379,6 +379,23 @@ against other people's servers, and parallelising it across subagents multiplies
 the request rate while the per-host pacing only governs one process. **Fan-out
 is an optimisation for thinking, never for fetching.**
 
+**Each phase names the model it wants, and it is not the same one.** The fan-out
+decides how many agents a phase runs; this decides which head, and the question
+that settles it is what still catches the mistake afterwards:
+
+| Phase | Model | Because |
+|---|---|---|
+| `resolve` | **haiku** | Search plus bookkeeping. A mis-tagged hit cannot reach the deliverable: the engine fetches every URL and keeps it only if the page corroborates THAT place. This is also the phase that fans out widest, so it is where the cheap head pays. |
+| `match` | **sonnet** | Nothing downstream re-checks a merge. A wrong `merge: true` ships one plausible company holding somebody else's registration number, and no gate in the pipeline can see it. |
+| `dossier` | **sonnet** | `check` catches a citation that does not resolve and a contact never observed. It cannot catch a packet that was skimmed, which is the whole of what the phase is paid for. |
+
+The emitted `*.workflow.mjs` already carries these, and each
+`agents/<role>.md` repeats its own — only one of the three harnesses above reads
+the workflow file, and a rule that lives only there is absent from the other two.
+Dispatching subagents by hand, or working down `RUNBOOK.md`, use the same
+tiering. It is a property of the phase, not of the country: it holds identically
+for a French sweep and a German confirm.
+
 Subagents never write; the folds stay with you, the orchestrator. Re-run
 `orchestrate` whenever a worklist changes.
 
