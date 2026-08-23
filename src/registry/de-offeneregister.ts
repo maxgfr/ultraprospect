@@ -142,7 +142,11 @@ export const offeneRegisterSnapshot: SnapshotSource = {
       status: statusOf(row.current_status),
       // No activity code: the Handelsregister files none. Declaring a section
       // would invent a classification the register does not publish.
-      sourceUrl: "https://offeneregister.de/",
+      // No sourceUrl. offeneregister.de publishes bulk files and nothing else —
+      // no page per company, and the SQL API that once served one is gone. A
+      // link to its homepage answered "open on the register" with a download
+      // site, which is a promise the record cannot keep. Where the record came
+      // from is said in words instead, with its `asOf`.
       asOf,
       // Only what is NOT already derivable from the fields beside it. At 5.3
       // million rows every repetition is measured in gigabytes: storing

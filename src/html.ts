@@ -419,7 +419,16 @@ function whatTheyDo(place: Place): string {
     bits.push(`<span class="c">the company as a whole <b>${esc(s.parent.activityCode)}</b> — the register filters matched on this</span>`);
   }
   if (s) {
-    bits.push(`<span class="c">${esc(s.connectorId)} <b>${esc(s.id)}</b>${s.sourceUrl ? ` — ${link(s.sourceUrl, "open on the register")}` : ""}</span>`);
+    // A register that hosts a page for this record gets a link. One that does
+    // not — a bulk export, a verification form — says so, because offering
+    // "open on the register" and landing on a homepage is worse than saying
+    // there is nothing to open.
+    const provenance = s.sourceUrl
+      ? ` — ${link(s.sourceUrl, "open on the register")}`
+      : s.asOf
+        ? ` <span class="src">read from a bulk open-data export as of ${esc(s.asOf.slice(0, 10))}; this register publishes no page per company</span>`
+        : ` <span class="src">answered by the authority directly; this register publishes no page per company</span>`;
+    bits.push(`<span class="c">${esc(s.connectorId)} <b>${esc(s.id)}</b>${provenance}</span>`);
   }
   return bits.join("");
 }

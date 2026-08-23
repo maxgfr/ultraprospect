@@ -21,6 +21,8 @@
 //     back "unknown", which reads as "we did not look".
 //   * GLEIF's fuzzy search answers about companies that merely resemble the
 //     query, so a register number has to be re-checked exactly.
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { euVies } from "../src/registry/eu-vies.js";
 import { parseViesAddress, viesVerdict } from "../src/registry/eu-vies.js";
@@ -348,6 +350,38 @@ describe("the connector table", () => {
       expect(c.activityPrefix.length, `${c.id} has no activity namespace`).toBeGreaterThan(0);
       expect(c.countries.length, `${c.id} serves no country`).toBeGreaterThan(0);
     }
+  });
+
+  it("never gives a record a sourceUrl that does not address that record", () => {
+    // Measured on a Hamburg run: 72 of 92 register records (78%) carried
+    // `sourceUrl: "https://offeneregister.de/"` — the homepage. The panel
+    // offered "open on the register" and it landed on a download site with
+    // nothing about the company. offeneregister.de has no per-company page at
+    // all: it publishes bulk files and a SQL API that is now gone. VIES is the
+    // same shape, a search form with no permalink for a VAT number.
+    //
+    // A link that cannot show the record is the same class of claim this tool
+    // refuses everywhere else — a search-result rank is not evidence of
+    // ownership, a shared doorway is not evidence of identity. So the rule:
+    // a sourceUrl opens THIS record, or the connector emits none and the page
+    // says where the record came from instead.
+    //
+    // Enforced structurally rather than per-connector, so a country added
+    // tomorrow inherits it: a URL that addresses a record has to interpolate
+    // that record's identifier, and a constant string cannot.
+    const dir = join(import.meta.dirname, "..", "src", "registry");
+    const offenders: string[] = [];
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".ts") && f !== "types.ts" && f !== "index.ts")) {
+      const src = readFileSync(join(dir, file), "utf8");
+      for (const m of src.matchAll(/sourceUrl:\s*([^,\n]+)/g)) {
+        const value = m[1]!.trim();
+        // A template that interpolates, a ternary of them, or a field carried
+        // through from the register's own answer, are all per-record. A plain
+        // quoted constant is a homepage by construction.
+        if (/^["']/.test(value) && !value.includes("${")) offenders.push(`${file}: ${value}`);
+      }
+    }
+    expect(offenders, "a constant sourceUrl cannot address a single record").toEqual([]);
   });
 
   it("names every sweepable register, and there are now three of them", () => {
