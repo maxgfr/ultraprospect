@@ -8488,6 +8488,18 @@ async function getJson(url) {
     return void 0;
   }
 }
+async function personioSearchJson(board, via) {
+  const data = await getJson(`https://${board.token}.jobs.personio.de/search.json`);
+  if (!Array.isArray(data)) return [];
+  return data.map((j) => ({
+    title: text(j.name) ?? "(untitled)",
+    url: j.id ? `https://${board.token}.jobs.personio.de/job/${j.id}` : void 0,
+    location: text(j.office) ?? (Array.isArray(j.offices) ? text(j.offices[0]) : void 0),
+    department: text(j.department),
+    employmentType: text(j.employment_type),
+    via
+  }));
+}
 async function getText(url) {
   try {
     const res = await httpGet(url, { timeoutMs: 2e4, retries: 1 });
@@ -8579,7 +8591,7 @@ async function fetchBoard(board) {
     }
     case "personio": {
       const body = await getText(`https://${board.token}.jobs.personio.de/xml`);
-      if (!body) return [];
+      if (!body) return await personioSearchJson(board, via);
       const out2 = [];
       for (const m of body.matchAll(/<position>([\s\S]*?)<\/position>/gi)) {
         const pos = (m[1] ?? "").replace(/<jobDescriptions>[\s\S]*?<\/jobDescriptions>/gi, "");

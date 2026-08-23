@@ -104,6 +104,28 @@ async function getJson(url: string): Promise<any | undefined> {
   }
 }
 
+/**
+ * Personio's other public feed, for the boards that do not serve `/xml`.
+ *
+ * Same openings, a thinner shape: `employment_type` here is the board's own
+ * LOCALISED label ("Festanstellung", "Praktikum/Werkstudium") rather than the
+ * XML's canonical enum, and there is no createdAt. Both are passed through as
+ * they arrive — inventing a canonical value from a German label would be a
+ * translation this tool has no business making.
+ */
+async function personioSearchJson(board: AtsBoard, via: string): Promise<JobPosting[]> {
+  const data = await getJson(`https://${board.token}.jobs.personio.de/search.json`);
+  if (!Array.isArray(data)) return [];
+  return data.map((j: any) => ({
+    title: text(j.name) ?? "(untitled)",
+    url: j.id ? `https://${board.token}.jobs.personio.de/job/${j.id}` : undefined,
+    location: text(j.office) ?? (Array.isArray(j.offices) ? text(j.offices[0]) : undefined),
+    department: text(j.department),
+    employmentType: text(j.employment_type),
+    via,
+  }));
+}
+
 async function getText(url: string): Promise<string | undefined> {
   try {
     const res = await httpGet(url, { timeoutMs: 20_000, retries: 1 });
@@ -220,7 +242,17 @@ export async function fetchBoard(board: AtsBoard): Promise<JobPosting[]> {
       // XML. Its `employmentType` vocabulary includes `freelance`, which is a
       // company stating in a structured field that it hires contractors.
       const body = await getText(`https://${board.token}.jobs.personio.de/xml`);
-      if (!body) return [];
+      // Not every board serves `/xml`. Measured on a Hamburg run:
+      // `megacad-gmbh` answers 404 there — on BOTH the .de and .com hostnames —
+      // while `search.json` answers 200 with four real openings; `personio-sog`
+      // serves both. So a 404 on the XML feed says nothing about whether the
+      // company is hiring, and treating it as "no openings" reported a board we
+      // could not read while the postings sat one keyless request away.
+      //
+      // `/xml` stays first because it carries what the JSON does not: the
+      // canonical employmentType vocabulary — including `freelance`, a company
+      // stating in a structured field that it hires contractors — and createdAt.
+      if (!body) return await personioSearchJson(board, via);
       const out: JobPosting[] = [];
       for (const m of body.matchAll(/<position>([\s\S]*?)<\/position>/gi)) {
         // `<name>` occurs twice per position: once as the job title, and once
