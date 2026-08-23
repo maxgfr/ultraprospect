@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [3.3.0](https://github.com/maxgfr/ultraprospect/compare/v3.2.0...v3.3.0) (2026-08-23)
+
+
+### Bug Fixes
+
+* **cli:** --help says --phase takes resolve, which it has always accepted ([c98fe42](https://github.com/maxgfr/ultraprospect/commit/c98fe42bed7f9b682d298cc374273bf71df6c709))
+
+
+### Features
+
+* **orchestrate:** send each fan-out phase to the model its failure mode deserves ([2e9c4d4](https://github.com/maxgfr/ultraprospect/commit/2e9c4d4ee5ef1268bb0a867a937ef24e718742f9))
+* **resolve:** --only, because --limit is a prefix and not a choice ([668fb64](https://github.com/maxgfr/ultraprospect/commit/668fb643d126a6e199a1f362256f180d5d005f78))
+
 # [3.2.0](https://github.com/maxgfr/ultraprospect/compare/v3.1.2...v3.2.0) (2026-08-22)
 
 
