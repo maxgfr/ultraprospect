@@ -9182,11 +9182,11 @@ function applyFit(places, verdicts) {
 var FIT_RANK = { strong: 3, possible: 2, weak: 1, no: -2 };
 var UNJUDGED = -1;
 function ranked(places) {
+  const rank = (p) => p.score?.fit ? FIT_RANK[p.score.fit] : UNJUDGED;
   return [...places].sort((a, b) => {
-    const fa = a.score?.fit ? FIT_RANK[a.score.fit] : UNJUDGED;
-    const fb = b.score?.fit ? FIT_RANK[b.score.fit] : UNJUDGED;
-    if (fa !== fb) return fb - fa;
-    return (b.score?.total ?? 0) - (a.score?.total ?? 0);
+    const rejected = (p) => p.score?.fit === "no" ? 1 : 0;
+    if (rejected(a) !== rejected(b)) return rejected(a) - rejected(b);
+    return (b.score?.total ?? 0) - (a.score?.total ?? 0) || rank(b) - rank(a);
   });
 }
 
@@ -10092,35 +10092,6 @@ function hostOf2(url) {
   }
 }
 var HTML_ROW_CAP = 2e3;
-function mapSvg(order, manifest) {
-  const pts = order.map((p, i) => ({ p, i })).filter(({ p }) => typeof p.lat === "number" && typeof p.lon === "number");
-  if (pts.length === 0) return "";
-  const lats = pts.map(({ p }) => p.lat);
-  const lons = pts.map(({ p }) => p.lon);
-  const [s, n] = [Math.min(...lats), Math.max(...lats)];
-  const [w, e] = [Math.min(...lons), Math.max(...lons)];
-  const midLat = (s + n) / 2;
-  const kx = Math.cos(midLat * Math.PI / 180);
-  const width = 900;
-  const spanX = Math.max(1e-6, (e - w) * kx);
-  const spanY = Math.max(1e-6, n - s);
-  const height = Math.max(220, Math.min(620, Math.round(width * spanY / spanX)));
-  const x = (lon) => (lon - w) * kx * (width - 24) / spanX + 12;
-  const y = (lat) => height - 12 - (lat - s) * (height - 24) / spanY;
-  const max = Math.max(1, ...pts.map(({ p }) => p.score?.total ?? 0));
-  const circles = pts.map(({ p, i }) => {
-    const t = (p.score?.total ?? 0) / max;
-    const r = 2.5 + t * 5;
-    const fit = p.score?.fit;
-    const cls = fit === "strong" || fit === "possible" ? `pt ${fit}` : fit === "no" ? "pt no" : p.website?.confidence === "corroborated" ? "pt sited" : "pt";
-    const hiring = p.signals?.isHiring === true ? ` \u2014 ${p.signals.openRoles} open role(s)` : "";
-    return `<circle class="${cls}" data-i="${i}" cx="${x(p.lon).toFixed(1)}" cy="${y(p.lat).toFixed(1)}" r="${r.toFixed(1)}"><title>${esc(p.name)} \u2014 ${p.score?.total ?? 0}${esc(hiring)}</title></circle>`;
-  }).join("");
-  return `<figure class="map">
-<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Every company in ${esc(manifest.target.label)}, positioned by coordinate and sized by score">${circles}</svg>
-<figcaption>${pts.length} located companies. Larger is a higher measured score. <b class="k strong"></b> judged a strong fit \xB7 <b class="k possible"></b> possible \xB7 <b class="k sited"></b> a corroborated website \xB7 <b class="k plain"></b> everything else. Click a point to open its row.</figcaption>
-</figure>`;
-}
 var collapse2 = (s) => s.replace(/\s+/g, " ").trim();
 function block(label, body) {
   return body ? `<div class="b"><dt>${esc(label)}</dt><dd>${body}</dd></div>` : "";
@@ -10518,16 +10489,6 @@ h1{font-size:1.7rem;margin:0 0 .25rem;letter-spacing:-.01em}
 .cov{border:1px solid var(--line);border-radius:8px;padding:.6rem .9rem;margin:0 0 1.25rem;background:var(--soft)}
 .cov summary{cursor:pointer;font-weight:600}
 .cov .scroll{margin-top:.6rem;background:var(--bg)}
-.map{margin:0 0 1.25rem}
-.map svg{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;background:transparent}
-.map figcaption{color:var(--muted);font-size:.82rem;margin-top:.4rem}
-circle.pt{fill:var(--pt);opacity:.85;cursor:pointer}
-circle.sited{fill:var(--sited);opacity:.75}
-circle.possible{fill:var(--possible);opacity:.95}
-circle.strong{fill:var(--strong);opacity:.95}
-circle.no{fill:var(--no);opacity:.5}
-b.k{display:inline-block;width:.62rem;height:.62rem;border-radius:50%;background:var(--pt);vertical-align:baseline}
-b.k.strong{background:var(--strong)}b.k.possible{background:var(--possible)}b.k.sited{background:var(--sited)}
 .tools{display:flex;gap:.5rem;align-items:center;margin:0 0 .5rem;flex-wrap:wrap}
 #q{flex:1 1 18rem;min-width:12rem;padding:.5rem .7rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
 .chip{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:999px;padding:.35rem .75rem;font:inherit;font-size:.85rem;cursor:pointer}
@@ -10604,7 +10565,6 @@ footer li{margin:.1rem 0}
 ${banners.join("\n")}
 ${statCards(s, manifest)}
 ${coverageTable(manifest, s)}
-${mapSvg(visible, manifest)}
 ${openingsSection(order)}
 <div class="tools">
 <input id="q" type="search" placeholder="Filter \u2014 name, legal name, register id, activity, town, domain, verdict" autocomplete="off" aria-label="Filter the table">
@@ -10674,18 +10634,6 @@ ${s.notes.lines.length ? `<details><summary>Run notes (${s.notes.distinct === s.
     var b=e.target.closest ? e.target.closest(".tog") : null;
     if(!b) return;
     open(b.parentNode.parentNode);
-  });
-
-  // A point on the map is a row. Clicking one opens it rather than only
-  // naming it, which is the difference between a picture and an index.
-  [].forEach.call(document.querySelectorAll("circle[data-i]"), function(dot){
-    dot.addEventListener("click", function(){
-      var r=document.getElementById("r"+dot.dataset.i);
-      if(!r) return;
-      if(r.hidden){ if(q) q.value=""; [].forEach.call(document.querySelectorAll(".chip"), function(ch){ ch.setAttribute("aria-pressed","false"); on[ch.dataset.facet]=false; }); apply(); }
-      open(r, true);
-      r.scrollIntoView({block:"center"});
-    });
   });
 
   var heads=[].slice.call(document.querySelectorAll("th[data-sort]"));

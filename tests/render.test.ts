@@ -434,45 +434,6 @@ describe("index.html", () => {
     expect(board).toContain("freelance");
   });
 
-  it("draws map points a human can actually see, in both themes", () => {
-    // Measured on a real Hamburg run: the default point rendered at 1.68:1
-    // against the light background and 1.65:1 against the dark one, and 94% of
-    // the 2000 points carry that default class. They were all there in the
-    // markup — correct coordinates, correct radii — and invisible on screen,
-    // which is the worst way for a map to fail: it looks like a run that found
-    // nothing rather than a page that drew nothing.
-    //
-    // 3:1 is the WCAG 2.2 threshold for a non-text graphic. This computes the
-    // point as it actually composites (fill over background at its opacity)
-    // rather than trusting the raw token, because the opacity is what did the
-    // damage.
-    const varsOf = (block: string) => Object.fromEntries([...block.matchAll(/--([a-z-]+):\s*(#[0-9a-f]{3,8})/gi)].map((m) => [m[1]!, m[2]!]));
-    const roots = [...html.matchAll(/:root\{([^}]*)\}/g)].map((m) => varsOf(m[1]!));
-    expect(roots.length).toBeGreaterThanOrEqual(2); // light and dark
-
-    const ptRule = html.match(/\.pt\{([^}]*)\}/)?.[1] ?? "";
-    const fillVar = ptRule.match(/fill:var\(--([a-z-]+)\)/)?.[1];
-    expect(fillVar).toBeTruthy();
-    const opacity = Number(ptRule.match(/opacity:\s*([\d.]+)/)?.[1] ?? "1");
-
-    const rgb = (h: string) => {
-      const x = h.slice(1);
-      const full = x.length === 3 ? [...x].map((c) => c + c).join("") : x;
-      return [0, 2, 4].map((i) => Number.parseInt(full.slice(i, i + 2), 16));
-    };
-    const lum = (c: number[]) => {
-      const s = c.map((v) => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4));
-      return 0.2126 * s[0]! + 0.7152 * s[1]! + 0.0722 * s[2]!;
-    };
-    for (const vars of roots) {
-      const fg = rgb(vars[fillVar!]!);
-      const bg = rgb(vars.bg!);
-      const composited = fg.map((c, i) => opacity * c + (1 - opacity) * bg[i]!);
-      const [hi, lo] = [lum(composited), lum(bg)].sort((a, b) => b - a);
-      expect((hi! + 0.05) / (lo! + 0.05)).toBeGreaterThanOrEqual(3);
-    }
-  });
-
   it("loads no external asset, and cannot reach the network at all", () => {
     // No tiles, no CDN, no font, no analytics. A page about who somebody's
     // prospects are should not phone anyone while it is being read.
@@ -490,9 +451,14 @@ describe("index.html", () => {
     expect(html).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|sendBeacon|new WebSocket|EventSource|\bimport\s*\(/i);
   });
 
-  it("draws the map as inline SVG from the run's own coordinates", () => {
-    expect(html).toContain("<svg");
-    expect(html).toContain("<circle");
+  it("carries no map, and says the coordinates on the row instead", () => {
+    // The map was removed rather than improved. Points on white with no
+    // coastline and no street tell a prospector nothing they can act on, and a
+    // basemap worth reading needs tiles — which need the network this page
+    // refuses. Pinned so it does not creep back as a half-map.
+    expect(html).not.toContain("<svg");
+    expect(html).not.toContain("<circle");
+    expect(html).toContain("48.80000, 2.40000");
   });
 
   it("defines its colours for both themes", () => {
