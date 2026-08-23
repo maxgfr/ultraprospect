@@ -250,6 +250,18 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
      job ad and business-to-business in every English one. A term with two
      readings produces hits nobody can act on, and they will look measured.
 
+     The trap is worst where the two readings live on the SAME page. Measured on
+     a Hamburg run: of three companies whose careers page matched this lexicon,
+     two carried `Freelancer` heading a real freelancer intake — "Wie deine
+     Zusammenarbeit mit uns abläuft", "Freelancer? Bitte hier entlang!" — and the
+     third matched `selbstständig` three times in "Freiraum für selbstständiges
+     und eigenverantwortliches Arbeiten", which describes an EMPLOYEE working
+     autonomously. Same page role, same lexicon, opposite meanings. German
+     `selbstständig`/`selbständig`, French `autonome` and English `independent`
+     all read both ways in a job ad; the words that only mean the legal status —
+     `Freiberufler`, `freiberuflich`, `Werkvertrag`, `Subunternehmer`,
+     `portage salarial`, `ZZP` — are the ones worth counting.
+
    **`--terms-on` defaults to the careers page, and widening it is a decision.**
    Measured on a real run before that default existed: 48 hits from home and
    legal pages, and every sampled one was wrong — `externe Dienstleister` naming
