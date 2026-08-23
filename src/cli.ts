@@ -738,11 +738,13 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
     const manifest = requireManifest(runDir);
     const town = shortLabel(manifest.target.label);
     const todo = buildResolveTodo(places, town, manifest.target.countryCode, selection);
+    // The selection is already applied — `buildResolveTodo` takes it, so the
+    // worklist and the fold work on the same places by construction.
     const plan = todo.items;
     // Written as a worklist, not just printed: that is what makes the lane
     // fannable by `orchestrate`, and website discovery is the stage that
     // decides whether a run has any content at all.
-    writeJson(runDir, "RESOLVE.todo.json", { ...todo, items: plan });
+    writeJson(runDir, "RESOLVE.todo.json", todo);
     if (bools.has("json")) out(jsonLine(plan));
     else for (const item of plan) for (const q of item.queries) out(q);
     say("");
