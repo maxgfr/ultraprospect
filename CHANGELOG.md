@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [3.5.0](https://github.com/maxgfr/ultraprospect/compare/v3.4.0...v3.5.0) (2026-08-23)
+
+
+### Bug Fixes
+
+* **excerpts:** collect the legal identifier's page too ([0a1d802](https://github.com/maxgfr/ultraprospect/commit/0a1d802b6409463be650537c37f122d82c80b6c4))
+* **html:** a citation you cannot open is not a source ([1a1ecaa](https://github.com/maxgfr/ultraprospect/commit/1a1ecaae486404ad4f61b2017355ade40b5f98b1))
+* **html:** source the last three places that printed a bare page id ([bb33372](https://github.com/maxgfr/ultraprospect/commit/bb33372cc4b21c8c72c87644277301e2852f8ed1))
+* **people:** a department is not a person, and a link wrapper is not a name ([876ff3e](https://github.com/maxgfr/ultraprospect/commit/876ff3e42259cae765ae08e2b6c7f2dbf4784bbf))
+* **registry:** a sourceUrl opens THAT record, or the connector emits none ([988ed40](https://github.com/maxgfr/ultraprospect/commit/988ed40ad1278a143ccb1b1f9e16bb09e6109fb2))
+
+
+### Features
+
+* **people:** fill the field that has always been read and never written ([10ea6cc](https://github.com/maxgfr/ultraprospect/commit/10ea6ccec94410f19cf1242c14d4905fb4fa602c))
+
 # [3.4.0](https://github.com/maxgfr/ultraprospect/compare/v3.3.1...v3.4.0) (2026-08-23)
 
 
