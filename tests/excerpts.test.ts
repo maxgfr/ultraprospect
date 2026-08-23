@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { collectQuotes, quoteKey } from "../src/excerpts.js";
+import { collectEvidence, pageKey, quoteKey } from "../src/excerpts.js";
 import { buildHtml } from "../src/render.js";
 import type { Place, RunManifest } from "../src/types.js";
 
@@ -63,11 +63,11 @@ function runWithPage(placeId: string, pageId: string, body: string): string {
 
 const LONG = "x".repeat(400);
 
-describe("collectQuotes", () => {
+describe("collectEvidence", () => {
   it("cuts the passage around the cited value, with the page's own provenance", () => {
     const dir = runWithPage("osm:n1", "P7", `${LONG} Ob als Werkstudent, auf Honorarbasis oder im festen Anstellungsverhältnis ${LONG}`);
     const p = place({ signals: signalsWith([{ value: "Honorarbasis", from: "P7", lane: "web" }]), pages: ["P7"] });
-    const quote = collectQuotes(dir, [p]).get(quoteKey("osm:n1", "P7", "Honorarbasis"))!;
+    const quote = collectEvidence(dir, [p]).quotes.get(quoteKey("osm:n1", "P7", "Honorarbasis"))!;
 
     expect(quote.located).toBe(true);
     expect(quote.text).toContain("auf Honorarbasis oder im festen");
@@ -85,7 +85,7 @@ describe("collectQuotes", () => {
     // literal search would report every phone in a run as unlocatable.
     const dir = runWithPage("osm:n1", "P7", "Kontakt: Telefon 040 8787 8655, E-Mail info@nolimit-it.de");
     const p = place({ contacts: { emails: [], phones: [{ value: "+4940 87878655", from: "P7", lane: "web" }], socials: [], people: [] }, pages: ["P7"] });
-    const quote = collectQuotes(dir, [p]).get(quoteKey("osm:n1", "P7", "+4940 87878655"))!;
+    const quote = collectEvidence(dir, [p]).quotes.get(quoteKey("osm:n1", "P7", "+4940 87878655"))!;
     expect(quote.located).toBe(true);
     expect(quote.text).toContain("040 8787 8655");
   });
@@ -95,7 +95,7 @@ describe("collectQuotes", () => {
     // for is worse than no excerpt: it invites a reader to stop checking.
     const dir = runWithPage("osm:n1", "P7", "Nothing relevant on this page at all.");
     const p = place({ contacts: { emails: [{ value: "ghost@nolimit-it.de", from: "P7", lane: "web" }], phones: [], socials: [], people: [] }, pages: ["P7"] });
-    const quote = collectQuotes(dir, [p]).get(quoteKey("osm:n1", "P7", "ghost@nolimit-it.de"))!;
+    const quote = collectEvidence(dir, [p]).quotes.get(quoteKey("osm:n1", "P7", "ghost@nolimit-it.de"))!;
     expect(quote.located).toBe(false);
     expect(quote.text).toContain("does not appear in the stored extract");
     expect(quote.text).not.toContain("Nothing relevant on this page");
@@ -105,13 +105,13 @@ describe("collectQuotes", () => {
     // An id with nothing behind it must never render as evidence.
     const dir = runWithPage("osm:n1", "P7", "here");
     const p = place({ contacts: { emails: [{ value: "a@b.de", from: "P99", lane: "web" }], phones: [], socials: [], people: [] }, pages: ["P99"] });
-    expect(collectQuotes(dir, [p]).size).toBe(0);
+    expect(collectEvidence(dir, [p]).quotes.size).toBe(0);
   });
 
   it("puts the passage in the page, behind a disclosure that needs no JavaScript", () => {
     const dir = runWithPage("osm:n1", "P7", `${LONG} auf Honorarbasis oder im festen ${LONG}`);
     const p = place({ signals: signalsWith([{ value: "Honorarbasis", from: "P7", lane: "web" }]), pages: ["P7"] });
-    const html = buildHtml([p], manifest(), { quotes: collectQuotes(dir, [p]) });
+    const html = buildHtml([p], manifest(), collectEvidence(dir, [p]));
 
     expect(html).toContain('<details class="q"><summary>[P7]</summary>');
     expect(html).toContain("auf Honorarbasis oder im festen");
@@ -120,11 +120,26 @@ describe("collectQuotes", () => {
     expect(html).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|sendBeacon|new WebSocket|EventSource|\bimport\s*\(/i);
   });
 
-  it("falls back to the bare id when no passage was collected", () => {
+  it("falls back to the bare id only when the page itself is unknown", () => {
+    // No run dir was read at all, so neither the passage nor the URL exists.
+    // The id is all there is, and it is still printed rather than dropped —
+    // `check` can resolve it even where a reader cannot.
     const p = place({ contacts: { emails: [{ value: "a@b.de", from: "P7", lane: "web" }], phones: [], socials: [], people: [] } });
     const html = buildHtml([p], manifest());
     expect(html).toContain('<span class="src">[P7]</span>');
     expect(html).not.toContain('<details class="q">');
+  });
+
+  it("keeps the link when the passage cache is full but the page is known", () => {
+    // The two are rationed differently on purpose: a passage is ~340 characters
+    // and a URL is ~60, so the file stays openable without the citation going
+    // dark. This is the case that produced 877 unopenable ids on a real run.
+    const dir = runWithPage("osm:n1", "P7", `${LONG} nothing matching here ${LONG}`);
+    const p = place({ contacts: { emails: [{ value: "a@b.de", from: "P7", lane: "web" }], phones: [], socials: [], people: [] }, pages: ["P7"] });
+    const ev = collectEvidence(dir, [p]);
+    expect(ev.pages.get(pageKey("osm:n1", "P7"))?.url).toBeTruthy();
+    const html = buildHtml([p], manifest(), { pages: ev.pages });
+    expect(html).not.toContain('<span class="src">[P7]</span>');
   });
 });
 

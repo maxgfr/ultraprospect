@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { toCsv, type CsvOptions } from "./csv.js";
 import { dossierPathFor } from "./dossier.js";
-import { collectQuotes } from "./excerpts.js";
+import { collectEvidence } from "./excerpts.js";
 import { buildHtml, HTML_ROW_CAP } from "./html.js";
 import { buildReport } from "./report.js";
 import { ranked } from "./score.js";
@@ -106,7 +106,7 @@ export function buildAll(places: readonly Place[], manifest: RunManifest, opts: 
   // Only the rows the page will show are worth reading evidence for: a quote
   // attached to a company nobody can scroll to is bytes with no reader.
   const visible = ranked(places).slice(0, HTML_ROW_CAP);
-  const ctx = opts.runDir ? { quotes: collectQuotes(opts.runDir, visible), dossiers: readDossiers(opts.runDir, visible) } : {};
+  const ctx = opts.runDir ? { ...collectEvidence(opts.runDir, visible), dossiers: readDossiers(opts.runDir, visible) } : {};
 
   const files = [
     { path: "PROSPECTS.csv", content: toCsv(places, opts) },

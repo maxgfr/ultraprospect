@@ -9795,6 +9795,9 @@ function toCsv(places, opts = {}) {
 // src/excerpts.ts
 import { existsSync as existsSync10, readFileSync as readFileSync9 } from "fs";
 import { join as join14 } from "path";
+function pageKey(placeId, pageId) {
+  return `${placeId} ${pageId}`;
+}
 function quoteKey(placeId, pageId, value) {
   return `${placeId}\0${pageId}\0${value}`;
 }
@@ -9862,26 +9865,29 @@ function citationsOf(place) {
     return true;
   });
 }
-function collectQuotes(runDir, places) {
-  const index = /* @__PURE__ */ new Map();
-  const pages = /* @__PURE__ */ new Map();
+function collectEvidence(runDir, places) {
+  const quotes = /* @__PURE__ */ new Map();
+  const refs = /* @__PURE__ */ new Map();
+  const parsed = /* @__PURE__ */ new Map();
   let budget = QUOTES_TOTAL;
   for (const place of places) {
-    if (budget <= 0) break;
     const slug = place.id.replace(/[^a-zA-Z0-9._-]/g, "_");
-    for (const { pageId, value } of citationsOf(place).slice(0, QUOTES_PER_PLACE)) {
-      if (budget <= 0) break;
+    const citations = citationsOf(place);
+    for (const [n, { pageId, value }] of citations.entries()) {
       const path = join14(runDir, "pages", slug, `${pageId}.md`);
-      if (!pages.has(path)) {
-        pages.set(path, existsSync10(path) ? parsePage(readFileSync9(path, "utf8")) : void 0);
+      if (!parsed.has(path)) {
+        parsed.set(path, existsSync10(path) ? parsePage(readFileSync9(path, "utf8")) : void 0);
       }
-      const page = pages.get(path);
+      const page = parsed.get(path);
       if (!page) continue;
-      index.set(quoteKey(place.id, pageId, value), excerpt(page, value, pageId));
-      budget--;
+      refs.set(pageKey(place.id, pageId), { url: page.url, role: page.role, fetchedAt: page.fetchedAt });
+      if (n < QUOTES_PER_PLACE && budget > 0) {
+        quotes.set(quoteKey(place.id, pageId, value), excerpt(page, value, pageId));
+        budget--;
+      }
     }
   }
-  return index;
+  return { quotes, pages: refs };
 }
 
 // src/summary.ts
@@ -10096,10 +10102,13 @@ var collapse2 = (s) => s.replace(/\s+/g, " ").trim();
 function block(label, body) {
   return body ? `<div class="b"><dt>${esc(label)}</dt><dd>${body}</dd></div>` : "";
 }
-function cite(place, pageId, value, quotes) {
+function cite(place, pageId, value, ev) {
   if (!pageId) return "";
-  const quote = quotes.get(quoteKey(place.id, pageId, value));
-  if (!quote) return `<span class="src">[${esc(pageId)}]</span>`;
+  const quote = ev.quotes.get(quoteKey(place.id, pageId, value));
+  if (!quote) {
+    const ref = ev.pages.get(pageKey(place.id, pageId));
+    return ref?.url ? `<span class="src">${link(ref.url, `[${pageId}]`)}${ref.fetchedAt ? ` ${esc(ref.fetchedAt.slice(0, 10))}` : ""}</span>` : `<span class="src">[${esc(pageId)}]</span>`;
+  }
   const head = [
     quote.url ? link(quote.url, quote.url) : "",
     quote.role ? esc(quote.role) : "",
@@ -10107,15 +10116,15 @@ function cite(place, pageId, value, quotes) {
   ].filter(Boolean).join(" \xB7 ");
   return `<details class="q"><summary>[${esc(pageId)}]</summary><div class="qt${quote.located ? "" : " miss"}"><p class="src">${head}</p><p>${esc(quote.text)}</p></div></details>`;
 }
-function sourced(items, href) {
+function sourced(place, items, ev, href) {
   if (!items.length) return "";
   return items.map((c) => {
-    const value = href ? `<a href="${esc(href(c.value))}">${esc(c.value)}</a>` : esc(c.value);
-    return `<span class="c">${value} <span class="src">[${esc(c.from)}]</span></span>`;
+    const value = href ? `<a href="${esc(href(c.value))}">${esc(c.value)}</a>` : link(c.value);
+    return `<span class="c">${value} ${cite(place, c.from, c.value, ev)}</span>`;
   }).join("");
 }
-function sourcedQuoted(place, items, quotes, href) {
-  return items.map((c) => `<span class="c"><a href="${esc(href(c.value))}">${esc(c.value)}</a> ${cite(place, c.from, c.value, quotes)}</span>`).join("");
+function sourcedQuoted(place, items, ev, href) {
+  return items.map((c) => `<span class="c"><a href="${esc(href(c.value))}">${esc(c.value)}</a> ${cite(place, c.from, c.value, ev)}</span>`).join("");
 }
 function hiringLine(place) {
   const sg = place.signals;
@@ -10227,7 +10236,7 @@ function openingsSection(order) {
 <ul class="jobs">${items}</ul>
 </section>`;
 }
-function answerBlock(place, brief, quotes) {
+function answerBlock(place, brief, ev) {
   if (!brief.asked) return "";
   const mentions = place.signals?.termMentions ?? [];
   const matched = place.signals?.matchedRoles ?? 0;
@@ -10237,9 +10246,9 @@ function answerBlock(place, brief, quotes) {
     bits.push(`<p class="hit"><b>Yes \u2014 their own site uses the words you asked about.</b> ${distinct} of ${brief.terms.length} terms, verbatim:</p>`);
     bits.push(
       `<ul class="quotes">${mentions.slice(0, 10).map((m) => {
-        const quoted = quotes.has(quoteKey(place.id, m.from, m.value));
+        const quoted = ev.quotes.has(quoteKey(place.id, m.from, m.value));
         const fallback = !quoted && m.note ? `<br><span class="src">\u2026${esc(collapse2(m.note))}\u2026</span>` : "";
-        return `<li>\u201C<b>${esc(m.value)}</b>\u201D ${cite(place, m.from, m.value, quotes)}${fallback}</li>`;
+        return `<li>\u201C<b>${esc(m.value)}</b>\u201D ${cite(place, m.from, m.value, ev)}${fallback}</li>`;
       }).join("")}</ul>`
     );
   } else if (brief.terms.length && place.signals) {
@@ -10329,10 +10338,10 @@ function sizeAndShape(place) {
   if (s.asOf) bits.push(`<span class="c warnc">as of ${esc(s.asOf)} \u2014 from a bulk snapshot, not from asking the register</span>`);
   return bits.join("");
 }
-function detail(place, columns, brief, quotes, dossier) {
+function detail(place, columns, brief, ev, dossier) {
   const hiring = hiringLine(place);
   const blocks = [
-    block("Answer", answerBlock(place, brief, quotes)),
+    block("Answer", answerBlock(place, brief, ev)),
     // A dossier somebody wrote outranks anything derived. Shown verbatim, and
     // labelled as written rather than measured.
     block("Written dossier", dossier ? `<div class="dossier">${mdLite(dossier)}</div>` : ""),
@@ -10347,10 +10356,10 @@ function detail(place, columns, brief, quotes, dossier) {
     block(
       "Contacts",
       [
-        sourcedQuoted(place, place.contacts.emails, quotes, (v) => `mailto:${v}`),
-        sourcedQuoted(place, place.contacts.phones, quotes, (v) => `tel:${v.replace(/[^\d+]/g, "")}`),
-        sourced(place.contacts.socials),
-        place.contacts.people.map((p) => `<span class="c">${esc(p.value)}${p.role ? ` \u2014 ${esc(p.role)}` : ""} ${cite(place, p.from, p.value, quotes)}</span>`).join("")
+        sourcedQuoted(place, place.contacts.emails, ev, (v) => `mailto:${v}`),
+        sourcedQuoted(place, place.contacts.phones, ev, (v) => `tel:${v.replace(/[^\d+]/g, "")}`),
+        sourced(place, place.contacts.socials, ev),
+        place.contacts.people.map((p) => `<span class="c">${esc(p.value)}${p.role ? ` \u2014 ${esc(p.role)}` : ""} ${cite(place, p.from, p.value, ev)}</span>`).join("")
       ].join("")
     ),
     block("Identifiers", legalIdBlock(place)),
@@ -10411,7 +10420,7 @@ function buildHtml(places, manifest, ctx = {}) {
   const order = ranked(places);
   const shown = Math.min(order.length, HTML_ROW_CAP);
   const visible = order.slice(0, HTML_ROW_CAP);
-  const quotes = ctx.quotes ?? /* @__PURE__ */ new Map();
+  const ev = { quotes: ctx.quotes ?? /* @__PURE__ */ new Map(), pages: ctx.pages ?? /* @__PURE__ */ new Map() };
   const COLUMNS = 10;
   const rows = visible.map((p, i) => {
     const h = p.signals?.isHiring === true ? `${p.signals.openRoles}` : p.signals?.isHiring === false ? "\u2014" : "?";
@@ -10431,7 +10440,7 @@ function buildHtml(places, manifest, ctx = {}) {
     const contact = [p.contacts.emails.length ? "\u2709" : "", p.contacts.phones.length ? "\u260E" : ""].filter(Boolean).join(" ");
     const reg = p.registry ? `${p.registry.id}` : "";
     return `<tr class="r" id="r${i}" data-h="${esc(hay)}" data-f="${esc(facets)}"><td class="n">${i + 1}</td><td><button type="button" class="tog" aria-expanded="false" aria-controls="d${esc(p.id)}">${esc(p.name)}</button></td><td class="n">${p.score?.total ?? 0}</td><td>${esc(p.score?.fit ?? "")}</td><td class="n">${h}</td><td>${esc(p.registry?.activityCode ?? p.category ?? "")}</td><td>${esc(p.address.commune ?? "")}</td><td>${contact}</td><td>${esc(reg)}</td><td>${site}</td></tr>
-${detail(p, COLUMNS, s.brief, quotes, ctx.dossiers?.get(p.id))}`;
+${detail(p, COLUMNS, s.brief, ev, ctx.dossiers?.get(p.id))}`;
   }).join("\n");
   const banners = [];
   if (manifest.truncated) {
@@ -10970,7 +10979,7 @@ function readDossiers(runDir, places) {
 }
 function buildAll(places, manifest, opts = {}) {
   const visible = ranked(places).slice(0, HTML_ROW_CAP);
-  const ctx = opts.runDir ? { quotes: collectQuotes(opts.runDir, visible), dossiers: readDossiers(opts.runDir, visible) } : {};
+  const ctx = opts.runDir ? { ...collectEvidence(opts.runDir, visible), dossiers: readDossiers(opts.runDir, visible) } : {};
   const files = [
     { path: "PROSPECTS.csv", content: toCsv(places, opts) },
     { path: "prospects.json", content: JSON.stringify(ranked(places), null, 2) + "\n" },

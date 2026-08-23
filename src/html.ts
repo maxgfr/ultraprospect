@@ -21,7 +21,7 @@
 //
 // The panel is markup, not something the script builds, so a browser with
 // JavaScript switched off shows every panel open rather than showing nothing.
-import { quoteKey, type QuoteIndex } from "./excerpts.js";
+import { pageKey, quoteKey, type Evidence, type PageIndex, type QuoteIndex } from "./excerpts.js";
 import { sizeBandLabel } from "./registry/index.js";
 import { ranked, SCORE_PART_LABELS } from "./score.js";
 import { coverage, summarise, type Brief, type RunSummary } from "./summary.js";
@@ -32,6 +32,8 @@ import { shortLabel, streetLine } from "./util.js";
 export interface HtmlContext {
   /** Passages cut from the pages the run cited. Empty when the run dir was not read. */
   quotes?: QuoteIndex;
+  /** Where each cited page came from, so a citation opens even with no passage. */
+  pages?: PageIndex;
   /** Written dossiers by place id, when an agent has produced any. */
   dossiers?: Map<string, string>;
 }
@@ -79,10 +81,17 @@ function block(label: string, body: string): string {
  * `<details>` rather than a scripted toggle, so a citation still opens with
  * JavaScript switched off.
  */
-function cite(place: Place, pageId: string | undefined, value: string, quotes: QuoteIndex): string {
+function cite(place: Place, pageId: string | undefined, value: string, ev: Evidence): string {
   if (!pageId) return "";
-  const quote = quotes.get(quoteKey(place.id, pageId, value));
-  if (!quote) return `<span class="src">[${esc(pageId)}]</span>`;
+  const quote = ev.quotes.get(quoteKey(place.id, pageId, value));
+  if (!quote) {
+    // No passage was collected for this one — the cache is rationed. The page
+    // is still known, so the id still opens. Only the excerpt is missing.
+    const ref = ev.pages.get(pageKey(place.id, pageId));
+    return ref?.url
+      ? `<span class="src">${link(ref.url, `[${pageId}]`)}${ref.fetchedAt ? ` ${esc(ref.fetchedAt.slice(0, 10))}` : ""}</span>`
+      : `<span class="src">[${esc(pageId)}]</span>`;
+  }
   const head = [
     quote.url ? link(quote.url, quote.url) : "",
     quote.role ? esc(quote.role) : "",
@@ -93,20 +102,20 @@ function cite(place: Place, pageId: string | undefined, value: string, quotes: Q
   return `<details class="q"><summary>[${esc(pageId)}]</summary><div class="qt${quote.located ? "" : " miss"}"><p class="src">${head}</p><p>${esc(quote.text)}</p></div></details>`;
 }
 
-/** A contact, always with the page id it was read from. */
-function sourced(items: readonly SourcedValue[], href?: (v: string) => string): string {
+/** A contact, always with an openable link to the page it was read from. */
+function sourced(place: Place, items: readonly SourcedValue[], ev: Evidence, href?: (v: string) => string): string {
   if (!items.length) return "";
   return items
     .map((c) => {
-      const value = href ? `<a href="${esc(href(c.value))}">${esc(c.value)}</a>` : esc(c.value);
-      return `<span class="c">${value} <span class="src">[${esc(c.from)}]</span></span>`;
+      const value = href ? `<a href="${esc(href(c.value))}">${esc(c.value)}</a>` : link(c.value);
+      return `<span class="c">${value} ${cite(place, c.from, c.value, ev)}</span>`;
     })
     .join("");
 }
 
 /** The same, with the cited passage attached to each value. */
-function sourcedQuoted(place: Place, items: readonly SourcedValue[], quotes: QuoteIndex, href: (v: string) => string): string {
-  return items.map((c) => `<span class="c"><a href="${esc(href(c.value))}">${esc(c.value)}</a> ${cite(place, c.from, c.value, quotes)}</span>`).join("");
+function sourcedQuoted(place: Place, items: readonly SourcedValue[], ev: Evidence, href: (v: string) => string): string {
+  return items.map((c) => `<span class="c"><a href="${esc(href(c.value))}">${esc(c.value)}</a> ${cite(place, c.from, c.value, ev)}</span>`).join("");
 }
 
 /**
@@ -293,7 +302,7 @@ function openingsSection(order: readonly Place[]): string {
  * the brief — nobody has tested it — and saying "no" there would turn our own
  * reach into a fact about them.
  */
-function answerBlock(place: Place, brief: Brief, quotes: QuoteIndex): string {
+function answerBlock(place: Place, brief: Brief, ev: Evidence): string {
   if (!brief.asked) return "";
   const mentions = place.signals?.termMentions ?? [];
   const matched = place.signals?.matchedRoles ?? 0;
@@ -310,9 +319,9 @@ function answerBlock(place: Place, brief: Brief, quotes: QuoteIndex): string {
           // not a companion: where the page itself could be quoted, printing
           // both shows the same sentence twice, the second time shorter and
           // undated.
-          const quoted = quotes.has(quoteKey(place.id, m.from, m.value));
+          const quoted = ev.quotes.has(quoteKey(place.id, m.from, m.value));
           const fallback = !quoted && m.note ? `<br><span class="src">…${esc(collapse(m.note))}…</span>` : "";
-          return `<li>“<b>${esc(m.value)}</b>” ${cite(place, m.from, m.value, quotes)}${fallback}</li>`;
+          return `<li>“<b>${esc(m.value)}</b>” ${cite(place, m.from, m.value, ev)}${fallback}</li>`;
         })
         .join("")}</ul>`,
     );
@@ -427,10 +436,10 @@ function sizeAndShape(place: Place): string {
 }
 
 /** Everything known about one company, in the shape a dossier is written in. */
-function detail(place: Place, columns: number, brief: Brief, quotes: QuoteIndex, dossier?: string): string {
+function detail(place: Place, columns: number, brief: Brief, ev: Evidence, dossier?: string): string {
   const hiring = hiringLine(place);
   const blocks = [
-    block("Answer", answerBlock(place, brief, quotes)),
+    block("Answer", answerBlock(place, brief, ev)),
     // A dossier somebody wrote outranks anything derived. Shown verbatim, and
     // labelled as written rather than measured.
     block("Written dossier", dossier ? `<div class="dossier">${mdLite(dossier)}</div>` : ""),
@@ -445,11 +454,11 @@ function detail(place: Place, columns: number, brief: Brief, quotes: QuoteIndex,
     block(
       "Contacts",
       [
-        sourcedQuoted(place, place.contacts.emails, quotes, (v) => `mailto:${v}`),
-        sourcedQuoted(place, place.contacts.phones, quotes, (v) => `tel:${v.replace(/[^\d+]/g, "")}`),
-        sourced(place.contacts.socials),
+        sourcedQuoted(place, place.contacts.emails, ev, (v) => `mailto:${v}`),
+        sourcedQuoted(place, place.contacts.phones, ev, (v) => `tel:${v.replace(/[^\d+]/g, "")}`),
+        sourced(place, place.contacts.socials, ev),
         place.contacts.people
-          .map((p) => `<span class="c">${esc(p.value)}${p.role ? ` — ${esc(p.role)}` : ""} ${cite(place, p.from, p.value, quotes)}</span>`)
+          .map((p) => `<span class="c">${esc(p.value)}${p.role ? ` — ${esc(p.role)}` : ""} ${cite(place, p.from, p.value, ev)}</span>`)
           .join(""),
       ].join(""),
     ),
@@ -537,7 +546,7 @@ export function buildHtml(places: readonly Place[], manifest: RunManifest, ctx: 
   const order = ranked(places);
   const shown = Math.min(order.length, HTML_ROW_CAP);
   const visible = order.slice(0, HTML_ROW_CAP);
-  const quotes: QuoteIndex = ctx.quotes ?? new Map();
+  const ev: Evidence = { quotes: ctx.quotes ?? new Map(), pages: ctx.pages ?? new Map() };
   const COLUMNS = 10;
 
   const rows = visible
@@ -564,7 +573,7 @@ export function buildHtml(places: readonly Place[], manifest: RunManifest, ctx: 
       const contact = [p.contacts.emails.length ? "✉" : "", p.contacts.phones.length ? "☎" : ""].filter(Boolean).join(" ");
       const reg = p.registry ? `${p.registry.id}` : "";
       return `<tr class="r" id="r${i}" data-h="${esc(hay)}" data-f="${esc(facets)}"><td class="n">${i + 1}</td><td><button type="button" class="tog" aria-expanded="false" aria-controls="d${esc(p.id)}">${esc(p.name)}</button></td><td class="n">${p.score?.total ?? 0}</td><td>${esc(p.score?.fit ?? "")}</td><td class="n">${h}</td><td>${esc(p.registry?.activityCode ?? p.category ?? "")}</td><td>${esc(p.address.commune ?? "")}</td><td>${contact}</td><td>${esc(reg)}</td><td>${site}</td></tr>
-${detail(p, COLUMNS, s.brief, quotes, ctx.dossiers?.get(p.id))}`;
+${detail(p, COLUMNS, s.brief, ev, ctx.dossiers?.get(p.id))}`;
     })
     .join("\n");
 

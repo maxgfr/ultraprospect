@@ -451,6 +451,25 @@ describe("index.html", () => {
     expect(html).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|sendBeacon|new WebSocket|EventSource|\bimport\s*\(/i);
   });
 
+  it("makes every citation openable, even where no passage was collected", () => {
+    // Measured on a Hamburg run: 877 of 1251 citations rendered as a bare
+    // `[P42]` — an id the reader cannot resolve to anything. The passage cache
+    // is capped so the file stays openable (QUOTES_PER_PLACE, QUOTES_TOTAL),
+    // and past the cap the citation lost its link entirely.
+    //
+    // But the page's URL is known for every citation, always, and it costs ~60
+    // bytes against a passage's ~340. So the two are separate: the passage is
+    // rationed, the link never is. A source you cannot open is not a source.
+    const withContact = place({
+      contacts: { emails: [{ value: "kontakt@acme.de", from: "P4", lane: "web" }], phones: [], socials: [], people: [] },
+      pages: ["P4"],
+    });
+    const pages = new Map([["osm:n1 P4", { url: "https://acme.de/impressum", role: "legal", fetchedAt: "2026-08-23T10:00:00.000Z" }]]);
+    const page = buildHtml([withContact], manifest(), { pages });
+    expect(page).toContain("https://acme.de/impressum");
+    expect(page).not.toMatch(/<span class="src">\[P4\]<\/span>/);
+  });
+
   it("carries no map, and says the coordinates on the row instead", () => {
     // The map was removed rather than improved. Points on white with no
     // coastline and no street tell a prospector nothing they can act on, and a
