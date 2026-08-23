@@ -70,6 +70,23 @@ describe("extractPeople", () => {
     expect(de("Geschäftsführer: info@acme.de")).toEqual([]);
   });
 
+  it("strips the link furniture a team page wraps a name in", () => {
+    // Observed verbatim: "Gründer: LinkedIn-Profil von Martin Hammer". The name
+    // is real and the prefix is the anchor text around it. Rejecting the whole
+    // string loses a real person; keeping it ships a contact called "LinkedIn".
+    expect(de("Gründer: LinkedIn-Profil von Martin Hammer")[0]?.value).toBe("Martin Hammer");
+    expect(de("Partner: Xing-Profil von Johannes Leßmann")[0]?.value).toBe("Johannes Leßmann");
+  });
+
+  it("refuses a department or a product standing where a person should", () => {
+    // Observed verbatim: "Partner • Corporate Planning Cloud" and "CTO Public
+    // Sector". Both are capitalised word pairs beside a real role label, and
+    // neither is anybody.
+    expect(de("Partner: Corporate Planning Cloud")).toEqual([]);
+    expect(de("CTO: Public Sector")).toEqual([]);
+    expect(de("Head of: Digital Solutions")).toEqual([]);
+  });
+
   it("does not report the same person twice from one page", () => {
     const twice = de("Vertreten durch: René Schuch\nGeschäftsführer: René Schuch");
     expect(twice).toHaveLength(1);
