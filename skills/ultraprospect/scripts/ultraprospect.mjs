@@ -12380,7 +12380,7 @@ async function cmdResolve(values, bools) {
     const town = shortLabel(manifest2.target.label);
     const todo = buildResolveTodo(places, town, manifest2.target.countryCode, selection);
     const plan = todo.items;
-    writeJson(runDir, "RESOLVE.todo.json", { ...todo, items: plan });
+    writeJson(runDir, "RESOLVE.todo.json", todo);
     if (bools.has("json")) out(jsonLine(plan));
     else for (const item of plan) for (const q of item.queries) out(q);
     say("");
