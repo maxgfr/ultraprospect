@@ -387,6 +387,30 @@ describe("REPORT.md", () => {
 describe("index.html", () => {
   const html = buildHtml([place({ lat: 48.8, lon: 2.4, score: { total: 10, parts: {} } })], manifest());
 
+  it("binds its script to the prospects table, not to whichever tbody comes first", () => {
+    // The page carries TWO tables: Coverage (Lane/Mode/Returned) above, and the
+    // prospects below. `document.querySelector("tbody")` takes the first one in
+    // the document, which is Coverage — and Coverage holds no `tr.r` at all.
+    //
+    // Measured on a real Hamburg run: `rows` came out empty, so the click
+    // listener sat on the wrong table and every interactive feature on the page
+    // was dead at once — opening a company, the search box, the facet chips,
+    // the column sort, the row counter, and clicking a point on the map (which
+    // resolves its row by id but then needs the `detail` link this loop
+    // assigns). Nothing threw; the page just stopped responding.
+    //
+    // So the selector must name the prospects table. Anchoring the test on the
+    // rendered markup rather than on the source string keeps it honest: the id
+    // has to exist on the table AND be what the script looks for.
+    const id = html.match(/<table id="([a-z-]+)">\s*<thead><tr><th class="n">#<\/th>/)?.[1];
+    expect(id, "the prospects table needs an id the script can address").toBeTruthy();
+    expect(html).toContain(`#${id} tbody`);
+
+    // And the Coverage table must still come first in the document, because
+    // that ordering is exactly what made the bare selector wrong.
+    expect(html.indexOf("<th>Lane</th>")).toBeLessThan(html.indexOf(`<table id="${id}">`));
+  });
+
   it("draws map points a human can actually see, in both themes", () => {
     // Measured on a real Hamburg run: the default point rendered at 1.68:1
     // against the light background and 1.65:1 against the dark one, and 94% of

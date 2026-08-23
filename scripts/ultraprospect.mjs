@@ -10587,7 +10587,7 @@ ${chips}
 ${order.length > shown ? `<p class="cap">Showing the ${shown} highest-ranked of ${order.length} companies. The rest are in <code>PROSPECTS.csv</code> and <code>prospects.json</code> \u2014 this table is capped so a browser can open it, not because the run stopped there.</p>` : ""}
 <p class="cap">Every company name opens a panel: the verdict, the score broken into its terms, each contact with the page it was read from, the open roles, and what the register filed.</p>
 <div class="scroll">
-<table>
+<table id="prospects">
 <thead><tr><th class="n">#</th><th data-sort="t">Company</th><th class="n" data-sort="n">Score</th><th data-sort="t">Fit</th><th class="n" data-sort="n">Roles</th><th data-sort="t">Activity</th><th data-sort="t">Town</th><th data-sort="t">Contact</th><th data-sort="t">Register</th><th data-sort="t">Website</th></tr></thead>
 <tbody>
 ${rows}
@@ -10607,7 +10607,7 @@ ${s.notes.lines.length ? `<details><summary>Run notes (${s.notes.distinct === s.
 // Without JavaScript every panel is open and the table is still a table, which
 // is why the cap note above is markup rather than something this script writes.
 (function(){
-  var tb=document.querySelector("tbody"), q=document.getElementById("q"), c=document.getElementById("count");
+  var tb=document.querySelector("#prospects tbody"), q=document.getElementById("q"), c=document.getElementById("count");
   if(!tb) return;
   var rows=[].slice.call(tb.querySelectorAll("tr.r")), total=rows.length, on={};
   rows.forEach(function(r){ r.detail = r.nextElementSibling; });
