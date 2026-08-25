@@ -1,6 +1,6 @@
 ---
 name: ultraprospect
-description: "Use when the user wants every company in a PLACE — a town, a street, a radius — turned into a qualified, sourced prospect list. A zero-dep engine (node scripts/ultraprospect.mjs, no keys, no install) sweeps OpenStreetMap worldwide and attaches whichever company register a country has. France and the UK can be ENUMERATED keylessly — the UK from Companies House's monthly open data, after `ingest`. Germany's export names the HRB holder VIES will not. Elsewhere it CONFIRMS each company from the registration its own site must publish by law (Impressum, aviso legal), against VIES, GLEIF, Brreg, PRH, ARES or EDGAR. It hands YOU the judgment it refuses: which pairs are one business, what a company does, whether it fits the brief. It REFUSES an ambiguous place, REFUSES an uncertain merge, DATES every snapshot record, and DECLARES whether a territory was swept or confirmed. Triggers: 'every company in X', 'prospect list for <area>', 'quelles entreprises à <ville>', 'Firmen in <Stadt>'."
+description: "Build a sourced prospect list for every company in a place, street, or radius. Use for territory-wide company discovery, register confirmation, website resolution, qualification, and citation-aware export; not for one-company lookups."
 license: MIT
 metadata:
   version: 3.5.0
@@ -76,7 +76,7 @@ gate. Read it rather than guessing a flag.
 | List every company in a town, street or radius | `scan --where "<place>"` |
 | Same, narrowed to an industry or a company size | `scan --where "<place>" --section J,M --min-employees 10` |
 | Answer the pairs the matcher would not decide | `match --run <dir> --apply verdicts.json` |
-| Find each company's website (your WebSearch) | `resolve --run <dir> --queries`, then `--web-results` |
+| Find each company's website (the host's native web search) | `resolve --run <dir> --queries`, then `--web-results` |
 | Read those websites — what they do, who they hire | `enrich --run <dir> --tier 1`, then `--tier 2 --limit 20` |
 | Attach a register identity outside France's sweep | `confirm --run <dir>` |
 | Rank what you found | `score --run <dir>` |
@@ -190,7 +190,7 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    with no web presence instead of as a search nobody ran.
 
    So: `resolve --queries` writes `RESOLVE.todo.json` and prints the queries.
-   **Run your own WebSearch once per query.** Pool EVERY hit into one JSON array
+   **Run the host's native web search once per query.** Pool EVERY hit into one JSON array
    — duplicates, directories, noise and all, `[{"placeId","url","title",
    "snippet"}]` — and pass it back with `--web-results`. Do not filter: you are
    finding candidates, not choosing. The engine fetches each one and keeps it
