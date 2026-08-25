@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [3.5.1](https://github.com/maxgfr/ultraprospect/compare/v3.5.0...v3.5.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* make ultraprospect compatible with Codex ([2507141](https://github.com/maxgfr/ultraprospect/commit/250714174c11e5d2250c3b8c597da52f9d4dfc0d))
+
 # [3.5.0](https://github.com/maxgfr/ultraprospect/compare/v3.4.0...v3.5.0) (2026-08-23)
 
 
