@@ -2759,7 +2759,7 @@ function readBody(req) {
 }
 
 // src/version.ts
-var VERSION = "3.5.1";
+var VERSION = "3.6.0";
 
 // src/engine.ts
 function brandEngine() {
