@@ -4,7 +4,12 @@ export default defineConfig({
   test: {
     // Tests write runs into /tmp/ultraprospect and read static fixtures —
     // never collect tests from those trees.
-    exclude: [...configDefaults.exclude, "**/.ultraprospect/**", "tests/fixtures/**"],
+    // `.claude/worktrees/**` holds full checkouts of this same repo, so without
+    // it the suite collects every test three times over — and the copies share
+    // one ULTRAPROSPECT_CACHE_DIR, so the snapshot and connector tests collide
+    // with each other and fail for reasons that have nothing to do with the
+    // code under review.
+    exclude: [...configDefaults.exclude, "**/.ultraprospect/**", "tests/fixtures/**", "**/.claude/**"],
     // Pins ULTRAPROSPECT_CACHE_DIR to a throwaway dir and forbids real network
     // from the unit suite — every upstream in this skill is a live public API,
     // and a test that quietly reaches Overpass measures the weather, not the code.
