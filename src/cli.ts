@@ -50,7 +50,8 @@ import {
   unreadableSnapshots,
   type SnapshotSource,
 } from "./snapshot.js";
-import { buildResolveTodo, resolveTargets, runResolve, type WebHit } from "./resolve.js";
+import { buildResolveTodo, resolveTargets, runResolve, skipOutcomeFor, type WebHit } from "./resolve.js";
+import { SKIP_REASONS, describeSkips } from "./skip.js";
 import { newPageStore } from "./pages.js";
 import { enrichable, persistEnrich, runEnrich } from "./enrich.js";
 import { applyFit, ranked, scoreAll } from "./score.js";
@@ -130,6 +131,8 @@ export const VALUE_FLAGS = [
   "out",
   "run",
   "osm-groups",
+  "category",
+  "category-lane",
   "activity",
   "section",
   "size-band",
@@ -149,6 +152,7 @@ export const VALUE_FLAGS = [
   "terms-on",
   "tier",
   "only",
+  "skip",
   "max-pages",
   "concurrency",
   "icp",
@@ -212,6 +216,13 @@ TARGETING (scan, where)
   --pick <n>             Take the Nth candidate instead of refusing an ambiguous query.
 
 FILTERS (scan)
+  --category <list>      Aim BOTH lanes with one vocabulary — the same one places.json
+                         prints back: an OSM tag (amenity=cafe), a whole OSM key (shop),
+                         or a register code (naf=56.30Z, nace=I). Refuses when it would
+                         leave one lane sweeping unfiltered; --osm-groups and --section
+                         each reach only their own lane, which is the mismatch this closes.
+  --category-lane <l>    osm | registry | both. Say that aiming only one lane is
+                         deliberate, and accept the other sweeping the whole territory.
   --osm-groups <list>    OSM catalogue groups: shop,office,craft,healthcare,amenity,tourism,leisure,club.
   --activity <list>      Activity codes in the register's own scheme, e.g. 62.01Z,70.22Z (NAF, France).
   --section <list>       Section letters in the country's own scheme, e.g. J,M (NACE across Europe).
@@ -231,6 +242,11 @@ WEBSITE DISCOVERY (resolve)
   --web-results <file>   Hits from your own WebSearch: [{url,title,snippet,placeId?}]. "-" reads stdin.
   --engine-search        Fall back to the keyless engines: every query, pooled and rank-fused.
   --limit <n>            Only resolve this many places.
+  --skip <reasons>       Spend no search on rows that cannot become a prospect:
+                         chain,unnamed,public,vacant. Each reads a tag a mapper
+                         asserted (brand:wikidata, operator:type, shop=vacant, no
+                         name), never a guess from the name. Counted and reported;
+                         the rows stay in places.json with their reason.
   --only <ids>           Resolve just these place ids, comma-separated. --limit takes a
                          prefix; this takes the ones you actually care about. Narrows
                          --queries too, so the fanned-out worklist matches the fold.
@@ -320,6 +336,34 @@ function say(message: string): void {
 
 function out(message: string): void {
   process.stdout.write(`${message}\n`);
+}
+
+/**
+ * `--skip`, validated rather than coerced.
+ *
+ * A typo silently resolves to "skip nothing", so the run spends the searches
+ * the user asked it not to and says it honoured the flag. Refusing is the only
+ * way that failure is visible.
+ */
+function skipReasons(raw: string | undefined): string[] | undefined {
+  const items = list(raw);
+  if (!items) return undefined;
+  const bad = items.filter((r) => !(SKIP_REASONS as readonly string[]).includes(r.toLowerCase()));
+  if (bad.length) throw new UsageError(`--skip: no such reason as ${bad.join(", ")} — choose from ${SKIP_REASONS.join(", ")}`);
+  return items.map((r) => r.toLowerCase());
+}
+
+/**
+ * `--category-lane`, validated rather than coerced.
+ *
+ * A typo here silently re-opens the lane the flag was meant to excuse, so an
+ * unrecognised value is a usage error and not a fallback to "both".
+ */
+function categoryLane(raw: string | undefined): "osm" | "registry" | "both" | undefined {
+  if (!raw) return undefined;
+  const v = raw.trim().toLowerCase();
+  if (v === "osm" || v === "registry" || v === "both") return v;
+  throw new UsageError(`--category-lane must be osm, registry or both — got ${JSON.stringify(raw)}`);
 }
 
 function list(raw: string | undefined): string[] | undefined {
@@ -624,6 +668,8 @@ async function cmdScan(values: Record<string, string>, bools: ReadonlySet<string
 
   const outcome = await runScan(target, {
     osmGroups: list(values["osm-groups"]),
+    categories: list(values.category),
+    categoryLane: categoryLane(values["category-lane"]),
     activityCodes: list(values.activity),
     sections: list(values.section),
     sizeBands: list(values["size-band"]),
@@ -671,7 +717,7 @@ async function cmdScan(values: Record<string, string>, bools: ReadonlySet<string
     say("");
     say("  ⚠ TRUNCATED — this run does NOT cover the whole territory:");
     for (const lane of outcome.manifest.lanes.filter((l) => l.truncated)) say(`      ${lane.lane}: ${lane.reason}`);
-    say("      narrow with --section / --activity / --min-employees, or raise --max-results");
+    say("      narrow with --category / --section / --min-employees, or raise --max-results");
   }
   say("");
   say(`next: ultraprospect resolve --run ${run.dir}`);
@@ -726,7 +772,7 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
   const runDir = resolveRun(values.run);
   const places = readPlaces(runDir);
   const limit = values.limit ? clampInt(values.limit, 1, 100_000, 50) : undefined;
-  const selection = { only: list(values.only), limit };
+  const selection = { only: list(values.only), skip: skipReasons(values.skip), limit };
   const targets = resolveTargets(places, selection);
 
   // The queries lane: the engine sizes the sweep, the agent runs its own
@@ -748,6 +794,13 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
     if (bools.has("json")) out(jsonLine(plan));
     else for (const item of plan) for (const q of item.queries) out(q);
     say("");
+    // The worklist is where the skip actually costs the user something — these
+    // are the searches they will run by hand — so the number NOT spent belongs
+    // here, not only on the fold that comes back later.
+    if (selection.skip?.length) {
+      const line = describeSkips(skipOutcomeFor(places, selection), Boolean(selection.limit));
+      if (line) say(`resolve: ${line}`);
+    }
     say(`resolve: ${plan.length} place(s) need a website, ${plan.reduce((n, p) => n + p.queries.length, 0)} quer(y|ies) to run.`);
     say(`  worklist: ${join(runDir, "RESOLVE.todo.json")}`);
     say("  Run your own WebSearch once per query. Pool EVERY hit into ONE JSON array,");

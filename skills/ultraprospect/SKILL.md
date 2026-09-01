@@ -74,6 +74,7 @@ gate. Read it rather than guessing a flag.
 | Check a place name resolves, before spending a sweep | `where "<place>"` |
 | Get a keyless register for the UK, Germany or Estonia, once | `ingest --country gb` · `de` · `ee` |
 | List every company in a town, street or radius | `scan --where "<place>"` |
+| Same, narrowed to ONE KIND OF BUSINESS, both lanes | `scan --where "<place>" --category amenity=cafe,naf=56.30Z` |
 | Same, narrowed to an industry or a company size | `scan --where "<place>" --section J,M --min-employees 10` |
 | Answer the pairs the matcher would not decide | `match --run <dir> --apply verdicts.json` |
 | Find each company's website (the host's native web search) | `resolve --run <dir> --queries`, then `--web-results` |
@@ -96,6 +97,9 @@ ultraprospect where "Vincennes" --country fr                  # resolve, or list
 ultraprospect scan --where "Vincennes" --country fr           # both lanes, fused
 ultraprospect scan --lat 48.8566 --long 2.3522 --radius 500m  # a point and a radius
 ultraprospect scan --where "Lyon" --section M --min-employees 20 --out ./runs
+ultraprospect scan --where "Vincennes" --country fr --category amenity=cafe,naf=56.30Z   # ONE trade, BOTH lanes
+ultraprospect scan --where "Kreuzberg, Berlin" --country de --category office=it          # where no register sweeps, OSM alone
+ultraprospect resolve --run <dir> --queries --skip chain,unnamed,public,vacant            # spend no search on a bank branch
 ultraprospect ingest --country gb                             # Companies House monthly snapshot, 470 MB, keyless
 ultraprospect ingest --country de                             # the German register export, 260 MB, keyless
 ultraprospect ingest --list                                   # what is cached, which vintage, how much disk
@@ -136,6 +140,47 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    `--min-employees`, `--section` and `--activity` are how a run stays useful; the
    register lane stops at `--max-results` and declares itself partial rather
    than spending twenty minutes.
+
+2a. **`--category` is the only filter that aims BOTH lanes. Reach for it first.**
+
+   The older filters each reach one lane and only one: `--osm-groups` narrows
+   OpenStreetMap, `--section` / `--activity` / `--min-employees` narrow the
+   register. Neither knows the other exists, so "I want cafés" said with either
+   of them alone half-narrows the run. Measured on a Saint-Mandé sweep:
+   `--section I` gave 154 register rows and left the OSM lane returning all 295
+   places in town, of which 5 were cafés — one intent, two territories, and
+   nothing in the output says so.
+
+   `--category` takes ONE vocabulary aimed at both, and it is the vocabulary
+   `places.json` already prints back at you:
+
+   | You type | Lane | Means |
+   |---|---|---|
+   | `amenity=cafe` | OSM | that exact tag |
+   | `shop` or `shop=*` | OSM | the whole key |
+   | `naf=56.30Z`, `sic-uk=56302`, `pkd=…` | register | an activity code, in the register's own scheme |
+   | `nace=I` | register | a section letter |
+
+   So the round trip holds: whatever `category` a row carries, you can paste it
+   straight back into `--category` on the next run. The scheme prefixes come off
+   the connectors themselves, not a hardcoded list.
+
+   **It refuses rather than half-narrow.** Name only OSM tags where a register
+   CAN be swept and the run stops, because the register lane would enumerate the
+   whole territory beside your five cafés. Answer it by naming the other lane
+   too, or by saying the asymmetry is deliberate with `--category-lane osm`.
+   Where no register can be enumerated at all — Germany, Spain, most of the
+   world — there is no second lane to aim and an OSM-only category just runs.
+
+   Two things it will not let you do, both of which used to return a confident
+   nothing: mixing a section with an activity code outside it (`nace=I,naf=10.71C`
+   — the register ANDs them, so the answer is zero rows), and excusing a lane
+   that was not going to run anyway.
+
+   Measured, same town: `--category amenity=cafe,amenity=restaurant,shop=bakery,
+   naf=56.10A,naf=56.30Z,naf=10.71C` returns 48 OSM + 65 register = 89 places
+   with **24 matched across both lanes** — against 422 places and 27 matches
+   unfiltered. Nearly all the matches, a fifth of the noise.
 
 2b. **Ingest first where a register publishes a file instead of an API.** The
    United Kingdom and Germany both do, and both exports are keyless.
@@ -189,14 +234,56 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    silence produced 11 corroborated sites out of 1164, which reads as a town
    with no web presence instead of as a search nobody ran.
 
-   So: `resolve --queries` writes `RESOLVE.todo.json` and prints the queries.
-   **Run the host's native web search once per query.** Pool EVERY hit into one JSON array
-   — duplicates, directories, noise and all, `[{"placeId","url","title",
-   "snippet"}]` — and pass it back with `--web-results`. Do not filter: you are
-   finding candidates, not choosing. The engine fetches each one and keeps it
-   only if the page carries the company's registration number, its street address or the
-   distinctive part of its name; a domain that ranked first and corroborates
-   nothing is recorded as `unverified`, never as the website.
+   **The keyless engines are blocked, so this loop is not optional.** Measured
+   live: DuckDuckGo answers an anti-bot challenge with HTTP 202, DuckDuckGo Lite
+   the same, Mojeek serves a challenge with a 200 and then a 403. All four, one
+   run. `--engine-search` is a probe, not a plan — when it says **blocked**,
+   nothing was searched, which is NOT the same as nothing being there.
+
+   The loop, mechanically:
+
+   ```bash
+   # 1. size it, and spend nothing on rows that cannot become a prospect
+   ultraprospect resolve --run <dir> --queries --skip chain,unnamed,public,vacant
+
+   # 2. run EVERY printed query through your own WebSearch, one at a time
+
+   # 3. pool every hit into ONE array — duplicates, directories, noise and all
+   cat > hits.json <<'JSON'
+   [
+     {"placeId": "osm:n248494308", "url": "https://…", "title": "…", "snippet": "…"},
+     {"placeId": "osm:n248494308", "url": "https://…", "title": "…", "snippet": "…"},
+     {"placeId": "osm:n1585168700", "url": "https://…", "title": "…", "snippet": "…"}
+   ]
+   JSON
+
+   # 4. hand them back — the engine fetches each one and judges it
+   ultraprospect resolve --run <dir> --web-results hits.json
+   ```
+
+   `placeId` is the id from `RESOLVE.todo.json`; several hits share one, and
+   that is expected. **Do not filter** — you are finding candidates, not
+   choosing. The engine fetches each one and keeps it only if the page carries
+   the company's registration number, its street address or the distinctive part
+   of its name; a domain that ranked first and corroborates nothing is recorded
+   as `unverified`, never as the website.
+
+   **Spend the searches on rows that could buy something.** `--skip` drops the
+   ones that cannot, and every test reads a tag a mapper ASSERTED rather than
+   guessing from a name: `chain` reads `brand`/`brand:wikidata`, `public` reads
+   `operator:type`, `vacant` reads `shop=vacant` and `disused:*`, `unnamed` is a
+   row whose name is literally its own tag. Measured on the Saint-Mandé sweep:
+   76 of 420 rows skipped — 42 chain, 24 unnamed, 9 public, 6 vacant, five of them
+   counted twice — which is 104 searches not run on BNP Paribas branches and
+   primary schools. Nothing is
+   deleted: the rows keep their place in `places.json`, and `RESOLVE.todo.json`
+   gains a `skipped` array naming each id and the reasons that applied — so you
+   can disagree with a call and re-run without it, rather than take the total on
+   trust.
+
+   Two registers cannot be aimed at all and the run says so rather than
+   pretending: Estonia enumerates but its export carries no activity code, so a
+   register term there is refused instead of accepted and dropped.
 
    **Aim the lane on a big territory.** It is sequential and fetches per place,
    so a two-thousand-place sweep is a long run. `--limit` takes a PREFIX of the
@@ -337,6 +424,10 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | `confirm` found nothing at all in the US | Expected. There is no US company register and no published company number; identity there rests on address and name. |
 | A merged place looks like two companies | Adjudication was skipped or answered too generously. Check `matchConfidence` and the raw lanes in `osm.json` / `registry.json`. |
 | Thousands of dormant one-person companies | Add `--min-employees`; ceased companies are already excluded unless `--include-ceased`. |
+| The run is full of schools, bank branches and EV chargers | `--osm-groups amenity` is a whole catalogue group, not a trade. Aim it with `--category amenity=cafe,…`, and drop what cannot buy with `resolve --skip chain,public`. |
+| `scan` refused: "left the … lane sweeping unfiltered" | Working as designed. A `--category` list that narrows one lane and not the other produces a run whose halves cover different territories. Name a term for the other lane, or `--category-lane <the one you meant>`. |
+| `scan` refused: activity codes "fall outside the sections asked for" | The register ANDs section and activity code, so `nace=I,naf=10.71C` would return zero rows and read as an empty trade. Ask for one or the other. |
+| `--max-results` truncated before the sector I wanted | The register splits by NACE section in order, so a budget spent early never reaches the later letters. Name the trade with `--category naf=…` instead of paying for sections you did not want. |
 | `resolve` exits 2 saying no results were supplied | Working as designed. Run `--queries`, do the searching, pass `--web-results`. |
 | `--engine-search` says the keyless fallback was **blocked** | The engines refused the request — a 403, or an anti-bot challenge served with a 200. Nothing was searched, which is NOT the same as nothing being there. Do your own WebSearch and pass `--web-results`; never report the run as a territory with no web presence. |
 | `--engine-search` corroborated almost nothing | Expected, and the reason `resolve` refuses to run without your hits. Measured on a Saint-Mandé sweep: 0 sites out of 12 through the keyless fallback, 9 out of 12 from the same queries run through the agent's own WebSearch. |
@@ -370,6 +461,12 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
   ownership; only the fetched page corroborating itself is.
 - Never present a run whose `check` exits non-zero. There is no "with caveats".
 - Never turn the `--icp` text into a number. The engine refuses to; so should you.
+- Never report a `--skip`ped row as absent from the territory. It was not
+  searched for, which is a decision about budget, not a finding about the world.
+- Never present a half-narrowed run as one trade: `--section` and `--osm-groups`
+  each reach one lane, and the run's two halves then describe different
+  territories. `--category` is the one that aims both, and it refuses rather
+  than let that happen silently.
 - Never describe a `watch` disappearance as a closure. A company drops out of a
   sweep for half a dozen reasons; only the register can say a business ceased,
   and `DELTA.md` keeps the two apart for exactly that reason.

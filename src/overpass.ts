@@ -116,7 +116,12 @@ function scopeClause(area: number | undefined, bbox: [number, number, number, nu
 }
 
 export function buildQuery(area: number | undefined, bbox: [number, number, number, number], opts: OverpassOptions = {}): string {
-  const groups = opts.groups?.length ? opts.groups : Object.keys(OSM_TAG_GROUPS);
+  // The catalogue is the DEFAULT, not an addition. A caller who supplied
+  // explicit filters has said what it wants at a finer grain than any group,
+  // and unioning the catalogue back in would hand `--category amenity=cafe` the
+  // whole town — the exact failure the flag exists to remove.
+  const fallback = opts.extraFilters?.length ? [] : Object.keys(OSM_TAG_GROUPS);
+  const groups = opts.groups?.length ? opts.groups : fallback;
   const filters = [...groups.map((g) => OSM_TAG_GROUPS[g]).filter((f): f is string => Boolean(f)), ...(opts.extraFilters ?? [])];
   const { header, suffix } = scopeClause(area, bbox);
   const body = filters.map((f) => `  nwr${f}${suffix};`).join("\n");
