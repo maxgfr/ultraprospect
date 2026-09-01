@@ -251,6 +251,20 @@ export interface Place {
   lat?: number;
   lon?: number;
   category?: string;
+  /**
+   * What website discovery FOUND for this place, once it has run.
+   *
+   * Undefined means `resolve` has not looked at this place yet — which is a
+   * different fact from `"none"`, and the one that matters: "this business has
+   * no website" is a claim someone will act on, and it may only be made about a
+   * place that was actually searched for. Same discipline as three-valued
+   * `isHiring`.
+   *
+   * `social-only` is its own state rather than a footnote in a summary line: for
+   * a small trader a Facebook page is very often the entire web presence, and
+   * that is a fact about the business, not a gap in the run.
+   */
+  webPresence?: "own-site" | "social-only" | "none";
   website?: {
     url: string;
     confidence: "declared" | "corroborated" | "unverified";

@@ -50,7 +50,7 @@ import {
   unreadableSnapshots,
   type SnapshotSource,
 } from "./snapshot.js";
-import { buildResolveTodo, resolveTargets, runResolve, skipOutcomeFor, type WebHit } from "./resolve.js";
+import { DEFAULT_QUERIES_PER_PLACE, buildResolveTodo, resolveTargets, runResolve, skipOutcomeFor, type WebHit } from "./resolve.js";
 import { SKIP_REASONS, describeSkips } from "./skip.js";
 import { newPageStore } from "./pages.js";
 import { enrichable, persistEnrich, runEnrich } from "./enrich.js";
@@ -153,6 +153,7 @@ export const VALUE_FLAGS = [
   "tier",
   "only",
   "skip",
+  "queries-per-place",
   "max-pages",
   "concurrency",
   "icp",
@@ -247,6 +248,9 @@ WEBSITE DISCOVERY (resolve)
                          asserted (brand:wikidata, operator:type, shop=vacant, no
                          name), never a guess from the name. Counted and reported;
                          the rows stay in places.json with their reason.
+  --queries-per-place <n>  Distinct search angles per place (default 3, max 8). You run each
+                         one by hand, so this is a budget: raise it on an aimed run of forty,
+                         lower it on a sweep of two thousand.
   --only <ids>           Resolve just these place ids, comma-separated. --limit takes a
                          prefix; this takes the ones you actually care about. Narrows
                          --queries too, so the fanned-out worklist matches the fold.
@@ -772,7 +776,12 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
   const runDir = resolveRun(values.run);
   const places = readPlaces(runDir);
   const limit = values.limit ? clampInt(values.limit, 1, 100_000, 50) : undefined;
-  const selection = { only: list(values.only), skip: skipReasons(values.skip), limit };
+  const selection = {
+    only: list(values.only),
+    skip: skipReasons(values.skip),
+    limit,
+    queriesPerPlace: values["queries-per-place"] ? clampInt(values["queries-per-place"], 1, 8, DEFAULT_QUERIES_PER_PLACE) : undefined,
+  };
   const targets = resolveTargets(places, selection);
 
   // The queries lane: the engine sizes the sweep, the agent runs its own

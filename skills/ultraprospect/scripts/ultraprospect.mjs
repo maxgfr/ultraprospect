@@ -4419,6 +4419,8 @@ async function fetchSirene(query, opts = {}) {
       if (!bySiret.has(key)) bySiret.set(key, r);
     }
   };
+  const sectionsReached = [];
+  const sectionsUnreached = [];
   async function walk(part, label, depth) {
     if (budget.left <= 0) return;
     const probe = await fetchPage(part, 1, 1);
@@ -4434,7 +4436,11 @@ async function fetchSirene(query, opts = {}) {
         opts.onNote?.(`sirene: ${label} reports >= ${HARD_CAP} (the API clamps the count) \u2014 splitting by NACE section`);
         notes.push(`sirene: ${label} is at or above the ${HARD_CAP} cap; split into ${NACE_SECTIONS.length} NACE sections`);
         for (const section3 of part.sections?.length ? part.sections : NACE_SECTIONS) {
-          await walk({ ...part, sections: [section3] }, `${label} / section ${section3}`, depth + 1);
+          if (budget.left <= 0) sectionsUnreached.push(section3);
+          else {
+            sectionsReached.push(section3);
+            await walk({ ...part, sections: [section3] }, `${label} / section ${section3}`, depth + 1);
+          }
         }
         return;
       }
@@ -4467,8 +4473,13 @@ async function fetchSirene(query, opts = {}) {
   await walk(query, "query", 0);
   if (budget.left <= 0) {
     truncated = true;
-    truncReason ??= `the --max-results budget of ${maxResults} was reached`;
+    const cutoff = !sectionsUnreached.length ? "" : sectionsReached.length ? ` after NACE section${sectionsReached.length === 1 ? "" : "s"} ${describeRange(sectionsReached)}; ${describeRange(sectionsUnreached)} ${sectionsUnreached.length === 1 ? "was" : "were"} never asked for. This is a PREFIX of an alphabetical split, not a sample of the territory` : ` before a single NACE section could be queried; ${describeRange(sectionsUnreached)} were all never asked for. Nothing here describes the territory`;
+    truncReason ??= `the --max-results budget of ${maxResults} was reached${cutoff}`;
     notes.push(`sirene: stopped at the --max-results budget of ${maxResults}; raise it or narrow the filters`);
+    if (sectionsUnreached.length) {
+      notes.push(`sirene: sections ${sectionsUnreached.join(", ")} were never queried \u2014 the split is alphabetical and the budget ran out first`);
+      opts.onNote?.(`sirene: sections ${sectionsUnreached.join(", ")} were NEVER QUERIED \u2014 narrow with --category rather than paying for the earlier letters`);
+    }
     opts.onNote?.(`sirene: hit the --max-results budget of ${maxResults} \u2014 the lane is INCOMPLETE`);
   }
   const records = [...bySiret.values()];
@@ -4486,6 +4497,13 @@ async function fetchSirene(query, opts = {}) {
       partitions: Math.max(1, partitions)
     }
   };
+}
+function describeRange(sections) {
+  if (sections.length <= 2) return sections.join(", ");
+  const order = NACE_SECTIONS;
+  const idx = sections.map((s) => order.indexOf(s));
+  const contiguous = idx.every((n, i) => i === 0 || n === (idx[i - 1] ?? -99) + 1);
+  return contiguous ? `${sections[0]}-${sections[sections.length - 1]}` : sections.join(", ");
 }
 function bandsAtLeast(minHeadcount) {
   return EFFECTIF_BANDS.filter((b) => b.floor >= 0 && b.floor >= minHeadcount).map((b) => b.code);
@@ -8292,6 +8310,18 @@ var DIRECTORY_HOSTS_BY_COUNTRY = {
     "restaurantguru.com",
     "restopolitan.com",
     "restaurants-de-france.fr",
+    // Trade and opening-hours directories, harvested from a live Saint-Mandé
+    // search for two independent food businesses. Every one of these carries
+    // the trading name AND the street address, so they corroborate on the two
+    // strongest signals there are: left unlisted, alentoor.fr and
+    // boulangeries-patisseries.fr were both filed as a company's own website,
+    // CORROBORATED, in a real run.
+    "alentoor.fr",
+    "boulangeries-patisseries.fr",
+    "trouver-ouvert.fr",
+    "aleou.fr",
+    "eater.space",
+    "mapstr.com",
     "uniiti.com",
     "kazfeed.com",
     "linternaute.com",
@@ -8336,6 +8366,7 @@ var DIRECTORY_HOSTS_BY_COUNTRY = {
   pl: ["panoramafirm.pl", "aleo.com", "pkt.pl"]
 };
 var SOCIAL_HOSTS = ["facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "youtube.com", "tiktok.com", "pinterest.", "wa.me"];
+var DEFAULT_QUERIES_PER_PLACE = 3;
 function directoryHostsFor(countryCode) {
   const national = DIRECTORY_HOSTS_BY_COUNTRY[(countryCode ?? "").toLowerCase()] ?? [];
   return [...INTERNATIONAL_DIRECTORY_HOSTS, ...national];
@@ -8351,7 +8382,7 @@ function classifyHost(url, countryCode) {
   if (directoryHostsFor(countryCode).some((h) => host.includes(h))) return "directory";
   return "own";
 }
-function queriesFor(place, fallbackTown, countryCode) {
+function queriesFor(place, fallbackTown, countryCode, perPlace = DEFAULT_QUERIES_PER_PLACE) {
   const town = place.address.commune ?? place.address.codePostal ?? fallbackTown ?? "";
   const names = /* @__PURE__ */ new Set();
   if (place.osm?.name) names.add(place.osm.name);
@@ -8363,10 +8394,15 @@ function queriesFor(place, fallbackTown, countryCode) {
   const legalId = place.registry?.establishmentId ?? place.registry?.id;
   if (legalId) queries.push(`"${legalId}"`);
   const firstName = [...names][0];
+  const street = place.address.libelleVoie;
+  if (street && firstName) {
+    const numero = place.address.numero ? `${place.address.numero} ` : "";
+    queries.push(`${firstName} ${numero}${street}${town ? ` ${town}` : ""}`.trim());
+  }
   if (!legalId && firstName) {
     for (const term of legalNoticeTerms(countryCode)) queries.push(`${firstName} ${term}`);
   }
-  return [...new Set(queries)].slice(0, 3);
+  return [...new Set(queries)].slice(0, Math.max(1, perPlace));
 }
 function searchLocaleFor(countryCode, lang) {
   if (lang) return lang;
@@ -8459,7 +8495,11 @@ function buildResolveTodo(places, town, countryCode, selection = {}) {
   return {
     version: 1,
     generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    items: resolveTargets(places, selection).map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town, countryCode) })),
+    items: resolveTargets(places, selection).map((p) => ({
+      placeId: p.id,
+      name: p.name,
+      queries: queriesFor(p, town, countryCode, selection.queriesPerPlace)
+    })),
     ...skipped.length ? { skipped } : {}
   };
 }
@@ -8479,11 +8519,19 @@ function skipOutcomeFor(places, opts = {}) {
   if (!opts.skip?.length) return { kept: targets, skipped: /* @__PURE__ */ new Map(), counts: {} };
   return partitionSkipped(targets, opts.skip);
 }
-function candidateUrlsFor(place, hits) {
+var MAX_FETCHED_CANDIDATES = 3;
+var MAX_SOCIAL_CANDIDATES = 5;
+function candidateUrlsFor(place, hits, countryCode) {
   const urls = [];
   if (place.website?.url) urls.push(place.website.url);
   for (const h of hits) urls.push(h.url);
-  return [...new Set(urls)].slice(0, 3);
+  const socials = [];
+  const rest = [];
+  for (const url of new Set(urls)) {
+    if (classifyHost(url, countryCode) === "social") socials.push(url);
+    else rest.push(url);
+  }
+  return [...socials.slice(0, MAX_SOCIAL_CANDIDATES), ...rest.slice(0, MAX_FETCHED_CANDIDATES)];
 }
 async function keylessHits(queries, locale, onEngineNote) {
   const lists = [];
@@ -8547,7 +8595,7 @@ async function runResolve(runDir, places, store, opts = {}) {
     saidByEngine.add(n);
     note(`resolve: the keyless fallback reports \u2014 ${n}`);
   };
-  const outcome = { pages: /* @__PURE__ */ new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unreadable: 0, unchanged: 0, socials: 0, notes };
+  const outcome = { pages: /* @__PURE__ */ new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unreadable: 0, unchanged: 0, socials: 0, socialOnly: 0, notes };
   const locale = searchLocaleFor(opts.countryCode, opts.lang);
   if (opts.useEngineSearch && locale) note(`resolve: the keyless fallback will search in ${locale}`);
   const shared = sharedAddressesIn(places);
@@ -8566,9 +8614,9 @@ async function runResolve(runDir, places, store, opts = {}) {
     opts.onProgress?.(done, targets.length, place.name);
     let hits = grouped.get(place.id) ?? [];
     if (hits.length === 0 && opts.useEngineSearch) {
-      hits = await keylessHits(queriesFor(place, opts.town, opts.countryCode), locale, engineNote);
+      hits = await keylessHits(queriesFor(place, opts.town, opts.countryCode, opts.queriesPerPlace), locale, engineNote);
     }
-    const candidates = candidateUrlsFor(place, hits);
+    const candidates = candidateUrlsFor(place, hits, opts.countryCode);
     if (candidates.length === 0) {
       outcome.unchanged++;
       continue;
@@ -8621,9 +8669,16 @@ async function runResolve(runDir, places, store, opts = {}) {
     }
     if (!settled) outcome.unchanged++;
   }
+  for (const place of targets) {
+    place.webPresence = place.website?.confidence === "corroborated" ? "own-site" : place.contacts.socials.length ? "social-only" : "none";
+    if (place.webPresence === "social-only") outcome.socialOnly++;
+  }
   note(
     `resolve: ${outcome.corroborated} corroborated, ${outcome.rejected} fetched but unverified, ${outcome.jsOnly} reachable but JavaScript-only, ${outcome.unreadable} candidate(s) refused or unreachable, ${outcome.socials} social profile(s), ${outcome.unchanged} left without a site`
   );
+  if (outcome.socialOnly) {
+    note(`resolve: ${outcome.socialOnly} place(s) whose only proven presence is a social profile \u2014 a state, not a gap`);
+  }
   return outcome;
 }
 
@@ -10135,6 +10190,7 @@ var HEADER = [
   "lon",
   "website",
   "website_confidence",
+  "web_presence",
   "emails",
   "contact_source",
   "phones",
@@ -10214,6 +10270,9 @@ function toCsv(places, opts = {}) {
         place.lon ?? "",
         place.website?.url ?? "",
         place.website?.confidence ?? "",
+        // Empty means discovery has not run for this row — NOT that it has no
+        // presence. "none" is the measured absence; blank is silence.
+        place.webPresence ?? "",
         place.contacts.emails.map((e) => e.value).join(" | "),
         // The page each contact came from, in the same order as the column
         // beside it. A CRM row without this cannot be audited later.
@@ -12342,6 +12401,7 @@ var VALUE_FLAGS = [
   "tier",
   "only",
   "skip",
+  "queries-per-place",
   "max-pages",
   "concurrency",
   "icp",
@@ -12434,6 +12494,9 @@ WEBSITE DISCOVERY (resolve)
                          asserted (brand:wikidata, operator:type, shop=vacant, no
                          name), never a guess from the name. Counted and reported;
                          the rows stay in places.json with their reason.
+  --queries-per-place <n>  Distinct search angles per place (default 3, max 8). You run each
+                         one by hand, so this is a budget: raise it on an aimed run of forty,
+                         lower it on a sweep of two thousand.
   --only <ids>           Resolve just these place ids, comma-separated. --limit takes a
                          prefix; this takes the ones you actually care about. Narrows
                          --queries too, so the fanned-out worklist matches the fold.
@@ -12855,7 +12918,12 @@ async function cmdResolve(values, bools) {
   const runDir = resolveRun(values.run);
   const places = readPlaces(runDir);
   const limit = values.limit ? clampInt(values.limit, 1, 1e5, 50) : void 0;
-  const selection = { only: list(values.only), skip: skipReasons(values.skip), limit };
+  const selection = {
+    only: list(values.only),
+    skip: skipReasons(values.skip),
+    limit,
+    queriesPerPlace: values["queries-per-place"] ? clampInt(values["queries-per-place"], 1, 8, DEFAULT_QUERIES_PER_PLACE) : void 0
+  };
   const targets = resolveTargets(places, selection);
   if (bools.has("queries")) {
     const manifest2 = requireManifest(runDir);

@@ -139,6 +139,18 @@ const DIRECTORY_HOSTS_BY_COUNTRY: Record<string, string[]> = {
     "restaurantguru.com",
     "restopolitan.com",
     "restaurants-de-france.fr",
+    // Trade and opening-hours directories, harvested from a live Saint-Mandé
+    // search for two independent food businesses. Every one of these carries
+    // the trading name AND the street address, so they corroborate on the two
+    // strongest signals there are: left unlisted, alentoor.fr and
+    // boulangeries-patisseries.fr were both filed as a company's own website,
+    // CORROBORATED, in a real run.
+    "alentoor.fr",
+    "boulangeries-patisseries.fr",
+    "trouver-ouvert.fr",
+    "aleou.fr",
+    "eater.space",
+    "mapstr.com",
     "uniiti.com",
     "kazfeed.com",
     "linternaute.com",
@@ -187,6 +199,16 @@ const SOCIAL_HOSTS = ["facebook.com", "instagram.com", "linkedin.com", "twitter.
 
 export type HostKind = "own" | "directory" | "social";
 
+/**
+ * How many distinct angles to search per place.
+ *
+ * Three is the default because the agent runs every one of these by hand and a
+ * two-thousand-place sweep at five angles is ten thousand searches. It is a
+ * BUDGET, not a claim that three is enough: an aimed run of forty cafés can
+ * afford five, and the flag exists so that choice is the caller's.
+ */
+export const DEFAULT_QUERIES_PER_PLACE = 3;
+
 /** The hosts to exclude for a territory: the international core plus that country's own. */
 export function directoryHostsFor(countryCode: string | undefined): string[] {
   const national = DIRECTORY_HOSTS_BY_COUNTRY[(countryCode ?? "").toLowerCase()] ?? [];
@@ -218,7 +240,7 @@ export function classifyHost(url: string, countryCode?: string): HostKind {
  * a restaurant in Mexico. The run's own territory is the right answer and we
  * always know it: the place was found inside it, by construction.
  */
-export function queriesFor(place: Place, fallbackTown?: string, countryCode?: string): string[] {
+export function queriesFor(place: Place, fallbackTown?: string, countryCode?: string, perPlace = DEFAULT_QUERIES_PER_PLACE): string[] {
   const town = place.address.commune ?? place.address.codePostal ?? fallbackTown ?? "";
   const names = new Set<string>();
   if (place.osm?.name) names.add(place.osm.name);
@@ -234,14 +256,31 @@ export function queriesFor(place: Place, fallbackTown?: string, countryCode?: st
   // the UK — so it comes off the record rather than out of a French constant.
   const legalId = place.registry?.establishmentId ?? place.registry?.id;
   if (legalId) queries.push(`"${legalId}"`);
+
+  const firstName = [...names][0];
+
+  // The street, where a mapper or the register recorded one.
+  //
+  // This outranks the legal-notice angle BECAUSE it is evidence rather than a
+  // hope. A café is not obliged to publish mentions légales and mostly does
+  // not, so that query spends one of very few slots on a page that will not
+  // exist; the door number is a fact about this business that its own site,
+  // its listing and its social page all tend to repeat. Where there is no
+  // street we have nothing to spend, and the legal notice is the best guess
+  // left — which is exactly the German case the angle was written for.
+  const street = place.address.libelleVoie;
+  if (street && firstName) {
+    const numero = place.address.numero ? `${place.address.numero} ` : "";
+    queries.push(`${firstName} ${numero}${street}${town ? ` ${town}` : ""}`.trim());
+  }
+
   // Where no register swept the territory there IS no number to quote, and the
   // strongest remaining angle is the page the law makes mandatory: only a
   // company's own site has an Impressum for that company.
-  const firstName = [...names][0];
   if (!legalId && firstName) {
     for (const term of legalNoticeTerms(countryCode)) queries.push(`${firstName} ${term}`);
   }
-  return [...new Set(queries)].slice(0, 3);
+  return [...new Set(queries)].slice(0, Math.max(1, perPlace));
 }
 
 /**
@@ -463,6 +502,8 @@ export interface ResolveOptions {
   only?: readonly string[];
   /** Skip reasons applied before any search is spent. See `src/skip.ts`. */
   skip?: readonly string[];
+  /** Distinct search angles per place. Defaults to DEFAULT_QUERIES_PER_PLACE. */
+  queriesPerPlace?: number;
   /** Fall back to the engine's keyless search when no hits were supplied. */
   useEngineSearch?: boolean;
   onNote?: (note: string) => void;
@@ -474,6 +515,8 @@ export interface ResolveOutcome {
   pages: Map<string, PageRecord[]>;
   corroborated: number;
   rejected: number;
+  /** Places whose ONLY proven presence is a social profile. A state, not a gap. */
+  socialOnly: number;
   /** Reachable sites that serve no text without a browser. */
   jsOnly: number;
   /**
@@ -504,7 +547,11 @@ export function buildResolveTodo(places: readonly Place[], town?: string, countr
   return {
     version: 1,
     generatedAt: new Date().toISOString(),
-    items: resolveTargets(places, selection).map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town, countryCode) })),
+    items: resolveTargets(places, selection).map((p) => ({
+      placeId: p.id,
+      name: p.name,
+      queries: queriesFor(p, town, countryCode, selection.queriesPerPlace),
+    })),
     ...(skipped.length ? { skipped } : {}),
   };
 }
@@ -524,6 +571,8 @@ export interface ResolveSelection {
   skip?: readonly string[];
   /** Ceiling, applied AFTER the selection — the same order `enrich` uses. */
   limit?: number;
+  /** Distinct search angles per place. Defaults to DEFAULT_QUERIES_PER_PLACE. */
+  queriesPerPlace?: number;
 }
 
 /**
@@ -569,13 +618,51 @@ export function skipOutcomeFor(places: readonly Place[], opts: ResolveSelection 
   return partitionSkipped(targets, opts.skip);
 }
 
-function candidateUrlsFor(place: Place, hits: readonly WebHit[]): string[] {
+/** How many fetchable candidates one place is worth. Each costs a request. */
+const MAX_FETCHED_CANDIDATES = 3;
+
+/** How many social profiles to keep. They cost no request, but they are not free of noise. */
+const MAX_SOCIAL_CANDIDATES = 5;
+
+/**
+ * The URLs worth looking at for one place, in the order they will be tried.
+ *
+ * SOCIAL PROFILES COME FIRST AND ARE NEVER CAPPED. They cost nothing — the loop
+ * records them and moves on without fetching — and they were being lost twice
+ * over. Measured on a live search for a Saint-Mandé bakery: the top three hits
+ * were rubypayeur, pagesjaunes and aleou, and the company's own Facebook page
+ * was fourth, so a cap over the raw ranked list threw away the only real signal
+ * there was. For a local trader a Facebook page is very often the ENTIRE web
+ * presence, which makes it the last thing that should lose a slot to a phone
+ * book.
+ *
+ * The cap on fetchable candidates is deliberately still applied over the ranked
+ * list INCLUDING known directories. Dropping them first to "free up" slots was
+ * tried and is worse: it pulls unlisted directories up into the freed slots,
+ * and a directory corroborates beautifully — it carries the name AND the
+ * address — so it gets filed as the company's own website. Measured on the same
+ * two businesses: alentoor.fr and boulangeries-patisseries.fr were both
+ * recorded as `corroborated`, which is precisely the failure the host blocklist
+ * exists to prevent. A blocklist can never be complete, so the budget stays
+ * small and rank-ordered, and being crowded out by a known directory is the
+ * cheap failure rather than the expensive one.
+ */
+function candidateUrlsFor(place: Place, hits: readonly WebHit[], countryCode?: string): string[] {
   const urls: string[] = [];
   if (place.website?.url) urls.push(place.website.url);
   for (const h of hits) urls.push(h.url);
-  // Keep at most three: each costs a fetch, and past the third the ranking is
-  // noise anyway.
-  return [...new Set(urls)].slice(0, 3);
+
+  const socials: string[] = [];
+  const rest: string[] = [];
+  for (const url of new Set(urls)) {
+    if (classifyHost(url, countryCode) === "social") socials.push(url);
+    else rest.push(url);
+  }
+  // Free is not the same as unlimited: the hits are whatever the agent pooled,
+  // and a sloppy pool can carry a dozen profiles for one shop. Enough to hold a
+  // Facebook page, an Instagram and a LinkedIn without the contact list turning
+  // into a search dump.
+  return [...socials.slice(0, MAX_SOCIAL_CANDIDATES), ...rest.slice(0, MAX_FETCHED_CANDIDATES)];
 }
 
 /**
@@ -697,7 +784,7 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
     saidByEngine.add(n);
     note(`resolve: the keyless fallback reports — ${n}`);
   };
-  const outcome: ResolveOutcome = { pages: new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unreadable: 0, unchanged: 0, socials: 0, notes };
+  const outcome: ResolveOutcome = { pages: new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unreadable: 0, unchanged: 0, socials: 0, socialOnly: 0, notes };
 
   const locale = searchLocaleFor(opts.countryCode, opts.lang);
   if (opts.useEngineSearch && locale) note(`resolve: the keyless fallback will search in ${locale}`);
@@ -726,10 +813,10 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
 
     let hits = grouped.get(place.id) ?? [];
     if (hits.length === 0 && opts.useEngineSearch) {
-      hits = await keylessHits(queriesFor(place, opts.town, opts.countryCode), locale, engineNote);
+      hits = await keylessHits(queriesFor(place, opts.town, opts.countryCode, opts.queriesPerPlace), locale, engineNote);
     }
 
-    const candidates = candidateUrlsFor(place, hits);
+    const candidates = candidateUrlsFor(place, hits, opts.countryCode);
     if (candidates.length === 0) {
       outcome.unchanged++;
       continue;
@@ -807,6 +894,18 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
     if (!settled) outcome.unchanged++;
   }
 
+  // What the search actually found, recorded per place rather than only summed.
+  //
+  // Only for the places this invocation SEARCHED FOR. That is the whole value
+  // of the field: `none` then means "we looked and found nothing", which is a
+  // finding, while absence means nobody has looked yet. Setting it on every
+  // place in the run would collapse the two, and "has no website" is exactly
+  // the kind of claim someone will act on.
+  for (const place of targets) {
+    place.webPresence = place.website?.confidence === "corroborated" ? "own-site" : place.contacts.socials.length ? "social-only" : "none";
+    if (place.webPresence === "social-only") outcome.socialOnly++;
+  }
+
   // The jsOnly count is reported separately from "left without a site" on
   // purpose: those companies HAVE a website, a human can open it, and only the
   // machine could not read it. Folding them into the absences would hide a
@@ -816,5 +915,11 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
       `${outcome.jsOnly} reachable but JavaScript-only, ${outcome.unreadable} candidate(s) refused or unreachable, ` +
       `${outcome.socials} social profile(s), ${outcome.unchanged} left without a site`,
   );
+  // Called out on its own line because it is the one outcome that reads as a
+  // gap and is not: these businesses HAVE a web presence, it is simply not a
+  // site of their own.
+  if (outcome.socialOnly) {
+    note(`resolve: ${outcome.socialOnly} place(s) whose only proven presence is a social profile — a state, not a gap`);
+  }
   return outcome;
 }
