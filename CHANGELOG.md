@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [3.8.0](https://github.com/maxgfr/ultraprospect/compare/v3.7.0...v3.8.0) (2026-09-01)
+
+
+### Bug Fixes
+
+* **test:** do not collect the suite from .claude/worktrees ([e759b7e](https://github.com/maxgfr/ultraprospect/commit/e759b7eeeca9656e53539e207e73e5e599c4607a))
+
+
+### Features
+
+* **resolve,sirene:** evidence-first query angles, social-only presence, honest truncation ([47eb5e7](https://github.com/maxgfr/ultraprospect/commit/47eb5e7a8736fd8702057bd91e57a094c2a112e4))
+* **resolve,sirene:** search on evidence rather than hope, and name what a truncation actually cost ([82858f7](https://github.com/maxgfr/ultraprospect/commit/82858f77ca45b62e4de1954fbe9619edfdc4ac88))
+* **scan,resolve:** aim both lanes with one --category, and stop spending searches on rows that cannot buy ([5b6a44b](https://github.com/maxgfr/ultraprospect/commit/5b6a44b14ec18da1a56a49059d946dc570aeee72))
+* **scan,resolve:** cross-lane --category targeting and search-budget skips ([041b9de](https://github.com/maxgfr/ultraprospect/commit/041b9de6248b6c005d39373c6f98fd9f28084920))
+
 # [3.7.0](https://github.com/maxgfr/ultraprospect/compare/v3.6.0...v3.7.0) (2026-08-31)
 
 
