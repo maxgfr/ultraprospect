@@ -25,11 +25,26 @@ import type { ConnectorContext, RegistryRecord } from "./registry/types.js";
 import type { GeoTarget, LaneCoverage, MatchCandidate, OsmPoi, Place, RunManifest } from "./types.js";
 import { emptyManifest, licencesFor, writeJson, writePlaces, writeRunManifest } from "./run.js";
 import { loadFixture } from "./fixture.js";
+import { laneGateRefusal, parseCategories } from "./category.js";
+import { naceSection } from "./classification/nace.js";
 import { firstText } from "./util.js";
 
 export interface ScanFilters {
   /** OSM catalogue groups to keep. Empty means every group. */
   osmGroups?: string[];
+  /**
+   * One targeting vocabulary aimed at BOTH lanes: `amenity=cafe`, `shop`,
+   * `naf=56.30Z`, `nace=I`. See `src/category.ts` for the grammar.
+   */
+  categories?: string[];
+  /**
+   * Which lanes a `--category` list is allowed to leave unfiltered.
+   *
+   * Undefined means "neither": a list that narrows only one lane is refused,
+   * because a half-narrowed run is the failure `--category` exists to remove
+   * and it is invisible in the output.
+   */
+  categoryLane?: "osm" | "registry" | "both";
   /** Activity codes in the register's own scheme: NAF in France, SIC in the UK. */
   activityCodes?: string[];
   /** Section letters, in the country's own vocabulary. NACE A-U in Europe. */
@@ -180,11 +195,99 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
     });
   }
 
+  // ---- Cross-lane targeting -------------------------------------------------
+  //
+  // `--category` is the one filter that reaches both lanes. Parsing it here,
+  // before either lane runs, is what makes the fail-closed rule enforceable:
+  // once the OSM lane has swept, a register lane left wide open is just a
+  // number in the manifest that nobody can tell was wrong.
+  const category = opts.categories?.length ? parseCategories(opts.categories) : undefined;
+  // A modifier with nothing to modify reads, to whoever typed it, as an
+  // instruction that was honoured.
+  if (opts.categoryLane && !category) {
+    throw Object.assign(new Error("--category-lane only means something alongside --category, and this run has no --category."), { exitCode: 2 });
+  }
+  if (category?.unknown.length) {
+    note(
+      `--category: not a term in any vocabulary — ${category.unknown.join(", ")}. Use an OSM tag (amenity=cafe, shop) or a register code (naf=56.30Z, nace=I).`,
+    );
+  }
+  // Which connector, if any, will enumerate this territory. Needed BEFORE the
+  // OSM lane runs, because the gate's whole job is to refuse before either lane
+  // has spent anything.
+  const registrySweep = opts.noRegistry || replay ? undefined : connectorsFor(target.countryCode, { only: opts.registryIds }).sweep;
+
+  // A register that enumerates but cannot be NARROWED by activity would accept
+  // the register terms and drop them, handing back the whole register beside a
+  // filtered OSM lane. Estonia's export carries no activity code, so this is
+  // not hypothetical — and a run that looks narrowed and is not is the one
+  // failure nobody downstream can see.
+  if (category?.targetsRegistry && registrySweep?.sweep && !registrySweep.sweepFiltersActivity) {
+    throw Object.assign(
+      new Error(
+        `${registrySweep.id} enumerates this territory but cannot narrow a sweep by activity — its export carries no activity code — so the register terms in --category would be accepted and ignored, and the run would return the whole register beside a filtered OSM lane. Drop them and aim the OSM lane alone with --category-lane osm.`,
+      ),
+      { exitCode: 2 },
+    );
+  }
+
+  if (category) {
+    // The refusal itself lives in `laneGateRefusal`, pure and unit-tested: the
+    // gate has more cases than the run does, and every one of them is a case
+    // where a wrong answer is invisible in the output.
+    const refusal = laneGateRefusal(category, {
+      osmWillRun: !opts.noOsm && !replay,
+      registryCanBeAimed: Boolean(registrySweep?.sweep && registrySweep.sweepFiltersActivity),
+      aim: opts.categoryLane ?? "both",
+    });
+    // No `handled` flag: nothing has printed this yet, and a refusal whose
+    // reason never reaches the user is just an exit code.
+    if (refusal) throw Object.assign(new Error(refusal), { exitCode: 2 });
+  }
+
+  const categoryFilters = category?.osmFilters.length ? category.osmFilters : undefined;
+  const activityCodes = [...(opts.activityCodes ?? []), ...(category?.activityCodes ?? [])];
+  const sections = [...(opts.sections ?? []), ...(category?.sections ?? [])];
+
+  // Sections and activity codes are separate query parameters, and every
+  // register ANDs them. So `nace=I,naf=10.71C` is not "hospitality OR bakeries"
+  // — it is "in section I AND coded 10.71C", and 10.71C is in section C, so the
+  // register answers with nothing at all.
+  //
+  // Zero rows from a filter that looks reasonable is the worst failure shape
+  // here: it reads as a territory with no such businesses. So the contradiction
+  // is refused rather than swept.
+  if (sections.length && activityCodes.length) {
+    const covered = new Set(sections.map((x) => x.toUpperCase()));
+    // A code whose section cannot be READ is not thereby safe: it is a code we
+    // cannot prove belongs to the sections asked for, and the cost of being
+    // wrong is the same silent zero. So the pair is refused unless every code
+    // is demonstrably inside.
+    const orphans = activityCodes.filter((code) => {
+      const section = naceSection(code);
+      return section === undefined || !covered.has(section);
+    });
+    if (orphans.length) {
+      const where = (c: string) => `${c} (${naceSection(c) ? `section ${naceSection(c)}` : "section unreadable"})`;
+      throw Object.assign(
+        new Error(
+          `the register ANDs sections with activity codes, so this pairing would return nothing: ${orphans.map(where).join(", ")} against section ${[...covered].join(", ")}. Ask for one or the other, not both.`,
+        ),
+        { exitCode: 2 },
+      );
+    }
+  }
+
   // ---- OSM lane -----------------------------------------------------------
   let pois: OsmPoi[] = replay?.osm ?? [];
   if (!replay && !opts.noOsm) {
     const t0 = Date.now();
-    const osm = await fetchOsmPois(target, { groups: opts.osmGroups, mirrors: opts.overpass ? [opts.overpass] : undefined, onNote: note });
+    const osm = await fetchOsmPois(target, {
+      groups: opts.osmGroups,
+      extraFilters: categoryFilters,
+      mirrors: opts.overpass ? [opts.overpass] : undefined,
+      onNote: note,
+    });
     timings.osm = Date.now() - t0;
     pois = osm.pois;
     for (const n of osm.notes) notes.push(n);
@@ -223,8 +326,8 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
     const result = await connector.sweep!(
       target,
       {
-        sections: opts.sections,
-        activityCodes: opts.activityCodes,
+        sections: sections.length ? sections : undefined,
+        activityCodes: activityCodes.length ? activityCodes : undefined,
         sizeBands,
         includeCeased: opts.includeCeased,
         maxResults: opts.maxResults,
@@ -301,9 +404,13 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
   const manifest = emptyManifest(target.label || target.query);
   manifest.target = target;
   manifest.filters = {
-    osmGroups: opts.osmGroups ?? "all",
-    activityCodes: opts.activityCodes ?? null,
-    sections: opts.sections ?? null,
+    // "all" would be a lie once --category has replaced the catalogue: the lane
+    // swept the compiled filters below, not the eight groups.
+    osmGroups: opts.osmGroups ?? (categoryFilters ? "replaced by --category" : "all"),
+    categories: opts.categories ?? null,
+    categoryOsmFilters: categoryFilters ?? null,
+    activityCodes: activityCodes.length ? activityCodes : null,
+    sections: sections.length ? sections : null,
     sizeBands: sizeBands ?? null,
     includeCeased: Boolean(opts.includeCeased),
     maxResults: opts.maxResults ?? null,

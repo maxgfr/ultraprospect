@@ -32,6 +32,7 @@
 // language are often the only thing that surfaces a small company's own site.
 import { dedupeByUrl, rrf, search } from "./engine.js";
 import { legalNoticeTerms } from "./legal-notice.js";
+import { describeSkips, partitionSkipped, type SkipOutcome } from "./skip.js";
 import { fetchPage, type PageStore } from "./pages.js";
 import type { PageRecord, Place } from "./types.js";
 import { foldAccents, normalizeName, tokenSet } from "./util.js";
@@ -315,6 +316,15 @@ export interface ResolveTodo {
    * orchestratable as adjudication and dossier-writing.
    */
   items: ResolveTodoItem[];
+  /**
+   * The places `--skip` kept out of `items`, each with the reasons that applied.
+   *
+   * Written rather than merely counted, because a skip is a decision about
+   * where to spend searches and it has to be REVERSIBLE: a reader who disagrees
+   * that a row is a chain needs the id and the reason to argue with, not a
+   * total. Absent when no reasons were asked for.
+   */
+  skipped?: { placeId: string; name: string; reasons: string[] }[];
 }
 
 /** A hit the agent's WebSearch produced, or one of ours. */
@@ -451,6 +461,8 @@ export interface ResolveOptions {
   limit?: number;
   /** Only work on these place ids. See `resolveTargets`. */
   only?: readonly string[];
+  /** Skip reasons applied before any search is spent. See `src/skip.ts`. */
+  skip?: readonly string[];
   /** Fall back to the engine's keyless search when no hits were supplied. */
   useEngineSearch?: boolean;
   onNote?: (note: string) => void;
@@ -486,10 +498,14 @@ export interface ResolveOutcome {
  * at searches nobody will use.
  */
 export function buildResolveTodo(places: readonly Place[], town?: string, countryCode?: string, selection: ResolveSelection = {}): ResolveTodo {
+  const outcome = skipOutcomeFor(places, selection);
+  const byId = new Map(places.map((p) => [p.id, p]));
+  const skipped = [...outcome.skipped].map(([placeId, reasons]) => ({ placeId, name: byId.get(placeId)?.name ?? placeId, reasons }));
   return {
     version: 1,
     generatedAt: new Date().toISOString(),
     items: resolveTargets(places, selection).map((p) => ({ placeId: p.id, name: p.name, queries: queriesFor(p, town, countryCode) })),
+    ...(skipped.length ? { skipped } : {}),
   };
 }
 
@@ -501,6 +517,11 @@ export function needsResolving(places: readonly Place[]): Place[] {
 export interface ResolveSelection {
   /** Place ids to resolve. Empty or absent means every place that needs one. */
   only?: readonly string[];
+  /**
+   * Skip reasons to apply before spending searches: chain, unnamed, public,
+   * vacant. Each reads a tag a mapper asserted — see `src/skip.ts`.
+   */
+  skip?: readonly string[];
   /** Ceiling, applied AFTER the selection — the same order `enrich` uses. */
   limit?: number;
 }
@@ -521,12 +542,31 @@ export interface ResolveSelection {
  * way to re-run a lane over settled evidence.
  */
 export function resolveTargets(places: readonly Place[], opts: ResolveSelection = {}): Place[] {
+  const targets = skipOutcomeFor(places, opts).kept;
+  return opts.limit ? targets.slice(0, opts.limit) : targets;
+}
+
+/**
+ * The skip partition for a SELECTION, not for the whole run.
+ *
+ * The distinction is the whole value of the number. `--only` has already
+ * decided which places this invocation is about, so a skip count taken over
+ * every place in `places.json` describes work the user never asked for — it
+ * would report 81 rows skipped on a run that was only ever going to search
+ * three. One function so the worklist and the fold cannot disagree.
+ *
+ * Skipping runs AFTER `--only`: the two are different questions, and a caller
+ * who wants a chain resolved anyway drops the reason rather than fighting the
+ * id list.
+ */
+export function skipOutcomeFor(places: readonly Place[], opts: ResolveSelection = {}): SkipOutcome {
   let targets = needsResolving(places);
   if (opts.only?.length) {
     const wanted = new Set(opts.only);
     targets = targets.filter((p) => wanted.has(p.id));
   }
-  return opts.limit ? targets.slice(0, opts.limit) : targets;
+  if (!opts.skip?.length) return { kept: targets, skipped: new Map(), counts: {} };
+  return partitionSkipped(targets, opts.skip);
 }
 
 function candidateUrlsFor(place: Place, hits: readonly WebHit[]): string[] {
@@ -666,6 +706,13 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
   // company sharing a door with one the caller filtered out still shares it.
   const shared = sharedAddressesIn(places);
   if (shared.size) note(`resolve: ${shared.size} address(es) hold more than one company in this run — an address alone will not corroborate a site for those`);
+
+  // Reported before the lane runs, and in the same terms the todo file records,
+  // so the number of searches NOT spent is as visible as the ones that were.
+  if (opts.skip?.length) {
+    const line = describeSkips(skipOutcomeFor(places, opts), Boolean(opts.limit));
+    if (line) note(`resolve: ${line}`);
+  }
 
   const targets = resolveTargets(places, opts);
   const grouped = groupHits(targets, opts.webResults ?? []);

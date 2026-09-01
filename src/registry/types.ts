@@ -244,6 +244,19 @@ export interface RegistryConnector {
    * only agree down to the division.
    */
   activityPrefix: string;
+  /**
+   * Does `sweep` actually HONOUR `sections` / `activityCodes`?
+   *
+   * Not every enumerable register can be narrowed. Estonia's export carries no
+   * activity code at all, so its sweep accepts the filters and ignores them —
+   * which is the worst shape of answer: a run that looks narrowed and returns
+   * the whole register beside a filtered OSM lane.
+   *
+   * Declared rather than inferred from `activityScheme`, because the two are
+   * different questions: a connector can publish codes on its records and still
+   * have no way to filter a sweep by them.
+   */
+  sweepFiltersActivity?: boolean;
   /** Documentation a human can read when a record looks wrong. */
   docsUrl: string;
   /**

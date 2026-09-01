@@ -313,6 +313,7 @@ ultraprospect render  --run "$RUN"
 
 ```bash
 ultraprospect scan --where "Lyon" --section M --min-employees 20
+ultraprospect scan --where "Vincennes" --country fr --category amenity=cafe,naf=56.30Z
 ultraprospect ingest --country gb                         # once: 470 MB, no key
 ultraprospect scan --where "Hebden Bridge" --country gb   # the UK register, enumerated
 ultraprospect ingest --country ee                         # 18 MB, rebuilt daily
@@ -322,6 +323,16 @@ ultraprospect scan --where "Nantes" --no-people          # organisation data onl
 ultraprospect scan --record ./fixtures/x                 # record a replayable sweep
 ultraprospect scan --fixture ./fixtures/x                # replay it, fully offline
 ```
+
+`--category` is the one filter that aims **both** lanes. The older filters each
+reach one and only one — `--osm-groups` narrows OpenStreetMap, `--section` and
+`--activity` narrow the register — so either alone half-narrows a run: measured
+on a Saint-Mandé sweep, `--section I` gave 154 register rows while the OSM lane
+still returned all 295 places in town. `--category` takes one vocabulary for
+both, and it is the vocabulary `places.json` prints back at you
+(`amenity=cafe`, `shop`, `naf=56.30Z`, `nace=I`), so a category you read out of
+a run pastes straight into the next one. It refuses rather than leave a lane
+sweeping the whole territory unfiltered.
 
 `--section J,M` means the same thing in Lyon, Berlin, Madrid and Manchester:
 NAF, WZ, CNAE and UK SIC are all NACE-derived and agree down to the division. It

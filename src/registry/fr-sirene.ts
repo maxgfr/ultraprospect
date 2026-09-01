@@ -543,6 +543,8 @@ export const frSirene: RegistryConnector = {
   licence: "French company data: base Sirene / RNE via recherche-entreprises.api.gouv.fr, Licence Ouverte 2.0",
   activityScheme: "nace",
   activityPrefix: "naf",
+  // The API/snapshot filters on the activity code server-side.
+  sweepFiltersActivity: true,
   docsUrl: "https://recherche-entreprises.api.gouv.fr/docs/",
   sizeBands: EFFECTIF_BANDS,
 

@@ -299,6 +299,8 @@ export const gbCompaniesHouse: RegistryConnector = {
   licence: "UK company data: Companies House, Open Government Licence v3.0",
   activityScheme: "nace",
   activityPrefix: "sic-uk",
+  // The API/snapshot filters on the activity code server-side.
+  sweepFiltersActivity: true,
   docsUrl: "https://developer-specs.company-information.service.gov.uk/",
   needsKey: { flag: "--companies-house-key", env: "ULTRAPROSPECT_COMPANIES_HOUSE_KEY", how: HOW_TO_GET_A_KEY },
   unverified: {
