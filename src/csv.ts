@@ -61,6 +61,7 @@ const HEADER = [
   "lon",
   "website",
   "website_confidence",
+  "web_presence",
   "emails",
   "contact_source",
   "phones",
@@ -147,6 +148,9 @@ export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
         place.lon ?? "",
         place.website?.url ?? "",
         place.website?.confidence ?? "",
+        // Empty means discovery has not run for this row — NOT that it has no
+        // presence. "none" is the measured absence; blank is silence.
+        place.webPresence ?? "",
         place.contacts.emails.map((e) => e.value).join(" | "),
         // The page each contact came from, in the same order as the column
         // beside it. A CRM row without this cannot be audited later.

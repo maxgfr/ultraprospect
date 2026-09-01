@@ -285,6 +285,24 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    pretending: Estonia enumerates but its export carries no activity code, so a
    register term there is refused instead of accepted and dropped.
 
+   **A Facebook page is a finding, not a gap.** For a local trader it is very
+   often the ENTIRE web presence, so `resolve` records it in `contacts.socials`
+   and marks the place `webPresence: "social-only"` — its own state, beside
+   `own-site` and `none`, and a column in the CSV. Measured on two Saint-Mandé
+   food businesses: both came back `social-only`, which is the true answer and
+   the actionable one. `none` means we searched and found nothing; an EMPTY
+   `web_presence` means nobody has searched yet, and the two must not be read
+   as the same thing.
+
+   **The queries themselves prefer evidence to hope.** Where a street is known,
+   `<name> <number> <street> <town>` is spent before the legal-notice angle: a
+   café is not obliged to publish mentions légales and mostly does not, while
+   the door number is a fact its site, its listing and its social page all
+   repeat. Where there is no street — most German OSM nodes — the Impressum
+   angle is still the best one left, and still runs. `--queries-per-place`
+   raises or lowers the budget; three is the default because you run each one
+   by hand.
+
    **Aim the lane on a big territory.** It is sequential and fetches per place,
    so a two-thousand-place sweep is a long run. `--limit` takes a PREFIX of the
    file; `--only <ids>` takes the places you actually want, which is what you
@@ -427,7 +445,9 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | The run is full of schools, bank branches and EV chargers | `--osm-groups amenity` is a whole catalogue group, not a trade. Aim it with `--category amenity=cafe,…`, and drop what cannot buy with `resolve --skip chain,public`. |
 | `scan` refused: "left the … lane sweeping unfiltered" | Working as designed. A `--category` list that narrows one lane and not the other produces a run whose halves cover different territories. Name a term for the other lane, or `--category-lane <the one you meant>`. |
 | `scan` refused: activity codes "fall outside the sections asked for" | The register ANDs section and activity code, so `nace=I,naf=10.71C` would return zero rows and read as an empty trade. Ask for one or the other. |
-| `--max-results` truncated before the sector I wanted | The register splits by NACE section in order, so a budget spent early never reaches the later letters. Name the trade with `--category naf=…` instead of paying for sections you did not want. |
+| `--max-results` truncated before the sector I wanted | The register splits by NACE section IN ORDER, so a budget spent early never reaches the later letters — and the lane now names them: "reached after NACE sections A-F; G-U were never asked for". That is a prefix, not a sample. Name the trade with `--category naf=…` instead of paying for sections you did not want. |
+| A company shows `web_presence: social-only` | Not a gap. We searched, found no site of its own, and found a social profile that is theirs. For a local trader that is usually the whole web presence. |
+| `web_presence` is empty | `resolve` has not run for that row. Different from `none`, which is a measured absence — do not report the two the same way. |
 | `resolve` exits 2 saying no results were supplied | Working as designed. Run `--queries`, do the searching, pass `--web-results`. |
 | `--engine-search` says the keyless fallback was **blocked** | The engines refused the request — a 403, or an anti-bot challenge served with a 200. Nothing was searched, which is NOT the same as nothing being there. Do your own WebSearch and pass `--web-results`; never report the run as a territory with no web presence. |
 | `--engine-search` corroborated almost nothing | Expected, and the reason `resolve` refuses to run without your hits. Measured on a Saint-Mandé sweep: 0 sites out of 12 through the keyless fallback, 9 out of 12 from the same queries run through the agent's own WebSearch. |
