@@ -11,7 +11,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "fs
 import { join } from "path";
 import { tmpdir } from "os";
 import { spawn } from "child_process";
-import { existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync3, readdirSync as readdirSync2, rmSync as rmSync3, statSync as statSync2, writeFileSync as writeFileSync4 } from "fs";
+import { existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync3, readdirSync as readdirSync2, rmSync as rmSync3, statSync as statSync2 } from "fs";
 import { join as join4 } from "path";
 import { tmpdir as tmpdir4 } from "os";
 import { mkdirSync as mkdirSync3, renameSync, unlinkSync, writeFileSync as writeFileSync3 } from "fs";
@@ -265,10 +265,16 @@ function ocrBudgetLeft() {
   return Math.max(0, envInt("OCR_MAX", DEFAULT_MAX_DOCS) - spent);
 }
 async function ocrTools() {
-  const probe = async (cmd, args) => (await runWithInput(cmd, args, Buffer.alloc(0), 2e4)).ok;
-  const [copyablePdf, tesseract] = await Promise.all([probe("copyable-pdf", ["--help"]), probe("tesseract", ["--version"])]);
-  return { copyablePdf, tesseract };
+  if (!toolsProbe) {
+    toolsProbe = (async () => {
+      const probe = async (cmd, args) => (await runWithInput(cmd, args, Buffer.alloc(0), 2e4)).ok;
+      const [copyablePdf, tesseract] = await Promise.all([probe("copyable-pdf", ["--help"]), probe("tesseract", ["--version"])]);
+      return { copyablePdf, tesseract };
+    })();
+  }
+  return toolsProbe;
 }
+var toolsProbe;
 async function ocrPdf(bytes) {
   if (ocrBudgetLeft() <= 0) return void 0;
   const { copyablePdf, tesseract } = await ocrTools();
@@ -508,10 +514,10 @@ var CP1252_LABELS = /* @__PURE__ */ new Set([
   "us-ascii",
   "ascii"
 ]);
+var CP1252_C1_RANGE = /[\x80-\x9f]/g;
+var cp1252C1 = (c) => String.fromCharCode(CP1252_C1[c.charCodeAt(0) - 128]);
 function decodeCp1252(bytes) {
-  let out2 = "";
-  for (const b of bytes) out2 += String.fromCharCode(b >= 128 && b <= 159 ? CP1252_C1[b - 128] : b);
-  return out2;
+  return bytes.toString("latin1").replace(CP1252_C1_RANGE, cp1252C1);
 }
 function decodeWith(bytes, encoding) {
   if (CP1252_LABELS.has(encoding)) return decodeCp1252(bytes);
@@ -738,6 +744,10 @@ async function readCappedBytes(res, max) {
   }
   return Buffer.concat(chunks);
 }
+var DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+function isBinaryDocument(contentType) {
+  return /application\/pdf/i.test(contentType) || docFormatForContentType(contentType) !== void 0;
+}
 async function httpGet(url, opts = {}) {
   const attempts = attemptsFor(opts.retries);
   let last = { ok: false, status: 0, body: "", contentType: "", url };
@@ -753,7 +763,7 @@ async function httpGet(url, opts = {}) {
         redirect: "follow",
         headers
       });
-      const max = opts.maxBytes ?? 4 * 1024 * 1024;
+      const max = opts.maxBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
       const meta = {
         contentType: res.headers.get("content-type") ?? "",
         url: res.url || url,
@@ -769,6 +779,7 @@ async function httpGet(url, opts = {}) {
       }
       const bytes = res.status === 304 ? Buffer.alloc(0) : await readCappedBytes(res, max);
       countFetch(bytes.length, false);
+      const keepBytes = opts.binary || isBinaryDocument(meta.contentType);
       const result = {
         ok: res.ok,
         status: res.status,
@@ -776,7 +787,7 @@ async function httpGet(url, opts = {}) {
         // Windows-1252 page used to come back with every accented character
         // replaced by U+FFFD, and nothing anywhere noticed.
         body: opts.binary ? "" : decodeBody(bytes, meta.contentType),
-        bytes: opts.binary ? bytes : void 0,
+        bytes: keepBytes ? bytes : void 0,
         ...meta
       };
       if (RETRY_STATUS.has(res.status) && attempt < attempts - 1) {
@@ -814,8 +825,14 @@ async function httpJson(method, url, body, opts = {}) {
         headers,
         body: body === void 0 ? void 0 : JSON.stringify(body)
       });
-      const text2 = await res.text();
-      countFetch(Buffer.byteLength(text2), false);
+      const max = opts.maxBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+      const bytes = await readCappedBytes(res, max);
+      countFetch(bytes.length, false);
+      if (bytes.length >= max) {
+        ctrl.abort();
+        return { ok: false, status: res.status, data: void 0, error: `response too large: over the ${max}-byte cap` };
+      }
+      const text2 = bytes.toString("utf8");
       let data;
       try {
         data = text2 ? JSON.parse(text2) : void 0;
@@ -1189,16 +1206,30 @@ function domainOf(raw) {
   }
 }
 var LOCAL_FILE_DOMAIN = "local file";
-var FNV_OFFSET = 0xcbf29ce484222325n;
-var FNV_PRIME = 0x100000001b3n;
-var MASK64 = (1n << 64n) - 1n;
-function fnv1a64(s) {
-  let h = FNV_OFFSET;
+var FNV_OFFSET_HI = 3421674724;
+var FNV_OFFSET_LO = 2216829733;
+var FNV_PRIME_LOW = 435;
+var laneHi = 0;
+var laneLo = 0;
+function fnvMix(s) {
+  let hi = laneHi;
+  let lo = laneLo;
   for (let i = 0; i < s.length; i++) {
-    h ^= BigInt(s.charCodeAt(i));
-    h = h * FNV_PRIME & MASK64;
+    lo = (lo ^ s.charCodeAt(i)) >>> 0;
+    const bP = (lo & 65535) * FNV_PRIME_LOW;
+    const aP = (lo >>> 16) * FNV_PRIME_LOW + (bP >>> 16);
+    const carry = aP >>> 16;
+    hi = carry + Math.imul(hi, FNV_PRIME_LOW) + (lo << 8) >>> 0;
+    lo = ((aP & 65535) << 16 | bP & 65535) >>> 0;
   }
-  return h;
+  laneHi = hi;
+  laneLo = lo;
+}
+function fnv1a64(s) {
+  laneHi = FNV_OFFSET_HI;
+  laneLo = FNV_OFFSET_LO;
+  fnvMix(s);
+  return BigInt(laneHi) << 32n | BigInt(laneLo);
 }
 function rrf(lists, keyOf, k = 60) {
   const score = /* @__PURE__ */ new Map();
@@ -1861,14 +1892,29 @@ function readCache(url, acceptLanguage = "", extractor = "native") {
 }
 function writeCache(url, res, now, acceptLanguage = "", extractor = "native") {
   if (isNoWrite()) return;
+  const dir2 = cacheDir();
+  const { meta, body } = entryPaths(url, acceptLanguage, extractor);
+  const { text: text2, ...rest } = res;
+  const write = () => {
+    ensureDir2(dir2);
+    writeFileAtomic(body, text2 ?? "");
+    writeFileAtomic(meta, JSON.stringify({ ...rest, cachedAt: now }));
+  };
   try {
-    mkdirSync4(cacheDir(), { recursive: true });
-    const { meta, body } = entryPaths(url, acceptLanguage, extractor);
-    const { text: text2, ...rest } = res;
-    writeFileSync4(body, text2 ?? "");
-    writeFileSync4(meta, JSON.stringify({ ...rest, cachedAt: now }));
+    write();
   } catch {
+    ensured.delete(dir2);
+    try {
+      write();
+    } catch {
+    }
   }
+}
+var ensured = /* @__PURE__ */ new Set();
+function ensureDir2(dir2) {
+  if (ensured.has(dir2)) return;
+  mkdirSync4(dir2, { recursive: true });
+  ensured.add(dir2);
 }
 function touchCache(url, entry, now, acceptLanguage = "", extractor = "native") {
   writeCache(url, entry, now, acceptLanguage, extractor);
@@ -2226,7 +2272,7 @@ var PROTOCOL_VERSIONS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]
 var LATEST_PROTOCOL = PROTOCOL_VERSIONS[PROTOCOL_VERSIONS.length - 1];
 var ASSUMED_HTTP_PROTOCOL = "2025-03-26";
 var RICH_TOOLS_SINCE = "2025-06-18";
-var DEFAULT_MAX_RESPONSE_BYTES = 1e6;
+var DEFAULT_MAX_RESPONSE_BYTES2 = 1e6;
 function isProtocolVersion(v) {
   return typeof v === "string" && PROTOCOL_VERSIONS.includes(v);
 }
@@ -2384,7 +2430,7 @@ var ERR_INVALID_PARAMS = -32602;
 var ERR_INTERNAL = -32603;
 function createServer(adapter, opts = {}) {
   const serverInfo = { name: opts.serverName ?? brand().name, version: adapter.version };
-  const maxBytes = opts.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+  const maxBytes = opts.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES2;
   let protocol = LATEST_PROTOCOL;
   const cancelled = /* @__PURE__ */ new Set();
   const CANCELLED_MAX = 1024;
@@ -2563,7 +2609,7 @@ async function runStdioServer(adapter, opts = {}) {
         track(
           (async () => {
             const out2 = [];
-            await Promise.all(parsed.map((m) => server.handle(m, (r) => void out2.push(r))));
+            await mapLimit(parsed, MAX_IN_FLIGHT, (m) => server.handle(m, (r) => void out2.push(r)));
             if (out2.length) emit(JSON.stringify(out2) + "\n");
           })().catch(reportInternal(send))
         );
