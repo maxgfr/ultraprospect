@@ -212,7 +212,9 @@ COMMANDS
 TARGETING (scan, where)
   --where <query>        Place name: a town, a street, an address.
   --lat <deg> --long <deg>   Point search. Requires --radius.
-  --radius <dist>        Search radius: 800, 800m, 2km. Point searches only.
+  --radius <dist>        Search radius: 800, 800m, 2km. Point searches only. A disc:
+                         Overpass is asked for the bounding box, then the OSM lane is
+                         trimmed to the circle so both lanes cover the same ground.
   --bbox <s,w,n,e>       Explicit bounding box, skipping the geocoder.
   --country <cc>         ISO-3166-1 alpha-2 hint for the geocoder, e.g. fr.
   --lang <code>          Preferred language for geocoder labels.

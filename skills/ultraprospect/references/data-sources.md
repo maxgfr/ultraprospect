@@ -79,6 +79,16 @@ Three measured behaviours shape how it is called:
    in the rotation, and `doctor` probes each with a query over central Paris so
    a regional extract shows up as one.
 
+**A point search is a disc in both lanes.** Overpass has no circle: `--radius
+800m` is sent as the bounding SQUARE around the point, whose corners sit at
+800·√2 ≈ 1131 m — 27% more area than was asked for, all of it in the corners.
+The French register's `/near_point` does take a radius and returns a real disc.
+So the OSM lane trims its own results back to the circle before fusion, and says
+how many features it dropped in `manifest.notes`. Without that the two lanes
+would cover different territories while the manifest called both of them
+"radius", and a shop 1.1 km out would appear in one and be missing from the
+other for no reason a reader could see.
+
 Failures come in two kinds that both contain the word "timeout" and want
 **opposite** responses: a saturated instance (`Dispatcher_Client`, `open64`, a
 504) means try another mirror; a genuine overrun (`Query timed out in N

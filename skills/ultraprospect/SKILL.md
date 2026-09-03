@@ -95,7 +95,7 @@ gate. Read it rather than guessing a flag.
 ultraprospect doctor --country de                             # are the upstreams this run needs up?
 ultraprospect where "Vincennes" --country fr                  # resolve, or list the candidates and exit 2
 ultraprospect scan --where "Vincennes" --country fr           # both lanes, fused
-ultraprospect scan --lat 48.8566 --long 2.3522 --radius 500m  # a point and a radius
+ultraprospect scan --lat 48.8566 --long 2.3522 --radius 500m  # a disc: the OSM lane is trimmed to it, like the register's
 ultraprospect scan --where "Lyon" --section M --min-employees 20 --out ./runs
 ultraprospect scan --where "Saint-Mandé" --country fr --exclude-legal-form 9110,6540,9220
 ultraprospect scan --where "Vincennes" --country fr --category amenity=cafe,naf=56.30Z   # ONE trade, BOTH lanes
