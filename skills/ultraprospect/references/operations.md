@@ -44,6 +44,11 @@ under it is taken.
 
 ## Reading the manifest
 
+`manifest.filters.legalForms` and `manifest.filters.excludeLegalForms` record
+the filed legal-form codes passed to `--legal-form` and
+`--exclude-legal-form`. `null` means no such filter was requested. Exclusions
+are client-side because the French API offers no negation.
+
 `lanes[]` is the honest part. Each entry has `returned`, `truncated`, a
 `reason`, and how many partitions the lane needed:
 

@@ -25,7 +25,7 @@ import type { ConnectorContext, RegistryRecord } from "./registry/types.js";
 import type { GeoTarget, LaneCoverage, MatchCandidate, OsmPoi, Place, RunManifest } from "./types.js";
 import { emptyManifest, licencesFor, writeJson, writePlaces, writeRunManifest } from "./run.js";
 import { loadFixture } from "./fixture.js";
-import { laneGateRefusal, parseCategories } from "./category.js";
+import { laneGateRefusal, legalFormGateRefusal, parseCategories } from "./category.js";
 import { naceSection } from "./classification/nace.js";
 import { firstText } from "./util.js";
 
@@ -51,6 +51,10 @@ export interface ScanFilters {
   sections?: string[];
   /** The register's own headcount band codes to keep. */
   sizeBands?: string[];
+  /** Legal-form codes filed by the legal unit to include. */
+  legalForms?: string[];
+  /** Legal-form codes filed by the legal unit to exclude. */
+  excludeLegalForms?: string[];
   /** Minimum headcount; expanded into the band list that satisfies it. */
   minEmployees?: number;
   /** Include companies the register marks as ceased. Off by default. */
@@ -220,6 +224,9 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
   // has spent anything.
   const registrySweep = opts.noRegistry || replay ? undefined : connectorsFor(target.countryCode, { only: opts.registryIds }).sweep;
 
+  const legalFormRefusal = legalFormGateRefusal(opts, registrySweep);
+  if (legalFormRefusal) throw Object.assign(new Error(legalFormRefusal), { exitCode: 2 });
+
   // A register that enumerates but cannot be NARROWED by activity would accept
   // the register terms and drop them, handing back the whole register beside a
   // filtered OSM lane. Estonia's export carries no activity code, so this is
@@ -332,6 +339,8 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
         sections: sections.length ? sections : undefined,
         activityCodes: activityCodes.length ? activityCodes : undefined,
         sizeBands,
+        legalForms: opts.legalForms,
+        excludeLegalForms: opts.excludeLegalForms,
         includeCeased: opts.includeCeased,
         maxResults: opts.maxResults,
       },
@@ -437,6 +446,8 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
     activityCodes: activityCodes.length ? activityCodes : null,
     sections: sections.length ? sections : null,
     sizeBands: sizeBands ?? null,
+    legalForms: opts.legalForms ?? null,
+    excludeLegalForms: opts.excludeLegalForms ?? null,
     includeCeased: Boolean(opts.includeCeased),
     maxResults: opts.maxResults ?? null,
     registryIds: opts.registryIds ?? null,

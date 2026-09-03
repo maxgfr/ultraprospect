@@ -205,9 +205,12 @@ Two endpoints:
 
 - `/search` — `code_commune`, `code_postal`, `departement`, `region`, `epci`,
   `activite_principale`, `section_activite_principale`, `tranche_effectif_salarie`,
-  `etat_administratif`, `categorie_entreprise`, `ca_min`/`ca_max`, and more.
+  `nature_juridique`, `etat_administratif`, `categorie_entreprise`,
+  `ca_min`/`ca_max`, and more. `nature_juridique=9110,5710` is an include list;
+  the API has no negation, so `--exclude-legal-form` is client-side.
 - `/near_point` — `lat`, `long`, `radius` (**≤ 50 km**), plus the two activity
-  filters. Nothing else.
+  filters. Nothing else; legal-form includes and exclusions are both re-applied
+  client-side there.
 
 ### Three ceilings, one of them undocumented
 

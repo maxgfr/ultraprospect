@@ -164,6 +164,10 @@ export interface RegistryFilters {
   sections?: string[];
   /** The register's own headcount band codes. */
   sizeBands?: string[];
+  /** Legal-form codes filed by the legal unit to include. */
+  legalForms?: string[];
+  /** Legal-form codes filed by the legal unit to exclude. */
+  excludeLegalForms?: string[];
   /** Include companies the register marks as ceased. Off by default. */
   includeCeased?: boolean;
   /** Stop after this many records and declare the lane partial. */
@@ -257,6 +261,10 @@ export interface RegistryConnector {
    * have no way to filter a sweep by them.
    */
   sweepFiltersActivity?: boolean;
+  /** Does `sweep` honour legal-form include and exclude filters? */
+  sweepFiltersLegalForm?: true;
+  /** Interpret one of this register's filed legal-form codes as public or private. */
+  legalFormIsPublic?(code: string): boolean;
   /** Documentation a human can read when a record looks wrong. */
   docsUrl: string;
   /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileOsmFilter, laneGateRefusal, parseCategories } from "../src/category.js";
+import { compileOsmFilter, laneGateRefusal, legalFormGateRefusal, parseCategories } from "../src/category.js";
 import { buildQuery } from "../src/overpass.js";
 import { CONNECTORS } from "../src/registry/index.js";
 
@@ -181,5 +181,24 @@ describe("laneGateRefusal — the fail-closed matrix", () => {
 
   it("says nothing when neither lane runs", () => {
     expect(laneGateRefusal(osmOnly, { osmWillRun: false, registryCanBeAimed: false, aim: "both" })).toBeUndefined();
+  });
+});
+
+describe("legalFormGateRefusal", () => {
+  const incapable = { id: "other-register", sweep: async () => ({ records: [], notes: [], coverage: {} as never }) } as any;
+  const capable = { ...incapable, sweepFiltersLegalForm: true } as any;
+
+  it("refuses include or exclude filters when the sweep connector cannot honour them", () => {
+    expect(legalFormGateRefusal({ legalForms: ["9110"] }, incapable)).toMatch(/other-register.*legal form/i);
+    expect(legalFormGateRefusal({ excludeLegalForms: ["9220"] }, incapable)).toMatch(/other-register.*legal form/i);
+  });
+
+  it("is silent when no legal-form filter was requested", () => {
+    expect(legalFormGateRefusal({}, incapable)).toBeUndefined();
+  });
+
+  it("is silent when the sweep connector declares support", () => {
+    expect(legalFormGateRefusal({ legalForms: ["5710"] }, capable)).toBeUndefined();
+    expect(legalFormGateRefusal({ excludeLegalForms: ["9110"] }, capable)).toBeUndefined();
   });
 });
