@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [3.11.0](https://github.com/maxgfr/ultraprospect/compare/v3.10.0...v3.11.0) (2026-09-03)
+
+
+### Features
+
+* **match:** join OSM ref:FR:SIRET / ref:FR:SIREN to the register before scoring ([fb73141](https://github.com/maxgfr/ultraprospect/commit/fb7314143156fafab1c2b5da8ed297e912db8c23))
+* **overpass:** industrial catalogue group, commercial leisure and tourism, no ATMs ([83b747d](https://github.com/maxgfr/ultraprospect/commit/83b747dededeae8cd11a39974d639a0e83223dd0))
+* **scan:** carry OSM-declared contacts with an osm:<id> source the gate re-reads ([cecd33d](https://github.com/maxgfr/ultraprospect/commit/cecd33d27eb6a7afeb1278cfc09e9d1d32e34c81))
+* **scan:** say when fusion could not run and when a filter reached one lane ([9bc65f8](https://github.com/maxgfr/ultraprospect/commit/9bc65f8350c5a62da26b0e2b42e7a939a150c234))
+* **scan:** trim the OSM lane to the --radius circle ([a8040d5](https://github.com/maxgfr/ultraprospect/commit/a8040d52512db4e7236bd18e422e06c1d11493b1))
+* **sirene:** --legal-form / --exclude-legal-form, and public bodies by filed legal form ([373b3c1](https://github.com/maxgfr/ultraprospect/commit/373b3c15e1bda38cbcd140dd6438f80eb21384a6))
+* **sirene:** spread --max-results across NACE sections and record sectionTotals ([5e57386](https://github.com/maxgfr/ultraprospect/commit/5e573868abdf8bbbeb5295508f68ccb4ca4b7711))
+
 # [3.10.0](https://github.com/maxgfr/ultraprospect/compare/v3.9.0...v3.10.0) (2026-09-03)
 
 
