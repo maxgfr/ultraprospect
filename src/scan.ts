@@ -15,7 +15,7 @@
 //     confirmed one will read every number here as complete.
 //   * Fusion never invents. A pair the matcher is unsure about produces two
 //     entities plus a to-do, not one entity and a shrug.
-import { poiCategory, poiWebsite } from "./overpass.js";
+import { poiCategory, poiContacts, poiWebsite } from "./overpass.js";
 import { fetchOsmPois } from "./overpass.js";
 import { buildMatchTodo, matchLanes } from "./match.js";
 import { bandsAtLeast } from "./registry/fr-sirene.js";
@@ -107,7 +107,7 @@ function placeFromPoi(poi: OsmPoi): Place {
     // `resolve` upgrades it to "corroborated" only after fetching the page and
     // finding the company on it.
     website: website ? { url: website, confidence: "declared", evidence: ["osm"] } : undefined,
-    contacts: { emails: [], phones: [], socials: [], people: [] },
+    contacts: { ...poiContacts(poi), people: [] },
     jobs: [],
     pages: [],
   };

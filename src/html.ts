@@ -107,7 +107,7 @@ function sourced(place: Place, items: readonly SourcedValue[], ev: Evidence, hre
   if (!items.length) return "";
   return items
     .map((c) => {
-      const value = href ? `<a href="${esc(href(c.value))}">${esc(c.value)}</a>` : link(c.value);
+      const value = href ? `<a href="${esc(href(c.value))}">${esc(c.value)}</a>` : /^https?:\/\//i.test(c.value) ? link(c.value) : esc(c.value);
       return `<span class="c">${value} ${cite(place, c.from, c.value, ev)}</span>`;
     })
     .join("");

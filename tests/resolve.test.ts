@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { classifyHost, corroborate, groupHits, needsResolving, queriesFor, resolveTargets, searchLocaleFor } from "../src/resolve.js";
+import { newPageStore } from "../src/pages.js";
+import { classifyHost, corroborate, groupHits, needsResolving, queriesFor, resolveTargets, runResolve, searchLocaleFor } from "../src/resolve.js";
 import type { Place } from "../src/types.js";
 import { rec } from "./factories.js";
 
@@ -323,6 +324,31 @@ describe("resolveTargets", () => {
     const places = [place({ id: "1" }), place({ id: "2" }), place({ id: "3" })];
     expect(resolveTargets(places, { only: ["2", "3"], limit: 1 }).map((p) => p.id)).toEqual(["2"]);
     expect(resolveTargets(places, { limit: 2 }).map((p) => p.id)).toEqual(["1", "2"]);
+  });
+});
+
+describe("webPresence", () => {
+  it("does not treat an OSM-declared social as a proven social-only presence", async () => {
+    const p = place({
+      contacts: {
+        emails: [],
+        phones: [],
+        socials: [{ value: "https://instagram.com/lesofficiers", from: "osm:n1", lane: "osm" }],
+        people: [],
+      },
+    });
+    await runResolve(".", [p], newPageStore());
+    expect(p.webPresence).toBe("none");
+  });
+
+  it("upgrades an OSM-declared social when the web search finds the same profile", async () => {
+    const url = "https://instagram.com/lesofficiers";
+    const p = place({
+      contacts: { emails: [], phones: [], socials: [{ value: url, from: "osm:n1", lane: "osm" }], people: [] },
+    });
+    await runResolve(".", [p], newPageStore(), { webResults: [{ placeId: p.id, url }] });
+    expect(p.webPresence).toBe("social-only");
+    expect(p.contacts.socials).toEqual([{ value: url, from: "web", lane: "web", note: "found while resolving the website" }]);
   });
 });
 

@@ -396,9 +396,11 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 9. **Run `check` before anyone reads the output.** Exit 1 means stop. It
    re-opens every citation, demands a source or an `[M]` on every factual line,
    and re-reads every email, phone and person against the page it claims to
-   come from. That last rule is the one that matters: an address assembled from
-   a naming convention is plausible, unfalsifiable at a glance, and will be
-   emailed. The gate makes it impossible rather than discouraged.
+   come from. Contacts declared in OSM carry the exact feature as `osm:<id>`;
+   the gate re-reads that feature from the run's `osm.json` and looks only at
+   its contact tags. That last rule is the one that matters: an address
+   assembled from a naming convention is plausible, unfalsifiable at a glance,
+   and will be emailed. The gate makes it impossible rather than discouraged.
 
 10. **Render, and hand over all four — they are not the same deliverable.**
     `render` writes one run in four shapes, and which one you put in front of
@@ -423,6 +425,9 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 11. **Write from `places.json`.** Every field carries where it came from. A place
    with `sources: ["osm","sirene"]` has both records attached; a place with one
    source has one, and the other half is not "missing data" you may fill in.
+   OSM-declared emails, phones and social profiles are carried into `contacts`
+   with an `osm:<id>` source, so they remain distinct from contacts observed on
+   a fetched page and can be re-read from `osm.json` by `check`.
    `website.confidence` is `corroborated`, `unverified` or `declared` (a mapper
    typed it into OSM and nobody has checked) — say which when it matters.
 
@@ -432,6 +437,7 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 |---|---|
 | `where` exits 2 with a list | Working as designed. Several distinct places match; choose one. |
 | Very few OSM places | Overpass mirrors were busy. `doctor` shows which answered; re-run. |
+| Contacts are empty after `scan` although OSM has phone tags | They are now carried as declared contacts with an `osm:<id>` source. Re-run the scan with the current build. |
 | `truncated: true` on the register lane | A French territory exceeding the API's 10 000-result ceiling even after the NACE split, or `--max-results` was reached. Narrow the filters. |
 | Register lane `mode: "confirm"`, not `"sweep"` | Expected everywhere but France and the United Kingdom. OSM covered the ground; run `confirm` to attach register identities company by company. |
 | The UK register lane returned nothing | No snapshot in the cache. Run `ingest --country gb` once, then re-scan. The lane's reason says so verbatim. |

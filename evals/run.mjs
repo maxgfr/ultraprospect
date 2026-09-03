@@ -93,6 +93,22 @@ async function offline() {
     places.filter((p) => p.website).every((p) => p.website.confidence === "declared"),
     "only `resolve` may upgrade a website's confidence",
   );
+  check(
+    "at least one place carries an OSM-declared contact with a feature source",
+    places.some((p) => [...p.contacts.emails, ...p.contacts.phones, ...p.contacts.socials].some((contact) => /^osm:[nwr]\d+$/.test(contact.from))),
+  );
+
+  let gate;
+  try {
+    gate = JSON.parse(run(["check", "--run", runDir, "--json"]));
+  } catch (error) {
+    gate = { ok: false, error: error?.stderr?.toString().trim() || error?.message || String(error) };
+  }
+  check(
+    "check accepts the replayed scan with no failing findings",
+    gate.ok === true && Array.isArray(gate.errors) && gate.errors.length === 0,
+    gate.error || `${gate.errors?.length ?? "unknown"} error(s)`,
+  );
 
   // The adjudication file is the matcher's refusal to guess. It must be usable.
   check("undecided pairs are sorted strongest first", todo.pairs.every((p, i, a) => i === 0 || a[i - 1].score >= p.score));

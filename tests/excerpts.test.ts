@@ -141,6 +141,16 @@ describe("collectEvidence", () => {
     const html = buildHtml([p], manifest(), { pages: ev.pages });
     expect(html).not.toContain('<span class="src">[P7]</span>');
   });
+
+  it("does not spend the page-excerpt quota on OSM citations", () => {
+    const dir = runWithPage("osm:n1", "P7", `${LONG} kontakt@nolimit-it.de ${LONG}`);
+    const osmEmails = Array.from({ length: 10 }, (_, i) => ({ value: `contact${i}@example.de`, from: "osm:n1", lane: "osm" as const }));
+    const p = place({
+      contacts: { emails: [...osmEmails, { value: "kontakt@nolimit-it.de", from: "P7", lane: "web" }], phones: [], socials: [], people: [] },
+      pages: ["P7"],
+    });
+    expect(collectEvidence(dir, [p]).quotes.has(quoteKey("osm:n1", "P7", "kontakt@nolimit-it.de"))).toBe(true);
+  });
 });
 
 function signalsWith(termMentions: { value: string; from: string; lane: "web" }[]) {

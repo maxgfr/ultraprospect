@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  OSM_CONTACT_KEYS,
   OSM_TAG_GROUPS,
   OVERPASS_MIRRORS,
   areaIdFor,
@@ -8,6 +9,7 @@ import {
   isQueryTooBig,
   overpassError,
   poiCategory,
+  poiContacts,
   poiWebsite,
 } from "../src/overpass.js";
 import { NACE_SECTIONS, naceSection } from "../src/classification/nace.js";
@@ -121,6 +123,75 @@ describe("poi helpers", () => {
 
   it("returns nothing when there is no website tag", () => {
     expect(poiWebsite(base)).toBeUndefined();
+  });
+});
+
+describe("poiContacts", () => {
+  const base: OsmPoi = { id: "n248494308", osmType: "node", osmId: 248494308, lat: 0, lon: 0, tags: {} };
+
+  it("publishes the exact contact-tag catalogue", () => {
+    expect(OSM_CONTACT_KEYS).toEqual({
+      emails: ["email", "contact:email"],
+      phones: ["phone", "contact:phone", "contact:mobile", "mobile", "contact:whatsapp"],
+      socials: ["contact:facebook", "contact:instagram", "contact:linkedin", "contact:twitter", "contact:youtube", "contact:tiktok"],
+    });
+  });
+
+  it.each(OSM_CONTACT_KEYS.emails)("reads and lowercases the %s tag", (key) => {
+    expect(poiContacts({ ...base, tags: { [key]: "Hello@Example.COM" } }).emails).toEqual([
+      { value: "hello@example.com", from: "osm:n248494308", lane: "osm", note: `declared in OSM tag ${key}` },
+    ]);
+  });
+
+  it.each(OSM_CONTACT_KEYS.phones)("reads and normalises the %s tag like a fetched tel: link", (key) => {
+    expect(poiContacts({ ...base, tags: { [key]: "+33 (0)1 43.28-30.07" } }).phones).toEqual([
+      { value: "+330143283007", from: "osm:n248494308", lane: "osm", note: `declared in OSM tag ${key}` },
+    ]);
+  });
+
+  it.each(OSM_CONTACT_KEYS.socials)("keeps the %s tag verbatim", (key) => {
+    expect(poiContacts({ ...base, tags: { [key]: "les-officiers" } }).socials).toEqual([
+      { value: "les-officiers", from: "osm:n248494308", lane: "osm", note: `declared in OSM tag ${key}` },
+    ]);
+  });
+
+  it("splits semicolon-separated values and uses the OSM feature type in the source", () => {
+    const way: OsmPoi = {
+      ...base,
+      id: "w42",
+      osmType: "way",
+      osmId: 42,
+      tags: {
+        email: "ONE@example.com; two@example.com",
+        phone: "+33 1 43 28 30 07; +33 1 48 08 55 16",
+        "contact:instagram": "https://instagram.com/one;@two",
+      },
+    };
+    const contacts = poiContacts(way);
+    expect(contacts.emails.map((item) => [item.value, item.from])).toEqual([
+      ["one@example.com", "osm:w42"],
+      ["two@example.com", "osm:w42"],
+    ]);
+    expect(contacts.phones.map((item) => [item.value, item.from])).toEqual([
+      ["+33143283007", "osm:w42"],
+      ["+33148085516", "osm:w42"],
+    ]);
+    expect(contacts.socials.map((item) => [item.value, item.from])).toEqual([
+      ["https://instagram.com/one", "osm:w42"],
+      ["@two", "osm:w42"],
+    ]);
+  });
+
+  it("returns empty contact lists for absent and empty tags", () => {
+    expect(poiContacts({ ...base, tags: { phone: " ; ", email: "", "contact:facebook": "  " } })).toEqual({
+      emails: [],
+      phones: [],
+      socials: [],
+    });
+  });
+
+  it("does not turn a WhatsApp URL into a malformed phone number", () => {
+    expect(poiContacts({ ...base, tags: { "contact:whatsapp": "https://wa.me/33143283007" } }).phones).toEqual([]);
   });
 });
 

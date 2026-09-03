@@ -6702,6 +6702,401 @@ function employeeFloor(record) {
   return typeof floor === "number" && floor >= 0 ? floor : void 0;
 }
 
+// src/legal-notice.ts
+var LEGAL_NOTICE_COUNTRIES = ["fr", "de", "es", "gb", "it", "nl", "be", "at", "pt", "pl", "ie", "lu", "cz", "dk", "fi", "se", "no"];
+var VAT_PATTERNS = {
+  at: /ATU\d{8}/i,
+  be: /BE0\d{9}/i,
+  bg: /BG\d{9,10}/i,
+  cy: /CY\d{8}[A-Z]/i,
+  cz: /CZ\d{8,10}/i,
+  de: /DE\d{9}/i,
+  dk: /DK\d{8}/i,
+  ee: /EE\d{9}/i,
+  el: /EL\d{9}/i,
+  es: /ES[A-Z0-9]\d{7}[A-Z0-9]/i,
+  fi: /FI\d{8}/i,
+  fr: /FR[0-9A-Z]{2}\d{9}/i,
+  hr: /HR\d{11}/i,
+  hu: /HU\d{8}/i,
+  ie: /IE\d[A-Z0-9+*]\d{5}[A-Z]{1,2}/i,
+  it: /IT\d{11}/i,
+  lt: /LT(?:\d{9}|\d{12})/i,
+  lu: /LU\d{8}/i,
+  lv: /LV\d{11}/i,
+  mt: /MT\d{8}/i,
+  nl: /NL\d{9}B\d{2}/i,
+  pl: /PL\d{10}/i,
+  pt: /PT\d{9}/i,
+  ro: /RO\d{2,10}/i,
+  se: /SE\d{12}/i,
+  si: /SI\d{8}/i,
+  sk: /SK\d{10}/i
+};
+function extractVatNumbers(text2) {
+  const out2 = [];
+  const seen = /* @__PURE__ */ new Set();
+  let compact = "";
+  const origin = [];
+  for (let i = 0; i < text2.length; i++) {
+    const ch = text2[i];
+    if (ch === " " || ch === "	" || ch === "\n" || ch === "\r" || ch === "." || ch === "-") continue;
+    compact += ch;
+    origin.push(i);
+  }
+  for (const [cc, re] of Object.entries(VAT_PATTERNS)) {
+    for (const m of compact.matchAll(new RegExp(re.source, "gi"))) {
+      const before = text2[(origin[m.index ?? 0] ?? 0) - 1];
+      if (before && /[A-Za-z]/.test(before)) continue;
+      const value = m[0].toUpperCase();
+      if (seen.has(value)) continue;
+      seen.add(value);
+      out2.push({ countryCode: cc, value });
+    }
+  }
+  return out2;
+}
+function extractHandelsregister(text2) {
+  const m = /\bHR([AB])\s*[:\s]?\s*(\d{1,7})\b/i.exec(text2);
+  if (!m) return void 0;
+  const value = `HR${m[1].toUpperCase()} ${m[2]}`;
+  const around = text2.slice(Math.max(0, m.index - 120), m.index + 160);
+  const court = /\b(?:Amtsgerichts?|Registergerichts?)\s*:?\s*(?!HR[AB]\b)(?!Amtsgericht|Registergericht)([A-ZÄÖÜ][\wÄÖÜäöüß.]*(?:[- ][A-ZÄÖÜ][\wÄÖÜäöüß.]*)?)/.exec(
+    around
+  );
+  return { value, court: court?.[1]?.trim() };
+}
+function extractUkCompanyNumber(text2) {
+  const m = /\b(?:compan(?:y|ies)\s+(?:reg(?:istration|istered)?\.?\s*)?(?:no\.?|number)|registered\s+in\s+England[^.]{0,40}?no\.?)[\s:.–—-]{0,10}((?:[A-Z]{2})?\d{6,8})\b/i.exec(
+    text2
+  );
+  return m?.[1]?.toUpperCase();
+}
+function extractSirenSiret(text2) {
+  const siret = /\b(?:SIRET)\D{0,12}(\d[\d\s.]{12,17}\d)\b/i.exec(text2);
+  if (siret) return { kind: "siret", value: siret[1].replace(/\D/g, "") };
+  const siren = /\b(?:SIREN|RCS[^\d]{0,30})\D{0,6}(\d[\d\s.]{7,12}\d)\b/i.exec(text2);
+  if (siren) return { kind: "siren", value: siren[1].replace(/\D/g, "") };
+  return void 0;
+}
+function extractSpanishNif(text2) {
+  const m = /\b(?:C\.?I\.?F\.?|N\.?I\.?F\.?)\s*[:.]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])\b/i.exec(text2);
+  return m?.[1]?.toUpperCase();
+}
+function extractLegalIds(text2, countryCode, pageId) {
+  const cc = countryCode?.toLowerCase();
+  const out2 = [];
+  const push = (id) => {
+    if (!out2.some((x) => x.kind === id.kind && x.value === id.value)) out2.push(id);
+  };
+  if (cc === "fr" || !cc) {
+    const fr = extractSirenSiret(text2);
+    if (fr) push({ kind: fr.kind, value: fr.value, countryCode: "fr", from: pageId });
+  }
+  if (cc === "de" || !cc) {
+    const de = extractHandelsregister(text2);
+    if (de) push({ kind: "hrb", value: de.value, countryCode: "de", from: pageId, context: de.court });
+  }
+  if (cc === "gb") {
+    const gb = extractUkCompanyNumber(text2);
+    if (gb) push({ kind: "company-number", value: gb, countryCode: "gb", from: pageId });
+  }
+  if (cc === "es" || !cc) {
+    const es = extractSpanishNif(text2);
+    if (es) push({ kind: "nif", value: es, countryCode: "es", from: pageId });
+  }
+  for (const vat of extractVatNumbers(text2)) {
+    push({ kind: "vat", value: vat.value, countryCode: vat.countryCode, from: pageId });
+  }
+  return out2;
+}
+function extractLegalId(text2, countryCode) {
+  return extractLegalIds(text2, countryCode)[0]?.value;
+}
+function legalNoticeTerms(countryCode) {
+  switch ((countryCode ?? "").toLowerCase()) {
+    case "de":
+    case "at":
+    case "ch":
+      return ["Impressum"];
+    case "es":
+      return ["aviso legal"];
+    case "fr":
+      return ["mentions l\xE9gales"];
+    case "it":
+      return ["note legali"];
+    case "nl":
+      return ["colofon"];
+    case "pt":
+      return ["aviso legal"];
+    case "pl":
+      return ["polityka prywatno\u015Bci"];
+    case "gb":
+    case "ie":
+    case "us":
+      return ["legal notice"];
+    default:
+      return [];
+  }
+}
+function legalIdCoverage(countryCode) {
+  const cc = countryCode?.toLowerCase();
+  if (cc && LEGAL_NOTICE_COUNTRIES.includes(cc)) {
+    return { expected: true, note: `${cc}: company websites are legally required to publish a registration number` };
+  }
+  if (cc === "us") {
+    return {
+      expected: false,
+      note: "us: there is no federal company register and no published company number \u2014 an EIN is never disclosed. Identity here rests on address and name, not on a registration."
+    };
+  }
+  return { expected: false, note: `${cc ?? "this country"}: no legal-notice obligation is modelled, so no registration number is expected on company sites` };
+}
+
+// src/signals.ts
+var ROLE_PATTERNS = [
+  {
+    role: "careers",
+    re: /(?:^|\/)(?:careers?|jobs?|emplois?|recrutement|nous-rejoindre|rejoignez|join-us|hiring|carriere|carrières?|karriere|stellen|stellenangebote|jobboerse|empleo|trabaja-con-nosotros|ofertas-de-empleo|lavora-con-noi)(?:\/|$|\.)/i
+  },
+  { role: "pricing", re: /(?:^|\/)(?:pricing|tarifs?|prix|nos-tarifs|abonnements?|plans?|devis|preise|preisliste|precios|tarifas|prezzi)(?:\/|$|\.)/i },
+  {
+    role: "about",
+    re: /(?:^|\/)(?:about|about-us|a-propos|à-propos|qui-sommes-nous|notre-histoire|entreprise|company|ueber-uns|über-uns|unternehmen|wir-ueber-uns|sobre-nosotros|quienes-somos|empresa|chi-siamo)(?:\/|$|\.)/i
+  },
+  {
+    role: "team",
+    re: /(?:^|\/)(?:team|equipe|équipe|notre-equipe|people|staff|collaborateurs|direction|mitarbeiter|ansprechpartner|equipo|nuestro-equipo)(?:\/|$|\.)/i
+  },
+  { role: "contact", re: /(?:^|\/)(?:contact|contactez-nous|nous-contacter|contact-us|kontakt|kontaktieren|contacto|contatti)(?:\/|$|\.)/i },
+  {
+    role: "legal",
+    // The legal page is the one this tool most depends on outside France: it is
+    // where German and Spanish law puts the registration number that `confirm`
+    // turns into a register record.
+    re: /(?:^|\/)(?:mentions-legales|mentions-légales|legal|legal-notice|legal-notices|impressum|imprint|anbieterkennzeichnung|aviso-legal|informacion-legal|note-legali|cgv|cgu|conditions-generales|privacy|confidentialite|datenschutz)(?:\/|$|\.)/i
+  },
+  { role: "services", re: /(?:^|\/)(?:services?|prestations?|expertises?|solutions?|savoir-faire|metiers?|métiers?)(?:\/|$|\.)/i },
+  { role: "products", re: /(?:^|\/)(?:products?|produits?|boutique|shop|catalogue|collections?)(?:\/|$|\.)/i },
+  { role: "cases", re: /(?:^|\/)(?:case-stud(?:y|ies)|references?|réalisations?|realisations|portfolio|clients?|temoignages?|témoignages?)(?:\/|$|\.)/i },
+  { role: "news", re: /(?:^|\/)(?:news|blog|actualites?|actualités?|articles?|presse|press)(?:\/|$|\.)/i }
+];
+function roleOf(url) {
+  let path;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    path = url;
+  }
+  if (path === "/" || path === "") return "home";
+  for (const { role, re } of ROLE_PATTERNS) if (re.test(path)) return role;
+  return "other";
+}
+var CMS_FINGERPRINTS = [
+  ["WordPress", /wp-content|wp-includes|name="generator"[^>]*WordPress/i],
+  ["Shopify", /cdn\.shopify\.com|Shopify\.theme/i],
+  ["Wix", /static\.wixstatic\.com|X-Wix-/i],
+  ["Squarespace", /squarespace\.com|static1\.squarespace/i],
+  ["Webflow", /assets(?:-global)?\.website-files\.com|generator"[^>]*Webflow/i],
+  ["Drupal", /generator"[^>]*Drupal|sites\/all\/(?:themes|modules)/i],
+  ["Joomla", /generator"[^>]*Joomla/i],
+  ["PrestaShop", /generator"[^>]*PrestaShop|\/themes\/[^"']*\/assets\/js\/theme/i],
+  ["Magento", /Magento_|mage\/cookies/i],
+  ["HubSpot CMS", /hs-scripts\.com|hubspotusercontent/i],
+  ["Framer", /framerusercontent\.com/i],
+  ["Odoo", /generator"[^>]*Odoo|web\/static\/src/i],
+  ["Next.js", /\/_next\/static\//i],
+  ["Nuxt", /\/_nuxt\//i]
+];
+var ANALYTICS_FINGERPRINTS = [
+  ["Google Analytics", /googletagmanager\.com\/gtag|google-analytics\.com|gtag\('config'/i],
+  ["Google Tag Manager", /googletagmanager\.com\/gtm\.js/i],
+  ["Matomo", /matomo\.js|piwik\.js/i],
+  ["Plausible", /plausible\.io\/js/i],
+  ["Fathom", /cdn\.usefathom\.com/i],
+  ["Hotjar", /static\.hotjar\.com/i],
+  ["Meta Pixel", /connect\.facebook\.net\/[^"']*\/fbevents\.js/i],
+  ["LinkedIn Insight", /snap\.licdn\.com/i],
+  ["HubSpot", /js\.hs-scripts\.com/i],
+  ["Intercom", /widget\.intercom\.io/i],
+  ["Crisp", /client\.crisp\.chat/i],
+  ["Axeptio", /axeptio\.imgix\.net|axept\.io/i]
+];
+var ECOMMERCE_FINGERPRINTS = /add-to-cart|ajouter-au-panier|data-product-id|woocommerce|shopify|prestashop|panier|checkout|stripe\.com\/v3|paypal\.com\/sdk/i;
+function fingerprints(html, table) {
+  return table.filter(([, re]) => re.test(html)).map(([name]) => name);
+}
+function extractEmails(text2, html, pageId) {
+  const out2 = /* @__PURE__ */ new Map();
+  for (const m of html.matchAll(/mailto:([^"'?>\s]+@[^"'?>\s]+)/gi)) {
+    const value = decodeURIComponent(m[1]).toLowerCase();
+    if (isPlausibleEmail(value)) out2.set(value, { value, from: pageId, lane: "web", note: "mailto link" });
+  }
+  for (const m of text2.matchAll(/[\w.+-]+@[\w-]+\.[\w.-]{2,}/g)) {
+    const value = m[0].toLowerCase().replace(/[.,;:]$/, "");
+    if (isPlausibleEmail(value) && !out2.has(value)) out2.set(value, { value, from: pageId, lane: "web", note: "in the page text" });
+  }
+  return [...out2.values()];
+}
+function isPlausibleEmail(value) {
+  if (!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(value)) return false;
+  if (/\.(png|jpe?g|gif|svg|webp|css|js|woff2?)$/i.test(value)) return false;
+  if (/^(?:example|test|no-?reply|your|email|nom|prenom)@/i.test(value)) return false;
+  return true;
+}
+function normalizePhoneValue(value) {
+  if (!/^[+0-9().\s-]+$/.test(value)) return void 0;
+  const normalized = value.replace(/[\s.()-]/g, "");
+  return normalized.replace(/\D/g, "").length >= 8 ? normalized : void 0;
+}
+function extractPhones(html, pageId) {
+  const out2 = /* @__PURE__ */ new Map();
+  for (const m of html.matchAll(/tel:([+0-9().\s-]{6,})/gi)) {
+    const raw = normalizePhoneValue(m[1]);
+    if (!raw) continue;
+    out2.set(raw, { value: raw, from: pageId, lane: "web", note: "tel: link" });
+  }
+  return [...out2.values()];
+}
+var NOT_A_PROFILE = /\/(?:sharer|share|intent|embed|watch|shorts|login|signup|home|policies|privacy|legal|about|developers?|plugins?|tr\?id=)\b|[?&](?:u|text|url|status|via)=/i;
+function extractSocials(html, pageId) {
+  const out2 = /* @__PURE__ */ new Map();
+  const re = /https?:\/\/(?:[a-z]{2,3}\.)?(?:www\.)?(facebook\.com|instagram\.com|linkedin\.com|twitter\.com|x\.com|youtube\.com|tiktok\.com)\/[^\s"'<>)]+/gi;
+  for (const m of html.matchAll(re)) {
+    const value = m[0].replace(/[)"'<>]+$/, "");
+    if (NOT_A_PROFILE.test(value)) continue;
+    try {
+      if (new URL(value).pathname.replace(/\/+$/, "").length < 2) continue;
+    } catch {
+      continue;
+    }
+    out2.set(value, { value, from: pageId, lane: "web", note: `${m[1]} link` });
+  }
+  return [...out2.values()];
+}
+function extractLanguages(html) {
+  const langs = /* @__PURE__ */ new Set();
+  const htmlLang = /<html[^>]*\slang=["']([a-z]{2})/i.exec(html);
+  if (htmlLang) langs.add(htmlLang[1].toLowerCase());
+  for (const m of html.matchAll(/hreflang=["']([a-z]{2})/gi)) langs.add(m[1].toLowerCase());
+  return [...langs];
+}
+function extractTermMentions(text2, pageId, terms) {
+  if (!terms.length) return [];
+  const re = new RegExp(
+    `(?<!\\p{L})(?:${[...terms].sort((a, b) => b.length - a.length).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\p{L}{0,3}(?!\\p{L})`,
+    "giu"
+  );
+  const out2 = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const m of text2.matchAll(re)) {
+    const key = m[0].toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const from = Math.max(0, m.index - 90);
+    const line = text2.slice(from, Math.min(text2.length, m.index + m[0].length + 90)).replace(/\s+/g, " ").trim();
+    out2.push({ value: m[0], from: pageId, lane: "web", note: line });
+  }
+  return out2;
+}
+function matchingJobs(input) {
+  const terms = input.roleFilter ?? [];
+  if (!terms.length) return input.jobs;
+  return input.jobs.filter((j) => terms.some((t) => j.title.toLowerCase().includes(t.toLowerCase())));
+}
+function oldestRoleDays(jobs, now) {
+  const stamps = jobs.map((j) => j.postedAt ? Date.parse(j.postedAt) : Number.NaN).filter((n) => Number.isFinite(n));
+  if (!stamps.length) return void 0;
+  const ref = now ? Date.parse(now) : Date.now();
+  return Math.max(0, Math.floor((ref - Math.min(...stamps)) / 864e5));
+}
+function buildSignals(input) {
+  const html = input.pages.map((p) => p.html ?? "").join("\n");
+  const roles = new Set(input.pages.map((p) => p.record.role));
+  const techFromJsonLd = /* @__PURE__ */ new Set();
+  for (const page of input.pages) {
+    if (!page.html) continue;
+    for (const node of extractJsonLd(page.html)) {
+      const type = node?.["@type"];
+      if (typeof type === "string") techFromJsonLd.add(`schema:${type}`);
+    }
+  }
+  return {
+    hasWebsite: input.pages.length > 0,
+    siteReachable: input.siteReachable,
+    pageCount: input.pages.length,
+    lastContentAt: input.lastContentAt,
+    sitemapUrls: input.sitemapUrls,
+    // Hiring is asserted only when postings were actually read. A detected
+    // board with no readable API leaves this undefined rather than false: "not
+    // hiring" and "we could not look" are different facts.
+    isHiring: input.atsProviders.length === 0 && !roles.has("careers") ? false : input.jobs.length > 0 || void 0,
+    openRoles: input.jobs.length,
+    matchedRoles: input.roleFilter?.length ? matchingJobs(input).length : void 0,
+    roleFilter: input.roleFilter?.length ? [...input.roleFilter] : void 0,
+    // A role open for a long time is a role the company cannot fill. That is
+    // the closest thing to a measurable opportunity a public source carries —
+    // and it is a COUNT of days, not a conclusion about why.
+    //
+    // Aged over the FILTERED roles when a filter exists. Measured on a real
+    // run: the oldest posting on two German boards was an "Initiativbewerbung",
+    // a standing invitation to apply speculatively that never closes, and it
+    // made a company whose oldest real vacancy was two months old look like it
+    // had failed to fill one for 1766 days. The engine must not learn that
+    // word — it is one country's, and the next country has another — but a
+    // caller's filter already excludes an evergreen catch-all, so the age
+    // follows the filter.
+    oldestOpenRoleDays: oldestRoleDays(matchingJobs(input), input.now),
+    // CAREERS ONLY, and that restriction is the signal.
+    //
+    // Measured on a Hamburg run before it was scoped: 48 mentions, every
+    // sampled one a false positive. `externe Dienstleister` is what a privacy
+    // policy calls a data processor; `Freiberufler` on a law firm's or tax
+    // adviser's site names the CLIENTS it advises; `Freelancer` on a one-person
+    // web studio's homepage describes the owner. The vocabulary was right and
+    // the page was wrong, which is the worst kind of wrong here: it reads as
+    // measured. On a careers page the same words are a company saying how it
+    // staffs work, which is the only reading worth acting on.
+    termMentions: (() => {
+      const terms = input.termLexicon ?? [];
+      if (!terms.length) return [];
+      const roles2 = new Set(input.termRoles ?? ["careers"]);
+      return input.pages.filter((p) => roles2.has(p.record.role)).flatMap((p) => extractTermMentions(p.text, p.record.id, terms));
+    })(),
+    termLexicon: input.termLexicon?.length ? [...input.termLexicon] : void 0,
+    atsProviders: [...input.atsProviders],
+    cms: fingerprints(html, CMS_FINGERPRINTS)[0],
+    analytics: fingerprints(html, ANALYTICS_FINGERPRINTS),
+    techStack: [.../* @__PURE__ */ new Set([...fingerprints(html, CMS_FINGERPRINTS).slice(1), ...techFromJsonLd])],
+    hasPricingPage: roles.has("pricing"),
+    hasEcommerce: ECOMMERCE_FINGERPRINTS.test(html),
+    languages: extractLanguages(html),
+    socialProfiles: [...new Set(input.pages.flatMap((p) => extractSocials(p.html ?? "", p.record.id).map((s) => s.value)))],
+    legalIdOnSite: input.pages.map((p) => extractLegalId(p.text, input.countryCode)).find(Boolean)
+  };
+}
+function sameOriginLinks(html, base) {
+  let origin;
+  try {
+    origin = new URL(base).origin;
+  } catch {
+    return [];
+  }
+  const out2 = /* @__PURE__ */ new Set();
+  for (const m of html.matchAll(/<a\b[^>]*\shref=["']([^"']+)["']/gi)) {
+    const href = m[1].trim();
+    if (!href || href.startsWith("#") || /^(?:mailto|tel|javascript|data):/i.test(href)) continue;
+    try {
+      const url = new URL(href, base);
+      if (url.origin !== origin) continue;
+      url.hash = "";
+      out2.add(url.href);
+    } catch {
+    }
+  }
+  return [...out2];
+}
+
 // src/overpass.ts
 var OVERPASS_MIRRORS = [
   "https://overpass-api.de/api/interpreter",
@@ -6718,6 +7113,11 @@ var OSM_TAG_GROUPS = {
   amenity: '["amenity"~"^(restaurant|cafe|bar|pub|fast_food|food_court|ice_cream|biergarten|bank|bureau_de_change|atm|pharmacy|clinic|doctors|dentist|veterinary|driving_school|language_school|prep_school|music_school|training|childcare|kindergarten|school|college|university|hospital|nursing_home|social_facility|funeral_directors|fuel|car_wash|car_rental|car_sharing|charging_station|cinema|theatre|nightclub|casino|marketplace|post_office|coworking_space|studio|internet_cafe|animal_boarding|animal_shelter|vehicle_inspection)$"]',
   tourism: '["tourism"~"^(hotel|motel|hostel|guest_house|apartment|chalet|camp_site|caravan_site|museum|gallery)$"]',
   leisure: '["leisure"~"^(fitness_centre|sports_centre|sports_hall|dance|escape_game|bowling_alley|amusement_arcade|adult_gaming_centre|horse_riding|golf_course|marina|hackerspace|trampoline_park)$"]'
+};
+var OSM_CONTACT_KEYS = {
+  emails: ["email", "contact:email"],
+  phones: ["phone", "contact:phone", "contact:mobile", "mobile", "contact:whatsapp"],
+  socials: ["contact:facebook", "contact:instagram", "contact:linkedin", "contact:twitter", "contact:youtube", "contact:tiktok"]
 };
 function areaIdFor(target) {
   if (target.osmType !== "relation" || typeof target.osmId !== "number") return void 0;
@@ -6872,6 +7272,29 @@ function poiWebsite(poi) {
   const first = raw.split(/[;\s]+/)[0];
   if (!first) return void 0;
   return /^https?:\/\//i.test(first) ? first : `https://${first}`;
+}
+function poiContacts(poi) {
+  const contacts = { emails: [], phones: [], socials: [] };
+  const from = `osm:${poi.osmType[0]}${poi.osmId}`;
+  for (const key of OSM_CONTACT_KEYS.emails) {
+    for (const raw of (poi.tags[key] ?? "").split(";")) {
+      const value = raw.trim().toLowerCase();
+      if (value) contacts.emails.push({ value, from, lane: "osm", note: `declared in OSM tag ${key}` });
+    }
+  }
+  for (const key of OSM_CONTACT_KEYS.phones) {
+    for (const raw of (poi.tags[key] ?? "").split(";")) {
+      const value = normalizePhoneValue(raw.trim());
+      if (value) contacts.phones.push({ value, from, lane: "osm", note: `declared in OSM tag ${key}` });
+    }
+  }
+  for (const key of OSM_CONTACT_KEYS.socials) {
+    for (const raw of (poi.tags[key] ?? "").split(";")) {
+      const value = raw.trim();
+      if (value) contacts.socials.push({ value, from, lane: "osm", note: `declared in OSM tag ${key}` });
+    }
+  }
+  return contacts;
 }
 
 // src/doctor.ts
@@ -7478,7 +7901,7 @@ function placeFromPoi(poi) {
     // `resolve` upgrades it to "corroborated" only after fetching the page and
     // finding the company on it.
     website: website ? { url: website, confidence: "declared", evidence: ["osm"] } : void 0,
-    contacts: { emails: [], phones: [], socials: [], people: [] },
+    contacts: { ...poiContacts(poi), people: [] },
     jobs: [],
     pages: []
   };
@@ -7726,157 +8149,6 @@ function writeScan(runDir, outcome) {
   writePlaces(runDir, outcome.places);
   writeJson(runDir, "MATCH.todo.json", buildMatchTodo(outcome.undecided));
   writeRunManifest(runDir, outcome.manifest);
-}
-
-// src/legal-notice.ts
-var LEGAL_NOTICE_COUNTRIES = ["fr", "de", "es", "gb", "it", "nl", "be", "at", "pt", "pl", "ie", "lu", "cz", "dk", "fi", "se", "no"];
-var VAT_PATTERNS = {
-  at: /ATU\d{8}/i,
-  be: /BE0\d{9}/i,
-  bg: /BG\d{9,10}/i,
-  cy: /CY\d{8}[A-Z]/i,
-  cz: /CZ\d{8,10}/i,
-  de: /DE\d{9}/i,
-  dk: /DK\d{8}/i,
-  ee: /EE\d{9}/i,
-  el: /EL\d{9}/i,
-  es: /ES[A-Z0-9]\d{7}[A-Z0-9]/i,
-  fi: /FI\d{8}/i,
-  fr: /FR[0-9A-Z]{2}\d{9}/i,
-  hr: /HR\d{11}/i,
-  hu: /HU\d{8}/i,
-  ie: /IE\d[A-Z0-9+*]\d{5}[A-Z]{1,2}/i,
-  it: /IT\d{11}/i,
-  lt: /LT(?:\d{9}|\d{12})/i,
-  lu: /LU\d{8}/i,
-  lv: /LV\d{11}/i,
-  mt: /MT\d{8}/i,
-  nl: /NL\d{9}B\d{2}/i,
-  pl: /PL\d{10}/i,
-  pt: /PT\d{9}/i,
-  ro: /RO\d{2,10}/i,
-  se: /SE\d{12}/i,
-  si: /SI\d{8}/i,
-  sk: /SK\d{10}/i
-};
-function extractVatNumbers(text2) {
-  const out2 = [];
-  const seen = /* @__PURE__ */ new Set();
-  let compact = "";
-  const origin = [];
-  for (let i = 0; i < text2.length; i++) {
-    const ch = text2[i];
-    if (ch === " " || ch === "	" || ch === "\n" || ch === "\r" || ch === "." || ch === "-") continue;
-    compact += ch;
-    origin.push(i);
-  }
-  for (const [cc, re] of Object.entries(VAT_PATTERNS)) {
-    for (const m of compact.matchAll(new RegExp(re.source, "gi"))) {
-      const before = text2[(origin[m.index ?? 0] ?? 0) - 1];
-      if (before && /[A-Za-z]/.test(before)) continue;
-      const value = m[0].toUpperCase();
-      if (seen.has(value)) continue;
-      seen.add(value);
-      out2.push({ countryCode: cc, value });
-    }
-  }
-  return out2;
-}
-function extractHandelsregister(text2) {
-  const m = /\bHR([AB])\s*[:\s]?\s*(\d{1,7})\b/i.exec(text2);
-  if (!m) return void 0;
-  const value = `HR${m[1].toUpperCase()} ${m[2]}`;
-  const around = text2.slice(Math.max(0, m.index - 120), m.index + 160);
-  const court = /\b(?:Amtsgerichts?|Registergerichts?)\s*:?\s*(?!HR[AB]\b)(?!Amtsgericht|Registergericht)([A-ZÄÖÜ][\wÄÖÜäöüß.]*(?:[- ][A-ZÄÖÜ][\wÄÖÜäöüß.]*)?)/.exec(
-    around
-  );
-  return { value, court: court?.[1]?.trim() };
-}
-function extractUkCompanyNumber(text2) {
-  const m = /\b(?:compan(?:y|ies)\s+(?:reg(?:istration|istered)?\.?\s*)?(?:no\.?|number)|registered\s+in\s+England[^.]{0,40}?no\.?)[\s:.–—-]{0,10}((?:[A-Z]{2})?\d{6,8})\b/i.exec(
-    text2
-  );
-  return m?.[1]?.toUpperCase();
-}
-function extractSirenSiret(text2) {
-  const siret = /\b(?:SIRET)\D{0,12}(\d[\d\s.]{12,17}\d)\b/i.exec(text2);
-  if (siret) return { kind: "siret", value: siret[1].replace(/\D/g, "") };
-  const siren = /\b(?:SIREN|RCS[^\d]{0,30})\D{0,6}(\d[\d\s.]{7,12}\d)\b/i.exec(text2);
-  if (siren) return { kind: "siren", value: siren[1].replace(/\D/g, "") };
-  return void 0;
-}
-function extractSpanishNif(text2) {
-  const m = /\b(?:C\.?I\.?F\.?|N\.?I\.?F\.?)\s*[:.]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])\b/i.exec(text2);
-  return m?.[1]?.toUpperCase();
-}
-function extractLegalIds(text2, countryCode, pageId) {
-  const cc = countryCode?.toLowerCase();
-  const out2 = [];
-  const push = (id) => {
-    if (!out2.some((x) => x.kind === id.kind && x.value === id.value)) out2.push(id);
-  };
-  if (cc === "fr" || !cc) {
-    const fr = extractSirenSiret(text2);
-    if (fr) push({ kind: fr.kind, value: fr.value, countryCode: "fr", from: pageId });
-  }
-  if (cc === "de" || !cc) {
-    const de = extractHandelsregister(text2);
-    if (de) push({ kind: "hrb", value: de.value, countryCode: "de", from: pageId, context: de.court });
-  }
-  if (cc === "gb") {
-    const gb = extractUkCompanyNumber(text2);
-    if (gb) push({ kind: "company-number", value: gb, countryCode: "gb", from: pageId });
-  }
-  if (cc === "es" || !cc) {
-    const es = extractSpanishNif(text2);
-    if (es) push({ kind: "nif", value: es, countryCode: "es", from: pageId });
-  }
-  for (const vat of extractVatNumbers(text2)) {
-    push({ kind: "vat", value: vat.value, countryCode: vat.countryCode, from: pageId });
-  }
-  return out2;
-}
-function extractLegalId(text2, countryCode) {
-  return extractLegalIds(text2, countryCode)[0]?.value;
-}
-function legalNoticeTerms(countryCode) {
-  switch ((countryCode ?? "").toLowerCase()) {
-    case "de":
-    case "at":
-    case "ch":
-      return ["Impressum"];
-    case "es":
-      return ["aviso legal"];
-    case "fr":
-      return ["mentions l\xE9gales"];
-    case "it":
-      return ["note legali"];
-    case "nl":
-      return ["colofon"];
-    case "pt":
-      return ["aviso legal"];
-    case "pl":
-      return ["polityka prywatno\u015Bci"];
-    case "gb":
-    case "ie":
-    case "us":
-      return ["legal notice"];
-    default:
-      return [];
-  }
-}
-function legalIdCoverage(countryCode) {
-  const cc = countryCode?.toLowerCase();
-  if (cc && LEGAL_NOTICE_COUNTRIES.includes(cc)) {
-    return { expected: true, note: `${cc}: company websites are legally required to publish a registration number` };
-  }
-  if (cc === "us") {
-    return {
-      expected: false,
-      note: "us: there is no federal company register and no published company number \u2014 an EIN is never disclosed. Identity here rests on address and name, not on a registration."
-    };
-  }
-  return { expected: false, note: `${cc ?? "this country"}: no legal-notice obligation is modelled, so no registration number is expected on company sites` };
 }
 
 // src/confirm.ts
@@ -8683,8 +8955,13 @@ async function runResolve(runDir, places, store, opts = {}) {
     for (const url of candidates) {
       const kind = classifyHost(url, opts.countryCode);
       if (kind === "social") {
-        if (!place.contacts.socials.some((s) => s.value === url)) {
-          place.contacts.socials.push({ value: url, from: "web", lane: "web", note: "found while resolving the website" });
+        const social = { value: url, from: "web", lane: "web", note: "found while resolving the website" };
+        const existing = place.contacts.socials.findIndex((item) => item.value === url);
+        if (existing === -1) {
+          place.contacts.socials.push(social);
+          outcome.socials++;
+        } else if (place.contacts.socials[existing].lane !== "web") {
+          place.contacts.socials[existing] = social;
           outcome.socials++;
         }
         continue;
@@ -8728,7 +9005,7 @@ async function runResolve(runDir, places, store, opts = {}) {
     if (!settled) outcome.unchanged++;
   }
   for (const place of targets) {
-    place.webPresence = place.website?.confidence === "corroborated" ? "own-site" : place.contacts.socials.length ? "social-only" : "none";
+    place.webPresence = place.website?.confidence === "corroborated" ? "own-site" : place.contacts.socials.some((social) => social.lane === "web") ? "social-only" : "none";
     if (place.webPresence === "social-only") outcome.socialOnly++;
   }
   note(
@@ -9205,245 +9482,6 @@ function peopleFrom(text2, pageId, opts = {}) {
   return extractPeople(text2, opts).map((p) => ({ value: p.value, role: p.role, from: pageId, lane: "web" }));
 }
 
-// src/signals.ts
-var ROLE_PATTERNS = [
-  {
-    role: "careers",
-    re: /(?:^|\/)(?:careers?|jobs?|emplois?|recrutement|nous-rejoindre|rejoignez|join-us|hiring|carriere|carrières?|karriere|stellen|stellenangebote|jobboerse|empleo|trabaja-con-nosotros|ofertas-de-empleo|lavora-con-noi)(?:\/|$|\.)/i
-  },
-  { role: "pricing", re: /(?:^|\/)(?:pricing|tarifs?|prix|nos-tarifs|abonnements?|plans?|devis|preise|preisliste|precios|tarifas|prezzi)(?:\/|$|\.)/i },
-  {
-    role: "about",
-    re: /(?:^|\/)(?:about|about-us|a-propos|à-propos|qui-sommes-nous|notre-histoire|entreprise|company|ueber-uns|über-uns|unternehmen|wir-ueber-uns|sobre-nosotros|quienes-somos|empresa|chi-siamo)(?:\/|$|\.)/i
-  },
-  {
-    role: "team",
-    re: /(?:^|\/)(?:team|equipe|équipe|notre-equipe|people|staff|collaborateurs|direction|mitarbeiter|ansprechpartner|equipo|nuestro-equipo)(?:\/|$|\.)/i
-  },
-  { role: "contact", re: /(?:^|\/)(?:contact|contactez-nous|nous-contacter|contact-us|kontakt|kontaktieren|contacto|contatti)(?:\/|$|\.)/i },
-  {
-    role: "legal",
-    // The legal page is the one this tool most depends on outside France: it is
-    // where German and Spanish law puts the registration number that `confirm`
-    // turns into a register record.
-    re: /(?:^|\/)(?:mentions-legales|mentions-légales|legal|legal-notice|legal-notices|impressum|imprint|anbieterkennzeichnung|aviso-legal|informacion-legal|note-legali|cgv|cgu|conditions-generales|privacy|confidentialite|datenschutz)(?:\/|$|\.)/i
-  },
-  { role: "services", re: /(?:^|\/)(?:services?|prestations?|expertises?|solutions?|savoir-faire|metiers?|métiers?)(?:\/|$|\.)/i },
-  { role: "products", re: /(?:^|\/)(?:products?|produits?|boutique|shop|catalogue|collections?)(?:\/|$|\.)/i },
-  { role: "cases", re: /(?:^|\/)(?:case-stud(?:y|ies)|references?|réalisations?|realisations|portfolio|clients?|temoignages?|témoignages?)(?:\/|$|\.)/i },
-  { role: "news", re: /(?:^|\/)(?:news|blog|actualites?|actualités?|articles?|presse|press)(?:\/|$|\.)/i }
-];
-function roleOf(url) {
-  let path;
-  try {
-    path = new URL(url).pathname;
-  } catch {
-    path = url;
-  }
-  if (path === "/" || path === "") return "home";
-  for (const { role, re } of ROLE_PATTERNS) if (re.test(path)) return role;
-  return "other";
-}
-var CMS_FINGERPRINTS = [
-  ["WordPress", /wp-content|wp-includes|name="generator"[^>]*WordPress/i],
-  ["Shopify", /cdn\.shopify\.com|Shopify\.theme/i],
-  ["Wix", /static\.wixstatic\.com|X-Wix-/i],
-  ["Squarespace", /squarespace\.com|static1\.squarespace/i],
-  ["Webflow", /assets(?:-global)?\.website-files\.com|generator"[^>]*Webflow/i],
-  ["Drupal", /generator"[^>]*Drupal|sites\/all\/(?:themes|modules)/i],
-  ["Joomla", /generator"[^>]*Joomla/i],
-  ["PrestaShop", /generator"[^>]*PrestaShop|\/themes\/[^"']*\/assets\/js\/theme/i],
-  ["Magento", /Magento_|mage\/cookies/i],
-  ["HubSpot CMS", /hs-scripts\.com|hubspotusercontent/i],
-  ["Framer", /framerusercontent\.com/i],
-  ["Odoo", /generator"[^>]*Odoo|web\/static\/src/i],
-  ["Next.js", /\/_next\/static\//i],
-  ["Nuxt", /\/_nuxt\//i]
-];
-var ANALYTICS_FINGERPRINTS = [
-  ["Google Analytics", /googletagmanager\.com\/gtag|google-analytics\.com|gtag\('config'/i],
-  ["Google Tag Manager", /googletagmanager\.com\/gtm\.js/i],
-  ["Matomo", /matomo\.js|piwik\.js/i],
-  ["Plausible", /plausible\.io\/js/i],
-  ["Fathom", /cdn\.usefathom\.com/i],
-  ["Hotjar", /static\.hotjar\.com/i],
-  ["Meta Pixel", /connect\.facebook\.net\/[^"']*\/fbevents\.js/i],
-  ["LinkedIn Insight", /snap\.licdn\.com/i],
-  ["HubSpot", /js\.hs-scripts\.com/i],
-  ["Intercom", /widget\.intercom\.io/i],
-  ["Crisp", /client\.crisp\.chat/i],
-  ["Axeptio", /axeptio\.imgix\.net|axept\.io/i]
-];
-var ECOMMERCE_FINGERPRINTS = /add-to-cart|ajouter-au-panier|data-product-id|woocommerce|shopify|prestashop|panier|checkout|stripe\.com\/v3|paypal\.com\/sdk/i;
-function fingerprints(html, table) {
-  return table.filter(([, re]) => re.test(html)).map(([name]) => name);
-}
-function extractEmails(text2, html, pageId) {
-  const out2 = /* @__PURE__ */ new Map();
-  for (const m of html.matchAll(/mailto:([^"'?>\s]+@[^"'?>\s]+)/gi)) {
-    const value = decodeURIComponent(m[1]).toLowerCase();
-    if (isPlausibleEmail(value)) out2.set(value, { value, from: pageId, lane: "web", note: "mailto link" });
-  }
-  for (const m of text2.matchAll(/[\w.+-]+@[\w-]+\.[\w.-]{2,}/g)) {
-    const value = m[0].toLowerCase().replace(/[.,;:]$/, "");
-    if (isPlausibleEmail(value) && !out2.has(value)) out2.set(value, { value, from: pageId, lane: "web", note: "in the page text" });
-  }
-  return [...out2.values()];
-}
-function isPlausibleEmail(value) {
-  if (!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(value)) return false;
-  if (/\.(png|jpe?g|gif|svg|webp|css|js|woff2?)$/i.test(value)) return false;
-  if (/^(?:example|test|no-?reply|your|email|nom|prenom)@/i.test(value)) return false;
-  return true;
-}
-function extractPhones(html, pageId) {
-  const out2 = /* @__PURE__ */ new Map();
-  for (const m of html.matchAll(/tel:([+0-9().\s-]{6,})/gi)) {
-    const raw = m[1].replace(/[\s.()-]/g, "");
-    if (raw.replace(/\D/g, "").length < 8) continue;
-    out2.set(raw, { value: raw, from: pageId, lane: "web", note: "tel: link" });
-  }
-  return [...out2.values()];
-}
-var NOT_A_PROFILE = /\/(?:sharer|share|intent|embed|watch|shorts|login|signup|home|policies|privacy|legal|about|developers?|plugins?|tr\?id=)\b|[?&](?:u|text|url|status|via)=/i;
-function extractSocials(html, pageId) {
-  const out2 = /* @__PURE__ */ new Map();
-  const re = /https?:\/\/(?:[a-z]{2,3}\.)?(?:www\.)?(facebook\.com|instagram\.com|linkedin\.com|twitter\.com|x\.com|youtube\.com|tiktok\.com)\/[^\s"'<>)]+/gi;
-  for (const m of html.matchAll(re)) {
-    const value = m[0].replace(/[)"'<>]+$/, "");
-    if (NOT_A_PROFILE.test(value)) continue;
-    try {
-      if (new URL(value).pathname.replace(/\/+$/, "").length < 2) continue;
-    } catch {
-      continue;
-    }
-    out2.set(value, { value, from: pageId, lane: "web", note: `${m[1]} link` });
-  }
-  return [...out2.values()];
-}
-function extractLanguages(html) {
-  const langs = /* @__PURE__ */ new Set();
-  const htmlLang = /<html[^>]*\slang=["']([a-z]{2})/i.exec(html);
-  if (htmlLang) langs.add(htmlLang[1].toLowerCase());
-  for (const m of html.matchAll(/hreflang=["']([a-z]{2})/gi)) langs.add(m[1].toLowerCase());
-  return [...langs];
-}
-function extractTermMentions(text2, pageId, terms) {
-  if (!terms.length) return [];
-  const re = new RegExp(
-    `(?<!\\p{L})(?:${[...terms].sort((a, b) => b.length - a.length).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\p{L}{0,3}(?!\\p{L})`,
-    "giu"
-  );
-  const out2 = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const m of text2.matchAll(re)) {
-    const key = m[0].toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const from = Math.max(0, m.index - 90);
-    const line = text2.slice(from, Math.min(text2.length, m.index + m[0].length + 90)).replace(/\s+/g, " ").trim();
-    out2.push({ value: m[0], from: pageId, lane: "web", note: line });
-  }
-  return out2;
-}
-function matchingJobs(input) {
-  const terms = input.roleFilter ?? [];
-  if (!terms.length) return input.jobs;
-  return input.jobs.filter((j) => terms.some((t) => j.title.toLowerCase().includes(t.toLowerCase())));
-}
-function oldestRoleDays(jobs, now) {
-  const stamps = jobs.map((j) => j.postedAt ? Date.parse(j.postedAt) : Number.NaN).filter((n) => Number.isFinite(n));
-  if (!stamps.length) return void 0;
-  const ref = now ? Date.parse(now) : Date.now();
-  return Math.max(0, Math.floor((ref - Math.min(...stamps)) / 864e5));
-}
-function buildSignals(input) {
-  const html = input.pages.map((p) => p.html ?? "").join("\n");
-  const roles = new Set(input.pages.map((p) => p.record.role));
-  const techFromJsonLd = /* @__PURE__ */ new Set();
-  for (const page of input.pages) {
-    if (!page.html) continue;
-    for (const node of extractJsonLd(page.html)) {
-      const type = node?.["@type"];
-      if (typeof type === "string") techFromJsonLd.add(`schema:${type}`);
-    }
-  }
-  return {
-    hasWebsite: input.pages.length > 0,
-    siteReachable: input.siteReachable,
-    pageCount: input.pages.length,
-    lastContentAt: input.lastContentAt,
-    sitemapUrls: input.sitemapUrls,
-    // Hiring is asserted only when postings were actually read. A detected
-    // board with no readable API leaves this undefined rather than false: "not
-    // hiring" and "we could not look" are different facts.
-    isHiring: input.atsProviders.length === 0 && !roles.has("careers") ? false : input.jobs.length > 0 || void 0,
-    openRoles: input.jobs.length,
-    matchedRoles: input.roleFilter?.length ? matchingJobs(input).length : void 0,
-    roleFilter: input.roleFilter?.length ? [...input.roleFilter] : void 0,
-    // A role open for a long time is a role the company cannot fill. That is
-    // the closest thing to a measurable opportunity a public source carries —
-    // and it is a COUNT of days, not a conclusion about why.
-    //
-    // Aged over the FILTERED roles when a filter exists. Measured on a real
-    // run: the oldest posting on two German boards was an "Initiativbewerbung",
-    // a standing invitation to apply speculatively that never closes, and it
-    // made a company whose oldest real vacancy was two months old look like it
-    // had failed to fill one for 1766 days. The engine must not learn that
-    // word — it is one country's, and the next country has another — but a
-    // caller's filter already excludes an evergreen catch-all, so the age
-    // follows the filter.
-    oldestOpenRoleDays: oldestRoleDays(matchingJobs(input), input.now),
-    // CAREERS ONLY, and that restriction is the signal.
-    //
-    // Measured on a Hamburg run before it was scoped: 48 mentions, every
-    // sampled one a false positive. `externe Dienstleister` is what a privacy
-    // policy calls a data processor; `Freiberufler` on a law firm's or tax
-    // adviser's site names the CLIENTS it advises; `Freelancer` on a one-person
-    // web studio's homepage describes the owner. The vocabulary was right and
-    // the page was wrong, which is the worst kind of wrong here: it reads as
-    // measured. On a careers page the same words are a company saying how it
-    // staffs work, which is the only reading worth acting on.
-    termMentions: (() => {
-      const terms = input.termLexicon ?? [];
-      if (!terms.length) return [];
-      const roles2 = new Set(input.termRoles ?? ["careers"]);
-      return input.pages.filter((p) => roles2.has(p.record.role)).flatMap((p) => extractTermMentions(p.text, p.record.id, terms));
-    })(),
-    termLexicon: input.termLexicon?.length ? [...input.termLexicon] : void 0,
-    atsProviders: [...input.atsProviders],
-    cms: fingerprints(html, CMS_FINGERPRINTS)[0],
-    analytics: fingerprints(html, ANALYTICS_FINGERPRINTS),
-    techStack: [.../* @__PURE__ */ new Set([...fingerprints(html, CMS_FINGERPRINTS).slice(1), ...techFromJsonLd])],
-    hasPricingPage: roles.has("pricing"),
-    hasEcommerce: ECOMMERCE_FINGERPRINTS.test(html),
-    languages: extractLanguages(html),
-    socialProfiles: [...new Set(input.pages.flatMap((p) => extractSocials(p.html ?? "", p.record.id).map((s) => s.value)))],
-    legalIdOnSite: input.pages.map((p) => extractLegalId(p.text, input.countryCode)).find(Boolean)
-  };
-}
-function sameOriginLinks(html, base) {
-  let origin;
-  try {
-    origin = new URL(base).origin;
-  } catch {
-    return [];
-  }
-  const out2 = /* @__PURE__ */ new Set();
-  for (const m of html.matchAll(/<a\b[^>]*\shref=["']([^"']+)["']/gi)) {
-    const href = m[1].trim();
-    if (!href || href.startsWith("#") || /^(?:mailto|tel|javascript|data):/i.test(href)) continue;
-    try {
-      const url = new URL(href, base);
-      if (url.origin !== origin) continue;
-      url.hash = "";
-      out2.add(url.href);
-    } catch {
-    }
-  }
-  return [...out2];
-}
-
 // src/enrich.ts
 var TIER1_ROLES = ["home", "legal"];
 var TIER2_ROLES = ["about", "services", "products", "pricing", "careers", "team", "contact", "cases", "news"];
@@ -9553,9 +9591,18 @@ async function enrichOne(runDir, place, store, opts) {
     place.contacts.socials.push(...extractSocials(page.html ?? "", page.record.id));
     place.contacts.people.push(...peopleFrom(page.text, page.record.id, { countryCode: opts.countryCode, companyName: place.name, town: opts.town }));
   }
-  place.contacts.emails = uniqueBy(place.contacts.emails, (e) => e.value);
-  place.contacts.phones = uniqueBy(place.contacts.phones, (p) => p.value);
-  place.contacts.socials = uniqueBy(place.contacts.socials, (s) => s.value);
+  place.contacts.emails = uniqueBy(
+    place.contacts.emails.sort((a, b) => Number(b.lane === "web") - Number(a.lane === "web")),
+    (e) => e.value
+  );
+  place.contacts.phones = uniqueBy(
+    place.contacts.phones.sort((a, b) => Number(b.lane === "web") - Number(a.lane === "web")),
+    (p) => p.value
+  );
+  place.contacts.socials = uniqueBy(
+    place.contacts.socials.sort((a, b) => Number(b.lane === "web") - Number(a.lane === "web")),
+    (s) => s.value
+  );
   place.contacts.people = uniqueBy(place.contacts.people, (p) => p.value.toLowerCase());
   place.jobs = jobs;
   place.pages = [.../* @__PURE__ */ new Set([...place.pages, ...fetched.map((f) => f.record.id)])];
@@ -10012,6 +10059,10 @@ function runCheck(input) {
   const warnings = [];
   const err = (rule, where, message) => errors.push({ level: "error", rule, where, message });
   const warn = (rule, where, message) => warnings.push({ level: "warning", rule, where, message });
+  const osmFeatures = /* @__PURE__ */ new Map();
+  for (const poi of readJsonSafe(join13(runDir, "osm.json")) ?? []) {
+    osmFeatures.set(`${poi.osmType[0]}${poi.osmId}`, poi);
+  }
   const pageText = /* @__PURE__ */ new Map();
   const pageOwner = /* @__PURE__ */ new Map();
   for (const place of places) {
@@ -10027,6 +10078,10 @@ function runCheck(input) {
     const items = [
       ...place.contacts.emails.map((c) => ({ ...c, kind: "email" })),
       ...place.contacts.phones.map((c) => ({ ...c, kind: "phone" })),
+      // Web-discovered social profiles cite the profile URL itself and have no
+      // stored page extract. OSM-declared profiles do have a re-readable source
+      // in osm.json, so they belong in this gate with the other OSM contacts.
+      ...place.contacts.socials.filter((c) => c.lane === "osm" || c.from === "osm" || c.from.startsWith("osm:")).map((c) => ({ ...c, kind: "social" })),
       ...place.contacts.people.map((c) => ({ ...c, kind: "person" })),
       // A term mention is a quote from the company's own page, and it is about
       // to be used as a reason to call them. Same treatment as a contact:
@@ -10035,7 +10090,30 @@ function runCheck(input) {
     ];
     for (const item of items) {
       contacts++;
-      if (item.lane === "registry" || item.lane === "osm" || item.from === "osm" || item.from === "registry") continue;
+      if (item.lane === "registry" || item.from === "registry") continue;
+      const claimsOsm = item.lane === "osm" || item.from === "osm" || item.from.startsWith("osm:");
+      if (claimsOsm) {
+        const match = /^osm:([nwr]\d+)$/.exec(item.from);
+        const poi = match ? osmFeatures.get(match[1]) : void 0;
+        if (!poi) {
+          err(
+            "contact-unsourced",
+            `${place.id} \xB7 ${item.kind} ${item.value}`,
+            `claims to come from ${item.from}, which is not an OSM feature stored in this run's osm.json. A contact that cannot be re-read was not observed.`
+          );
+          continue;
+        }
+        const declared = poiContacts(poi);
+        const values = item.kind === "email" ? declared.emails : item.kind === "phone" ? declared.phones : item.kind === "social" ? declared.socials : [];
+        if (!values.some((value) => value.value === item.value)) {
+          err(
+            "contact-not-on-page",
+            `${place.id} \xB7 ${item.kind} ${item.value}`,
+            `does not appear in the contact tags of ${item.from} stored in osm.json. Either it was constructed, or the OSM feature changed before this run was recorded \u2014 both mean it must not ship.`
+          );
+        }
+        continue;
+      }
       const text2 = pageText.get(item.from);
       if (!text2) {
         err(
@@ -10252,7 +10330,9 @@ var HEADER = [
   "emails",
   "contact_source",
   "phones",
+  "phone_source",
   "socials",
+  "social_source",
   "officers",
   "is_hiring",
   "open_roles",
@@ -10336,7 +10416,9 @@ function toCsv(places, opts = {}) {
         // beside it. A CRM row without this cannot be audited later.
         place.contacts.emails.map((e) => e.from).join(" | "),
         place.contacts.phones.map((p) => p.value).join(" | "),
+        place.contacts.phones.map((p) => p.from).join(" | "),
         place.contacts.socials.map((x) => x.value).join(" | "),
+        place.contacts.socials.map((x) => x.from).join(" | "),
         people,
         // Three states, not two: an empty cell means a board was found and
         // could not be read, which is not the same as "no".
@@ -10420,7 +10502,7 @@ function excerpt(page, value, pageId) {
 function citationsOf(place) {
   const out2 = [];
   const add = (pageId, value) => {
-    if (pageId && /^P\d+$/.test(pageId)) out2.push({ pageId, value });
+    if (pageId && /^(?:P\d+|osm:[nwr]\d+)$/.test(pageId)) out2.push({ pageId, value });
   };
   for (const m of place.signals?.termMentions ?? []) add(m.from, m.value);
   for (const e of place.contacts.emails) add(e.from, e.value);
@@ -10444,8 +10526,15 @@ function collectEvidence(runDir, places) {
   let budget = QUOTES_TOTAL;
   for (const place of places) {
     const slug = place.id.replace(/[^a-zA-Z0-9._-]/g, "_");
+    let placeQuotes = 0;
     const citations = citationsOf(place);
-    for (const [n, { pageId, value }] of citations.entries()) {
+    for (const { pageId, value } of citations) {
+      const osm = /^osm:([nwr])(\d+)$/.exec(pageId);
+      if (osm) {
+        const featureType = osm[1] === "n" ? "node" : osm[1] === "w" ? "way" : "relation";
+        refs.set(pageKey(place.id, pageId), { url: `https://www.openstreetmap.org/${featureType}/${osm[2]}` });
+        continue;
+      }
       const path = join14(runDir, "pages", slug, `${pageId}.md`);
       if (!parsed.has(path)) {
         parsed.set(path, existsSync10(path) ? parsePage(readFileSync9(path, "utf8")) : void 0);
@@ -10453,8 +10542,9 @@ function collectEvidence(runDir, places) {
       const page = parsed.get(path);
       if (!page) continue;
       refs.set(pageKey(place.id, pageId), { url: page.url, role: page.role, fetchedAt: page.fetchedAt });
-      if (n < QUOTES_PER_PLACE && budget > 0) {
+      if (placeQuotes < QUOTES_PER_PLACE && budget > 0) {
         quotes.set(quoteKey(place.id, pageId, value), excerpt(page, value, pageId));
+        placeQuotes++;
         budget--;
       }
     }
@@ -10691,7 +10781,7 @@ function cite(place, pageId, value, ev) {
 function sourced(place, items, ev, href) {
   if (!items.length) return "";
   return items.map((c) => {
-    const value = href ? `<a href="${esc(href(c.value))}">${esc(c.value)}</a>` : link(c.value);
+    const value = href ? `<a href="${esc(href(c.value))}">${esc(c.value)}</a>` : /^https?:\/\//i.test(c.value) ? link(c.value) : esc(c.value);
     return `<span class="c">${value} ${cite(place, c.from, c.value, ev)}</span>`;
   }).join("");
 }

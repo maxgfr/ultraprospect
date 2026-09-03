@@ -59,6 +59,12 @@ A single-site restaurant with a dated website is a plausible target. [M]
 - `[P1][P4]` — from both.
 - `[M]` — your own inference. The Angle paragraph is where this belongs.
 
+The `from` field on a sourced value uses the source's own address: `P3` for a
+stored fetched page, `osm:n248494308` (or `osm:w…` / `osm:r…`) for a feature in
+the run's `osm.json`, a direct URL when the URL itself is the cited source, or a
+lane name such as `registry` for open register data. These forms are provenance
+in `places.json`; only stored page ids use the dossier's `[P#]` grammar.
+
 Structure is exempt: headings, separators, short bullet labels, block quotes,
 table rows and fenced code make no claims. Demanding ids on them would teach
 whoever writes the dossier to sprinkle ids to silence the gate, and then the ids

@@ -24,7 +24,9 @@
 // themselves once told.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
-import type { Place, RunManifest } from "./types.js";
+import { readJsonSafe } from "./engine.js";
+import { poiContacts } from "./overpass.js";
+import type { OsmPoi, Place, RunManifest } from "./types.js";
 import { foldAccents } from "./util.js";
 
 export interface Finding {
@@ -111,6 +113,14 @@ export function runCheck(input: CheckInput): CheckReport {
   const err = (rule: string, where: string, message: string) => errors.push({ level: "error", rule, where, message });
   const warn = (rule: string, where: string, message: string) => warnings.push({ level: "warning", rule, where, message });
 
+  // OSM contacts cite the exact feature that declared them. Keep the recorded
+  // features in memory so every contact can be re-read without reopening the
+  // run artifact, just as fetched pages are loaded once below.
+  const osmFeatures = new Map<string, OsmPoi>();
+  for (const poi of (readJsonSafe(join(runDir, "osm.json")) as OsmPoi[] | undefined) ?? []) {
+    osmFeatures.set(`${poi.osmType[0]}${poi.osmId}`, poi);
+  }
+
   // Every page id the run actually holds, with its text, read once.
   const pageText = new Map<string, string>();
   const pageOwner = new Map<string, string>();
@@ -133,6 +143,10 @@ export function runCheck(input: CheckInput): CheckReport {
     const items = [
       ...place.contacts.emails.map((c) => ({ ...c, kind: "email" })),
       ...place.contacts.phones.map((c) => ({ ...c, kind: "phone" })),
+      // Web-discovered social profiles cite the profile URL itself and have no
+      // stored page extract. OSM-declared profiles do have a re-readable source
+      // in osm.json, so they belong in this gate with the other OSM contacts.
+      ...place.contacts.socials.filter((c) => c.lane === "osm" || c.from === "osm" || c.from.startsWith("osm:")).map((c) => ({ ...c, kind: "social" })),
       ...place.contacts.people.map((c) => ({ ...c, kind: "person" })),
       // A term mention is a quote from the company's own page, and it is about
       // to be used as a reason to call them. Same treatment as a contact:
@@ -141,8 +155,32 @@ export function runCheck(input: CheckInput): CheckReport {
     ];
     for (const item of items) {
       contacts++;
-      // Open-data lanes carry their own provenance and are not on disk as pages.
-      if (item.lane === "registry" || item.lane === "osm" || item.from === "osm" || item.from === "registry") continue;
+      if (item.lane === "registry" || item.from === "registry") continue;
+
+      const claimsOsm = item.lane === "osm" || item.from === "osm" || item.from.startsWith("osm:");
+      if (claimsOsm) {
+        const match = /^osm:([nwr]\d+)$/.exec(item.from);
+        const poi = match ? osmFeatures.get(match[1]!) : undefined;
+        if (!poi) {
+          err(
+            "contact-unsourced",
+            `${place.id} · ${item.kind} ${item.value}`,
+            `claims to come from ${item.from}, which is not an OSM feature stored in this run's osm.json. A contact that cannot be re-read was not observed.`,
+          );
+          continue;
+        }
+        const declared = poiContacts(poi);
+        const values = item.kind === "email" ? declared.emails : item.kind === "phone" ? declared.phones : item.kind === "social" ? declared.socials : [];
+        if (!values.some((value) => value.value === item.value)) {
+          err(
+            "contact-not-on-page",
+            `${place.id} · ${item.kind} ${item.value}`,
+            `does not appear in the contact tags of ${item.from} stored in osm.json. Either it was constructed, or the OSM feature changed before this run was recorded — both mean it must not ship.`,
+          );
+        }
+        continue;
+      }
+
       const text = pageText.get(item.from);
       if (!text) {
         err(
