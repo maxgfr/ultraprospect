@@ -5,6 +5,29 @@ bakery is a `shop=bakery` node with an awning *and* a SIRET filed at the
 building, and the whole value of the join is that neither half is a prospect alone —
 neither half is a prospect on its own.
 
+## The identifier signal
+
+Before scoring names, addresses or distance, the matcher reads any OSM
+identifier tags declared by the active register connector. In France those are
+`ref:FR:SIRET` for an establishment and `ref:FR:SIREN` for a legal unit. Spaces
+and dots are stripped, then the value must have the register's exact shape.
+
+A SIRET joins its exact establishment record. A SIREN joins only when exactly
+one record in this run carries that legal-unit id; several establishments under
+one SIREN are ambiguous, so none is chosen. If both tags are present, an exact
+SIRET is tried first and an unmatched SIRET may fall back to a unique SIREN.
+
+The join is exact and has no distance gate. It records `matchConfidence: 1` and
+`matchedBy: "identifier"`; when both sides have coordinates more than 150 m
+apart, the decision records that disagreement as a note. Both records are then
+consumed before scoring, so neither can be offered again.
+
+An identifier absent from the run is not turned into a register record. It stays
+in `legalIds` as `unverified`, citing the exact `osm:<id>` feature. An ambiguous
+or absent declared identifier also blocks weaker name scoring for that POI: a
+different plausible name is not permission to replace the identity OSM
+actually declared.
+
 ## Why proximity cannot carry a match
 
 A Paris office block holds fifty registered companies inside twenty metres. If
@@ -79,12 +102,13 @@ merges. Street-only agreement, without the number, scores 0.3.
 
 | Score | Outcome |
 |---|---|
-| ≥ 0.72 | Merged. One entity, `sources: ["osm","sirene"]`. |
+| ≥ 0.72 | Merged. One entity, `sources: ["osm","registry"]`. |
 | 0.40 – 0.72 | **Undecided.** Written to `MATCH.todo.json` for you. |
 | < 0.40 | Two distinct entities. |
 
-A merge records the score it was made on and which signal carried it —
-`matchConfidence: 0.851`, `matchedBy: "name"` — never a flat 1. A pair merged at
+A scored merge records the score it was made on and which signal carried it —
+`matchConfidence: 0.851`, `matchedBy: "name"` — never a flat 1. `matchedBy` can
+also be `"identifier"` for the exact pre-scoring join described above. A pair merged at
 0.74 and one merged at 0.99 are both "merged", and only one of them is worth
 re-reading when a row looks wrong.
 

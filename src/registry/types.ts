@@ -273,6 +273,13 @@ export interface RegistryConnector {
    * concerned, so an object literal reorders them silently.
    */
   sizeBands?: ReadonlyArray<{ code: string; floor: number; label: string }>;
+  /** OSM tags that carry identifiers this register can join exactly. */
+  osmRefKeys?: ReadonlyArray<{
+    tag: string;
+    level: "establishment" | "legal-unit";
+    kind: LegalId["kind"];
+    normalise: (raw: string) => string | null;
+  }>;
   /**
    * Set when the connector needs a credential.
    *

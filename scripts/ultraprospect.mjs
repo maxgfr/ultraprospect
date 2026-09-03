@@ -4570,6 +4570,26 @@ var frSirene = {
   sweepFiltersActivity: true,
   docsUrl: "https://recherche-entreprises.api.gouv.fr/docs/",
   sizeBands: EFFECTIF_BANDS,
+  osmRefKeys: [
+    {
+      tag: "ref:FR:SIRET",
+      level: "establishment",
+      kind: "siret",
+      normalise(raw) {
+        const value = raw.replace(/[\s.]+/g, "");
+        return /^\d{14}$/.test(value) ? value : null;
+      }
+    },
+    {
+      tag: "ref:FR:SIREN",
+      level: "legal-unit",
+      kind: "siren",
+      normalise(raw) {
+        const value = raw.replace(/[\s.]+/g, "");
+        return /^\d{9}$/.test(value) ? value : null;
+      }
+    }
+  ],
   availability() {
     return { available: true };
   },
@@ -7575,6 +7595,80 @@ function scorePair(poi, rec) {
   const score = 0.8 * identity + 0.2 * proximity;
   return { score, parts: { distance: proximity, name: nameScore, enseigne: enseigneScore, address: addressScore }, distanceM, matchedName: best.name };
 }
+function identifierJoins(pois, records, refKeys) {
+  const byEstablishment = /* @__PURE__ */ new Map();
+  const byLegalUnit = /* @__PURE__ */ new Map();
+  for (const rec of records) {
+    if (rec.establishmentId) {
+      const matches2 = byEstablishment.get(rec.establishmentId) ?? [];
+      matches2.push(rec);
+      byEstablishment.set(rec.establishmentId, matches2);
+    }
+    const matches = byLegalUnit.get(rec.id) ?? [];
+    matches.push(rec);
+    byLegalUnit.set(rec.id, matches);
+  }
+  const merged = /* @__PURE__ */ new Map();
+  const declared = [];
+  const usedRecords = /* @__PURE__ */ new Set();
+  const matchedByPoi = /* @__PURE__ */ new Map();
+  const readByPoi = pois.flatMap((poi) => {
+    const identifiers = refKeys.flatMap((refKey) => {
+      const raw = poi.tags[refKey.tag];
+      if (raw === void 0) return [];
+      const value = refKey.normalise(raw);
+      return value ? [{ refKey, value }] : [];
+    });
+    return identifiers.length ? [{ poi, identifiers }] : [];
+  });
+  const attach = (poi, rec) => {
+    const key = recordKey(rec);
+    const distanceM = typeof rec.lat === "number" && typeof rec.lon === "number" ? haversineM(poi.lat, poi.lon, rec.lat, rec.lon) : void 0;
+    merged.set(key, {
+      osmId: poi.id,
+      score: 1,
+      by: "identifier",
+      note: distanceM !== void 0 && distanceM > MAX_DISTANCE_M ? `Declared identifier overrides ${Math.round(distanceM)} m distance (above the ${MAX_DISTANCE_M} m scoring gate).` : void 0
+    });
+    usedRecords.add(key);
+    matchedByPoi.set(poi.id, rec);
+  };
+  for (const { poi, identifiers } of readByPoi) {
+    for (const item of identifiers.filter((candidate) => candidate.refKey.level === "establishment")) {
+      const rec = (byEstablishment.get(item.value) ?? []).find((candidate) => !usedRecords.has(recordKey(candidate)));
+      if (rec) {
+        attach(poi, rec);
+        break;
+      }
+    }
+  }
+  for (const { poi, identifiers } of readByPoi) {
+    if (!matchedByPoi.has(poi.id)) {
+      for (const item of identifiers.filter((candidate) => candidate.refKey.level === "legal-unit")) {
+        const candidates = byLegalUnit.get(item.value) ?? [];
+        if (candidates.length === 1 && !usedRecords.has(recordKey(candidates[0]))) {
+          attach(poi, candidates[0]);
+          break;
+        }
+      }
+    }
+  }
+  for (const { poi, identifiers } of readByPoi) {
+    const rec = matchedByPoi.get(poi.id);
+    const key = rec ? recordKey(rec) : void 0;
+    for (const item of identifiers) {
+      const matchesRecord = Boolean(rec && (item.refKey.level === "establishment" ? rec.establishmentId === item.value : rec.id === item.value));
+      declared.push({
+        poiId: poi.id,
+        kind: item.refKey.kind,
+        value: item.value,
+        matched: matchesRecord,
+        recordId: matchesRecord ? key : void 0
+      });
+    }
+  }
+  return { merged, declared };
+}
 function toCandidate2(poi, rec, scored) {
   return {
     osmId: poi.id,
@@ -7595,19 +7689,22 @@ function toCandidate2(poi, rec, scored) {
     distanceM: Math.round(scored.distanceM)
   };
 }
-function matchLanes(pois, records) {
+function matchLanes(pois, records, refKeys = []) {
+  const identifiers = identifierJoins(pois, records, refKeys);
   const index = buildIndex(records);
   const scored = [];
+  const usedPoi = new Set(identifiers.declared.map((identifier) => identifier.poiId));
+  const usedRec = new Set(identifiers.merged.keys());
   for (const poi of pois) {
+    if (usedPoi.has(poi.id)) continue;
     for (const rec of nearby(index, poi.lat, poi.lon)) {
+      if (usedRec.has(recordKey(rec))) continue;
       const s = scorePair(poi, rec);
       if (s.score >= MERGE_LOW) scored.push({ poi, rec, s });
     }
   }
   scored.sort((a, b) => b.s.score - a.s.score);
-  const merged = /* @__PURE__ */ new Map();
-  const usedPoi = /* @__PURE__ */ new Set();
-  const usedRec = /* @__PURE__ */ new Set();
+  const merged = new Map(identifiers.merged);
   const undecided = [];
   for (const { poi, rec, s } of scored) {
     const key = recordKey(rec);
@@ -7621,7 +7718,7 @@ function matchLanes(pois, records) {
       undecided.push(toCandidate2(poi, rec, s));
     }
   }
-  return { merged, undecided };
+  return { merged, undecided, declared: identifiers.declared };
 }
 function buildMatchTodo(undecided) {
   return {
@@ -7756,6 +7853,7 @@ function emptyManifest(label) {
       byConnector: {},
       places: 0,
       merged: 0,
+      mergedByIdentifier: 0,
       undecided: 0,
       withWebsite: 0,
       enrichedTier1: 0,
@@ -7915,9 +8013,9 @@ function placeFromRecord(rec) {
 function activityPrefix(rec) {
   return connectorById(rec.connectorId)?.activityPrefix ?? "activity";
 }
-function mergeInto(poiPlace, rec, confidence, by) {
+function mergeInto(poiPlace, rec, confidence, by, identifier) {
   poiPlace.registry = rec;
-  poiPlace.registryEvidence = { mode: "sweep", how: "sweep-match" };
+  poiPlace.registryEvidence = by === "identifier" && identifier ? { mode: "sweep", how: "osm-identifier", from: `osm:${identifier.poiId}`, legalId: identifier.value } : { mode: "sweep", how: "sweep-match" };
   poiPlace.sources = [.../* @__PURE__ */ new Set([...poiPlace.sources, "registry"])];
   poiPlace.matchConfidence = Number(confidence.toFixed(3));
   poiPlace.matchedBy = by;
@@ -8067,7 +8165,12 @@ async function runScan(target, opts = {}) {
     }
   }
   const t0 = Date.now();
-  const { merged, undecided } = matchLanes(pois, records);
+  const refConnectorId = sweepConnectorId ?? selection.sweep?.id;
+  const refKeys = refConnectorId ? connectorById(refConnectorId)?.osmRefKeys ?? [] : [];
+  const { merged, undecided, declared } = matchLanes(pois, records, refKeys);
+  for (const [recordId, decision] of merged) {
+    if (decision.note) note(`match: osm:${decision.osmId} \u2194 ${recordId}: ${decision.note}`);
+  }
   timings.match = Date.now() - t0;
   const places = [];
   const poiPlaces = /* @__PURE__ */ new Map();
@@ -8082,11 +8185,24 @@ async function runScan(target, opts = {}) {
     const decision = merged.get(key);
     const host = decision ? poiPlaces.get(decision.osmId) : void 0;
     if (host && decision) {
-      mergeInto(host, rec, decision.score, decision.by);
+      const identifier = decision.by === "identifier" ? declared.find((item) => item.poiId === decision.osmId && item.recordId === key) : void 0;
+      mergeInto(host, rec, decision.score, decision.by, identifier);
       claimed.add(key);
     } else {
       places.push(placeFromRecord(rec));
     }
+  }
+  for (const identifier of declared) {
+    const host = poiPlaces.get(identifier.poiId);
+    if (!host) continue;
+    host.legalIds ??= [];
+    host.legalIds.push({
+      kind: identifier.kind,
+      value: identifier.value,
+      from: `osm:${identifier.poiId}`,
+      status: identifier.matched ? "verified" : "unverified",
+      authority: host.registry?.connectorId ?? refConnectorId
+    });
   }
   if (opts.noPeople) {
     let stripped = 0;
@@ -8123,6 +8239,7 @@ async function runScan(target, opts = {}) {
     byConnector: sweepConnectorId && records.length ? { [sweepConnectorId]: records.length } : {},
     places: places.length,
     merged: claimed.size,
+    mergedByIdentifier: [...merged.values()].filter((decision) => decision.by === "identifier").length,
     undecided: undecided.length,
     withWebsite: places.filter((p) => p.website?.url).length
   };
@@ -10051,6 +10168,13 @@ function runCheck(input) {
   for (const poi of readJsonSafe(join13(runDir, "osm.json")) ?? []) {
     osmFeatures.set(`${poi.osmType[0]}${poi.osmId}`, poi);
   }
+  const stripLegalId = (value) => value.replace(/[\s.\-–—:/,\u00a0\u202f]/g, "").toLowerCase();
+  const osmCarriesIdentifier = (from, value) => {
+    const match = /^osm:([nwr]\d+)$/.exec(from);
+    const poi = match ? osmFeatures.get(match[1]) : void 0;
+    if (!poi) return false;
+    return Object.entries(poi.tags).filter(([tag]) => tag.startsWith("ref:")).some(([, raw]) => stripLegalId(raw).includes(stripLegalId(value)));
+  };
   const pageText = /* @__PURE__ */ new Map();
   const pageOwner = /* @__PURE__ */ new Map();
   for (const place of places) {
@@ -10132,14 +10256,30 @@ function runCheck(input) {
         );
         continue;
       }
+      if (id.from.startsWith("osm:")) {
+        const match = /^osm:([nwr]\d+)$/.exec(id.from);
+        if (!match || !osmFeatures.has(match[1])) {
+          err(
+            "legal-id-unsourced",
+            `${place.id} \xB7 ${id.kind} ${id.value}`,
+            `claims to come from ${id.from}, which is not an OSM feature stored in this run's osm.json.`
+          );
+        } else if (!osmCarriesIdentifier(id.from, id.value)) {
+          err(
+            "legal-id-not-on-page",
+            `${place.id} \xB7 ${id.kind} ${id.value}`,
+            `does not appear in the ref:* tags of ${id.from} stored in osm.json. Either it was misread, or the OSM feature changed before this run was recorded \u2014 both mean the identity built on it must not ship.`
+          );
+        }
+        continue;
+      }
       const text2 = pageText.get(id.from);
       if (!text2) {
         err("legal-id-unsourced", `${place.id} \xB7 ${id.kind} ${id.value}`, `claims to come from ${id.from}, which is not a stored page in this run.`);
         continue;
       }
-      const strip = (x) => x.replace(/[\s.\-–—:/,\u00a0\u202f]/g, "").toLowerCase();
-      const haystack = strip(text2);
-      if (!haystack.includes(strip(id.value))) {
+      const haystack = stripLegalId(text2);
+      if (!haystack.includes(stripLegalId(id.value))) {
         err(
           "legal-id-not-on-page",
           `${place.id} \xB7 ${id.kind} ${id.value}`,
@@ -10150,12 +10290,24 @@ function runCheck(input) {
   }
   for (const place of places) {
     const ev = place.registryEvidence;
-    if (ev?.how !== "verified-id") continue;
-    if (!ev.legalId || !(place.legalIds ?? []).some((id) => id.value === ev.legalId)) {
+    if (ev?.how !== "verified-id" && ev?.how !== "osm-identifier") continue;
+    const legalId = ev.legalId ? (place.legalIds ?? []).find((id) => id.value === ev.legalId) : void 0;
+    const connector = place.registry ? connectorById(place.registry.connectorId) : void 0;
+    const registryCarriesIdentifier = Boolean(
+      place.registry && legalId && connector?.osmRefKeys?.some((key) => {
+        if (key.kind !== legalId.kind) return false;
+        const raw = key.level === "establishment" ? place.registry?.establishmentId : place.registry?.id;
+        return raw !== void 0 && key.normalise(raw) === legalId.value;
+      })
+    );
+    const backed = Boolean(
+      legalId && (ev.how !== "osm-identifier" || ev.from?.startsWith("osm:") && legalId.from === ev.from && osmCarriesIdentifier(ev.from, legalId.value) && registryCarriesIdentifier)
+    );
+    if (!backed) {
       err(
         "registry-evidence-unbacked",
         `${place.id}`,
-        `says its register record was confirmed from a published identifier, but the run holds no such identifier for it.`
+        `says its register record was attached from a published identifier, but the cited source does not carry that identifier.`
       );
     }
   }
@@ -10606,7 +10758,8 @@ var SCORE_BANDS = [
 var EVIDENCE_LABELS = {
   "verified-id": "by a published registration number",
   "name-lookup": "by a name lookup",
-  "sweep-match": "by enumerating the territory"
+  "sweep-match": "by enumerating the territory",
+  "osm-identifier": "by an identifier declared in OSM"
 };
 function briefOf(places) {
   const terms = places.find((p) => p.signals?.termLexicon?.length)?.signals?.termLexicon ?? [];
@@ -11377,7 +11530,7 @@ function coverageSection(manifest, s, places) {
     l.push("");
   }
   l.push(
-    `${places.length} companies after fusion (${manifest.counts.merged} matched across both lanes, ${manifest.counts.undecided} pairs left for adjudication).`
+    `${places.length} companies after fusion (${manifest.counts.merged} matched across both lanes, ${manifest.counts.mergedByIdentifier ?? 0} by a declared identifier, ${manifest.counts.undecided} pairs left for adjudication).`
   );
   l.push("");
   if (s.registry.dated.count) {
@@ -11423,7 +11576,7 @@ function inventorySection(s) {
   }
   if (s.legalIds.total) {
     l.push(
-      `- **Legal identifiers found on the companies' own sites.** ${s.legalIds.total} read \xB7 ${s.legalIds.verified} verified and named by an authority \xB7 ${s.legalIds.attested} attested live but with no name disclosed \xB7 ${s.legalIds.unverified} nobody could answer on`
+      `- **Legal identifiers declared in OSM or found on the companies' own sites.** ${s.legalIds.total} read \xB7 ${s.legalIds.verified} verified and named by an authority \xB7 ${s.legalIds.attested} attested live but with no name disclosed \xB7 ${s.legalIds.unverified} nobody could answer on`
     );
   }
   if (s.site.enriched) {
@@ -12997,7 +13150,7 @@ async function cmdScan(values, bools, positional) {
   say(`  OSM              ${c.osm}`);
   if (registerLane?.mode === "sweep") {
     say(`  register         ${c.registry}  (${registerLane.connectorId})`);
-    say(`  fused places     ${c.places}  (${c.merged} matched across both lanes)`);
+    say(`  fused places     ${c.places}  (${c.merged} matched across both lanes, ${c.mergedByIdentifier} by a declared identifier)`);
   } else {
     say(`  register         not swept \u2014 ${registerLane?.reason ?? "no connector"}`);
     say(`  places           ${c.places}  (OSM only, so far)`);

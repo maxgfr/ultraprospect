@@ -35,6 +35,7 @@ function manifest(): RunManifest {
       byConnector: {},
       places: 0,
       merged: 0,
+      mergedByIdentifier: 0,
       undecided: 0,
       withWebsite: 0,
       enrichedTier1: 0,

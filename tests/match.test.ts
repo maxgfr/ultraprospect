@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MAX_DISTANCE_M, MERGE_HIGH, MERGE_LOW, applyVerdicts, buildMatchTodo, matchLanes, scorePair } from "../src/match.js";
+import { frSirene } from "../src/registry/fr-sirene.js";
 import type { OsmPoi, Place } from "../src/types.js";
 import { rec } from "./factories.js";
 
@@ -118,6 +119,93 @@ describe("matchLanes", () => {
     const { merged, undecided } = matchLanes([poi({ name: "Le Bistrot" })], [rec({ legalName: "SOCIETE GENERALE" })]);
     expect(merged.size).toBe(0);
     expect(undecided).toHaveLength(0);
+  });
+});
+
+describe("identifier join", () => {
+  const refKeys = frSirene.osmRefKeys!;
+
+  it("merges an exact SIRET two kilometres away without name agreement", () => {
+    const p = poi({ name: "A Shopfront Name", tags: { "ref:FR:SIRET": "30247464801175" } });
+    const r = rec({ legalName: "A COMPLETELY DIFFERENT LEGAL NAME", lat: 48.8655, lon: 2.4397 });
+
+    const { merged, declared } = matchLanes([p], [r], refKeys);
+
+    expect(merged.get("fr-sirene:30247464801175")).toMatchObject({ osmId: "n1", score: 1, by: "identifier" });
+    expect(merged.get("fr-sirene:30247464801175")?.note).toContain("150 m");
+    expect(declared).toEqual([{ poiId: "n1", kind: "siret", value: "30247464801175", matched: true, recordId: "fr-sirene:30247464801175" }]);
+  });
+
+  it("normalises a spaced SIRET before joining", () => {
+    const p = poi({ tags: { "ref:FR:SIRET": "302 474 648 01175" } });
+
+    const { merged, declared } = matchLanes([p], [rec()], refKeys);
+
+    expect(merged.get("fr-sirene:30247464801175")?.by).toBe("identifier");
+    expect(declared[0]?.value).toBe("30247464801175");
+  });
+
+  it("keeps a SIRET absent from the run declared without fabricating a merge", () => {
+    const p = poi({ name: "Naturalia", tags: { "ref:FR:SIRET": "99999999999999" } });
+
+    const { merged, declared } = matchLanes([p], [rec()], refKeys);
+
+    expect(merged.size).toBe(0);
+    expect(declared).toEqual([{ poiId: "n1", kind: "siret", value: "99999999999999", matched: false }]);
+  });
+
+  it("does not offer a record consumed by an identifier join to the scored pass", () => {
+    const identified = poi({ id: "n1", name: "Different", tags: { "ref:FR:SIRET": "30247464801175" } });
+    const nameMatch = poi({ id: "n2", name: "Naturalia", lat: 48.8476 });
+
+    const { merged, undecided } = matchLanes([identified, nameMatch], [rec()], refKeys);
+
+    expect(merged.size).toBe(1);
+    expect(merged.get("fr-sirene:30247464801175")).toMatchObject({ osmId: "n1", by: "identifier" });
+    expect(undecided).toEqual([]);
+  });
+
+  it("does not merge a SIREN shared by two establishments in the run", () => {
+    const p = poi({ name: "Naturalia", tags: { "ref:FR:SIREN": "302474648" } });
+    const records = [rec({ establishmentId: "30247464801175" }), rec({ establishmentId: "30247464809999" })];
+
+    const { merged, declared } = matchLanes([p], records, refKeys);
+
+    expect(merged.size).toBe(0);
+    expect(declared).toEqual([{ poiId: "n1", kind: "siren", value: "302474648", matched: false }]);
+  });
+
+  it("merges a record without coordinates by identifier", () => {
+    const p = poi({ name: "Different", tags: { "ref:FR:SIRET": "30247464801175" } });
+
+    const { merged } = matchLanes([p], [rec({ lat: undefined, lon: undefined })], refKeys);
+
+    expect(merged.get("fr-sirene:30247464801175")).toMatchObject({ osmId: "n1", score: 1, by: "identifier" });
+  });
+
+  it("gives an exact establishment identifier priority over an earlier legal-unit identifier", () => {
+    const legalUnit = poi({ id: "n1", tags: { "ref:FR:SIREN": "302474648" } });
+    const establishment = poi({ id: "n2", tags: { "ref:FR:SIRET": "30247464801175" } });
+
+    const { merged, declared } = matchLanes([legalUnit, establishment], [rec()], refKeys);
+
+    expect(merged.get("fr-sirene:30247464801175")?.osmId).toBe("n2");
+    expect(declared).toEqual([
+      { poiId: "n1", kind: "siren", value: "302474648", matched: false },
+      { poiId: "n2", kind: "siret", value: "30247464801175", matched: true, recordId: "fr-sirene:30247464801175" },
+    ]);
+  });
+
+  it("falls back from an unmatched SIRET to a unique SIREN on the same POI", () => {
+    const p = poi({ tags: { "ref:FR:SIRET": "99999999999999", "ref:FR:SIREN": "302474648" } });
+
+    const { merged, declared } = matchLanes([p], [rec()], refKeys);
+
+    expect(merged.get("fr-sirene:30247464801175")).toMatchObject({ osmId: "n1", by: "identifier" });
+    expect(declared).toEqual([
+      { poiId: "n1", kind: "siret", value: "99999999999999", matched: false },
+      { poiId: "n1", kind: "siren", value: "302474648", matched: true, recordId: "fr-sirene:30247464801175" },
+    ]);
   });
 });
 

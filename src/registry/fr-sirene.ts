@@ -586,6 +586,26 @@ export const frSirene: RegistryConnector = {
   sweepFiltersActivity: true,
   docsUrl: "https://recherche-entreprises.api.gouv.fr/docs/",
   sizeBands: EFFECTIF_BANDS,
+  osmRefKeys: [
+    {
+      tag: "ref:FR:SIRET",
+      level: "establishment",
+      kind: "siret",
+      normalise(raw) {
+        const value = raw.replace(/[\s.]+/g, "");
+        return /^\d{14}$/.test(value) ? value : null;
+      },
+    },
+    {
+      tag: "ref:FR:SIREN",
+      level: "legal-unit",
+      kind: "siren",
+      normalise(raw) {
+        const value = raw.replace(/[\s.]+/g, "");
+        return /^\d{9}$/.test(value) ? value : null;
+      },
+    },
+  ],
 
   availability(): Availability {
     return { available: true };

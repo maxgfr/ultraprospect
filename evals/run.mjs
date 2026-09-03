@@ -62,6 +62,7 @@ async function offline() {
 
   const manifest = JSON.parse(readFileSync(join(runDir, "manifest.json"), "utf8"));
   const places = JSON.parse(readFileSync(join(runDir, "places.json"), "utf8"));
+  const registry = JSON.parse(readFileSync(join(runDir, "registry.json"), "utf8"));
   const todo = JSON.parse(readFileSync(join(runDir, "MATCH.todo.json"), "utf8"));
 
   check("the replayed run is not marked truncated", manifest.truncated === false);
@@ -71,6 +72,11 @@ async function offline() {
   // Fusion invariants — the ones a downstream consumer would be wrong without.
   check("fusion produced fewer entities than the two lanes summed", places.length < manifest.counts.osm + manifest.counts.registry, `${places.length} places`);
   check("at least one pair matched across both lanes", manifest.counts.merged > 0, `${manifest.counts.merged} merged`);
+  check(
+    "at least eight pairs matched by a declared identifier",
+    manifest.counts.mergedByIdentifier >= 8,
+    `${manifest.counts.mergedByIdentifier ?? 0} identifier merge(s)`,
+  );
   check("place ids are unique", new Set(places.map((p) => p.id)).size === places.length);
   check(
     "every merged place carries both lane records",
@@ -86,6 +92,19 @@ async function offline() {
     (() => {
       const keys = places.filter((p) => p.registry).map((p) => `${p.registry.connectorId}:${p.registry.establishmentId ?? p.registry.id}`);
       return new Set(keys).size === keys.length;
+    })(),
+  );
+  check(
+    "every identifier merge cites its OSM feature",
+    places
+      .filter((p) => p.matchedBy === "identifier")
+      .every((p) => /^osm:[nwr]\d+$/.test(p.registryEvidence?.from ?? "") && p.legalIds?.some((id) => /^osm:[nwr]\d+$/.test(id.from ?? ""))),
+  );
+  check(
+    "no place fabricates a register record absent from registry.json",
+    (() => {
+      const recorded = new Set(registry.map((r) => `${r.connectorId}:${r.establishmentId ?? r.id}`));
+      return places.filter((p) => p.registry).every((p) => recorded.has(`${p.registry.connectorId}:${p.registry.establishmentId ?? p.registry.id}`));
     })(),
   );
   check(

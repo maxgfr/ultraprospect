@@ -22,7 +22,7 @@
 // someone else's SIREN — so the cost of guessing is much higher here than the
 // cost of asking.
 import type { MatchCandidate, MatchTodo, OsmPoi, Place, PostalAddress } from "./types.js";
-import type { RegistryRecord } from "./registry/types.js";
+import type { RegistryConnector, RegistryRecord } from "./registry/types.js";
 import { recordKey } from "./registry/types.js";
 import { bestNameMatch, foldAccents, haversineM, nameSimilarity } from "./util.js";
 
@@ -173,8 +173,19 @@ export interface MergeDecision {
   osmId: string;
   /** The pair's score, 0.72-1. Carried through so a row can be re-judged later. */
   score: number;
-  /** Which signal carried it — name, enseigne or address. */
-  by: "name" | "enseigne" | "address";
+  /** Which signal carried it — an exact identifier, name, enseigne or address. */
+  by: "identifier" | "name" | "enseigne" | "address";
+  /** A material caveat about the decision, such as coordinates disagreeing. */
+  note?: string;
+}
+
+export interface DeclaredIdentifier {
+  poiId: string;
+  kind: string;
+  value: string;
+  matched: boolean;
+  /** Fully-qualified `recordKey` when this declaration produced the join. */
+  recordId?: string;
 }
 
 export interface MatchOutcome {
@@ -182,6 +193,101 @@ export interface MatchOutcome {
   merged: Map<string, MergeDecision>;
   /** Pairs in the middle band, for the agent. */
   undecided: MatchCandidate[];
+  /** Every valid OSM identifier read, including ones absent or ambiguous in this run. */
+  declared: DeclaredIdentifier[];
+}
+
+type OsmRefKey = NonNullable<RegistryConnector["osmRefKeys"]>[number];
+
+/** Join identifiers before any name, address or distance scoring is attempted. */
+export function identifierJoins(
+  pois: readonly OsmPoi[],
+  records: readonly RegistryRecord[],
+  refKeys: readonly OsmRefKey[],
+): { merged: Map<string, MergeDecision>; declared: DeclaredIdentifier[] } {
+  const byEstablishment = new Map<string, RegistryRecord[]>();
+  const byLegalUnit = new Map<string, RegistryRecord[]>();
+  for (const rec of records) {
+    if (rec.establishmentId) {
+      const matches = byEstablishment.get(rec.establishmentId) ?? [];
+      matches.push(rec);
+      byEstablishment.set(rec.establishmentId, matches);
+    }
+    const matches = byLegalUnit.get(rec.id) ?? [];
+    matches.push(rec);
+    byLegalUnit.set(rec.id, matches);
+  }
+
+  const merged = new Map<string, MergeDecision>();
+  const declared: DeclaredIdentifier[] = [];
+  const usedRecords = new Set<string>();
+  const matchedByPoi = new Map<string, RegistryRecord>();
+  const readByPoi = pois.flatMap((poi) => {
+    const identifiers = refKeys.flatMap((refKey) => {
+      const raw = poi.tags[refKey.tag];
+      if (raw === undefined) return [];
+      const value = refKey.normalise(raw);
+      return value ? [{ refKey, value }] : [];
+    });
+    return identifiers.length ? [{ poi, identifiers }] : [];
+  });
+
+  const attach = (poi: OsmPoi, rec: RegistryRecord) => {
+    const key = recordKey(rec);
+    const distanceM = typeof rec.lat === "number" && typeof rec.lon === "number" ? haversineM(poi.lat, poi.lon, rec.lat, rec.lon) : undefined;
+    merged.set(key, {
+      osmId: poi.id,
+      score: 1,
+      by: "identifier",
+      note:
+        distanceM !== undefined && distanceM > MAX_DISTANCE_M
+          ? `Declared identifier overrides ${Math.round(distanceM)} m distance (above the ${MAX_DISTANCE_M} m scoring gate).`
+          : undefined,
+    });
+    usedRecords.add(key);
+    matchedByPoi.set(poi.id, rec);
+  };
+
+  // Establishments are exact physical identities, so resolve every one before
+  // a legal-unit identifier is allowed to consume one of its records.
+  for (const { poi, identifiers } of readByPoi) {
+    for (const item of identifiers.filter((candidate) => candidate.refKey.level === "establishment")) {
+      const rec = (byEstablishment.get(item.value) ?? []).find((candidate) => !usedRecords.has(recordKey(candidate)));
+      if (rec) {
+        attach(poi, rec);
+        break;
+      }
+    }
+  }
+
+  for (const { poi, identifiers } of readByPoi) {
+    if (!matchedByPoi.has(poi.id)) {
+      for (const item of identifiers.filter((candidate) => candidate.refKey.level === "legal-unit")) {
+        const candidates = byLegalUnit.get(item.value) ?? [];
+        if (candidates.length === 1 && !usedRecords.has(recordKey(candidates[0]!))) {
+          attach(poi, candidates[0]!);
+          break;
+        }
+      }
+    }
+  }
+
+  for (const { poi, identifiers } of readByPoi) {
+    const rec = matchedByPoi.get(poi.id);
+    const key = rec ? recordKey(rec) : undefined;
+    for (const item of identifiers) {
+      const matchesRecord = Boolean(rec && (item.refKey.level === "establishment" ? rec.establishmentId === item.value : rec.id === item.value));
+      declared.push({
+        poiId: poi.id,
+        kind: item.refKey.kind,
+        value: item.value,
+        matched: matchesRecord,
+        recordId: matchesRecord ? key : undefined,
+      });
+    }
+  }
+
+  return { merged, declared };
 }
 
 function toCandidate(poi: OsmPoi, rec: RegistryRecord, scored: PairScore): MatchCandidate {
@@ -213,21 +319,27 @@ function toCandidate(poi: OsmPoi, rec: RegistryRecord, scored: PairScore): Match
  * well-separated, so the optimal matching and the greedy one agree except in
  * cases that belong in the undecided band anyway.
  */
-export function matchLanes(pois: readonly OsmPoi[], records: readonly RegistryRecord[]): MatchOutcome {
+export function matchLanes(pois: readonly OsmPoi[], records: readonly RegistryRecord[], refKeys: readonly OsmRefKey[] = []): MatchOutcome {
+  const identifiers = identifierJoins(pois, records, refKeys);
   const index = buildIndex(records);
   const scored: { poi: OsmPoi; rec: RegistryRecord; s: PairScore }[] = [];
+  // A valid declared identifier is stronger than every scored signal. When it
+  // is absent or ambiguous in this run, offering the POI to name scoring could
+  // attach a different legal identity and turn "unmatched" into fabrication.
+  const usedPoi = new Set(identifiers.declared.map((identifier) => identifier.poiId));
+  const usedRec = new Set(identifiers.merged.keys());
 
   for (const poi of pois) {
+    if (usedPoi.has(poi.id)) continue;
     for (const rec of nearby(index, poi.lat, poi.lon)) {
+      if (usedRec.has(recordKey(rec))) continue;
       const s = scorePair(poi, rec);
       if (s.score >= MERGE_LOW) scored.push({ poi, rec, s });
     }
   }
   scored.sort((a, b) => b.s.score - a.s.score);
 
-  const merged = new Map<string, MergeDecision>();
-  const usedPoi = new Set<string>();
-  const usedRec = new Set<string>();
+  const merged = new Map(identifiers.merged);
   const undecided: MatchCandidate[] = [];
 
   for (const { poi, rec, s } of scored) {
@@ -249,7 +361,7 @@ export function matchLanes(pois: readonly OsmPoi[], records: readonly RegistryRe
     }
   }
 
-  return { merged, undecided };
+  return { merged, undecided, declared: identifiers.declared };
 }
 
 export function buildMatchTodo(undecided: readonly MatchCandidate[]): MatchTodo {

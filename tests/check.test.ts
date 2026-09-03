@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCheck } from "../src/check.js";
 import type { Place, RunManifest } from "../src/types.js";
+import { rec } from "./factories.js";
 
 let runDir: string;
 
@@ -58,6 +59,7 @@ function manifest(over: Partial<RunManifest> = {}): RunManifest {
       byConnector: {},
       places: 1,
       merged: 0,
+      mergedByIdentifier: 0,
       undecided: 0,
       withWebsite: 0,
       enrichedTier1: 0,
@@ -394,5 +396,43 @@ describe("a legal identifier is re-read the way it was written down", () => {
   it("still rejects a number that is genuinely not on the page", () => {
     const r = runCheck({ runDir, places: [withId("Amtsgericht Hamburg, HRB: 11111")], manifest: manifest() });
     expect(r.errors.map((e) => e.rule)).toContain("legal-id-not-on-page");
+  });
+
+  it("accepts an OSM legal id that is present in the feature's ref tags", () => {
+    const p = place({
+      legalIds: [{ kind: "siret", value: "30247464801175", from: "osm:n1", status: "verified" }],
+      registry: rec(),
+      registryEvidence: { mode: "sweep", how: "osm-identifier", from: "osm:n1", legalId: "30247464801175" },
+    });
+
+    const r = runCheck({ runDir, places: [p], manifest: manifest() });
+
+    expect(r.errors.filter((error) => error.rule === "legal-id-unsourced" || error.rule === "legal-id-not-on-page")).toEqual([]);
+    expect(r.errors.map((error) => error.rule)).not.toContain("registry-evidence-unbacked");
+  });
+
+  it("rejects an OSM legal id that is absent from the feature's ref tags", () => {
+    const p = place({
+      legalIds: [{ kind: "siret", value: "99999999999999", from: "osm:n1", status: "verified" }],
+      registry: rec({ establishmentId: "99999999999999" }),
+      registryEvidence: { mode: "sweep", how: "osm-identifier", from: "osm:n1", legalId: "99999999999999" },
+    });
+
+    const r = runCheck({ runDir, places: [p], manifest: manifest() });
+
+    expect(r.errors.map((error) => error.rule)).toContain("legal-id-not-on-page");
+    expect(r.errors.map((error) => error.rule)).toContain("registry-evidence-unbacked");
+  });
+
+  it("rejects OSM identifier evidence that names a different registry record", () => {
+    const p = place({
+      legalIds: [{ kind: "siret", value: "30247464801175", from: "osm:n1", status: "verified", authority: "fr-sirene" }],
+      registry: rec({ id: "999999999", establishmentId: "99999999999999" }),
+      registryEvidence: { mode: "sweep", how: "osm-identifier", from: "osm:n1", legalId: "30247464801175" },
+    });
+
+    const r = runCheck({ runDir, places: [p], manifest: manifest() });
+
+    expect(r.errors.map((error) => error.rule)).toContain("registry-evidence-unbacked");
   });
 });

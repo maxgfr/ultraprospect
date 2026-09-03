@@ -33,7 +33,7 @@ import { toRecord as edgarRecord } from "../src/registry/us-edgar.js";
 import { toRecord as gleifRecord } from "../src/registry/gleif.js";
 import { toRecord as krsRecord } from "../src/registry/pl-krs.js";
 import { toRecord as prhRecord } from "../src/registry/fi-prh.js";
-import { expandRecord } from "../src/registry/fr-sirene.js";
+import { expandRecord, frSirene } from "../src/registry/fr-sirene.js";
 import { gbCompaniesHouse } from "../src/registry/gb-companies-house.js";
 import { CONNECTORS, connectorsFor } from "../src/registry/index.js";
 import { licencesFor } from "../src/run.js";
@@ -131,6 +131,14 @@ describe("eu-vies", () => {
 });
 
 describe("fr-sirene", () => {
+  it("declares the French OSM establishment and legal-unit references", () => {
+    expect(frSirene.osmRefKeys?.map(({ tag, level, kind }) => ({ tag, level, kind }))).toEqual([
+      { tag: "ref:FR:SIRET", level: "establishment", kind: "siret" },
+      { tag: "ref:FR:SIREN", level: "legal-unit", kind: "siren" },
+    ]);
+    expect(frSirene.osmRefKeys?.find((key) => key.tag === "ref:FR:SIRET")?.normalise("3024746480117")).toBeNull();
+  });
+
   it("reads an establishment closed with F as ceased, not as unknown", () => {
     // TWO VOCABULARIES: a legal unit is A/C, an establishment is A/F. Mapping
     // only A and C reported every closed office as "unknown", which downstream

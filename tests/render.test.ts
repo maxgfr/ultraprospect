@@ -50,6 +50,7 @@ function manifest(over: Partial<RunManifest> = {}): RunManifest {
       byConnector: { "fr-sirene": 5 },
       places: 12,
       merged: 3,
+      mergedByIdentifier: 0,
       undecided: 1,
       withWebsite: 2,
       enrichedTier1: 2,
@@ -400,6 +401,26 @@ describe("REPORT.md", () => {
     expect(report).toContain("Register records by connector: gleif 1 · de-offeneregister 1");
     expect(report).toContain("1 by a published registration number");
     expect(report).toContain("1 by a name lookup");
+  });
+
+  it("does not describe an OSM-declared legal identifier as found on a company site", () => {
+    const report = buildReport(
+      [place({ legalIds: [{ kind: "siret", value: "30247464801175", from: "osm:n1", status: "verified", authority: "fr-sirene" }] })],
+      manifest(),
+    );
+
+    expect(report).toContain("declared in OSM or found on the companies' own sites");
+    expect(report).not.toContain("Legal identifiers found on the companies' own sites");
+  });
+
+  it("renders a legacy manifest without an undefined identifier count", () => {
+    const legacy = manifest();
+    delete (legacy.counts as Partial<RunManifest["counts"]>).mergedByIdentifier;
+
+    const report = buildReport([place()], legacy);
+
+    expect(report).toContain("0 by a declared identifier");
+    expect(report).not.toContain("undefined by a declared identifier");
   });
 
   it("reports unreadable job boards separately from companies that are not hiring", () => {
