@@ -196,7 +196,7 @@ export interface Place {
   sources: Lane[];
   /** 0-1. The pair's actual score, never rounded up to certainty. */
   matchConfidence?: number;
-  /** Which signal carried the merge: the name, a brand, or the street address. */
+  /** Which signal carried the merge: an identifier, the name, a brand, or the street address. */
   matchedBy?: string;
   osm?: OsmPoi;
   /**
@@ -240,7 +240,7 @@ export interface Place {
   /** How the register record got attached, and what backs it. */
   registryEvidence?: {
     mode: RegistryMode;
-    /** "verified-id" | "name-lookup" | "sweep-match". */
+    /** "verified-id" | "name-lookup" | "sweep-match" | "osm-identifier". */
     how: string;
     /** Page id the legal identifier was read from, when there was one. */
     from?: string;
@@ -352,6 +352,8 @@ export interface RunManifest {
     byConnector: Record<string, number>;
     places: number;
     merged: number;
+    /** Cross-lane merges made from an exact identifier declared in OSM. */
+    mergedByIdentifier: number;
     undecided: number;
     withWebsite: number;
     enrichedTier1: number;

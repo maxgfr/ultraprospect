@@ -709,7 +709,7 @@ async function cmdScan(values: Record<string, string>, bools: ReadonlySet<string
   say(`  OSM              ${c.osm}`);
   if (registerLane?.mode === "sweep") {
     say(`  register         ${c.registry}  (${registerLane.connectorId})`);
-    say(`  fused places     ${c.places}  (${c.merged} matched across both lanes)`);
+    say(`  fused places     ${c.places}  (${c.merged} matched across both lanes, ${c.mergedByIdentifier} by a declared identifier)`);
   } else {
     // Saying "register 0" here would read as an empty register rather than as a
     // register that cannot be swept. The distinction is the whole point.

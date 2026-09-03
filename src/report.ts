@@ -102,7 +102,7 @@ function coverageSection(manifest: RunManifest, s: RunSummary, places: readonly 
   }
 
   l.push(
-    `${places.length} companies after fusion (${manifest.counts.merged} matched across both lanes, ${manifest.counts.undecided} pairs left for adjudication).`,
+    `${places.length} companies after fusion (${manifest.counts.merged} matched across both lanes, ${manifest.counts.mergedByIdentifier ?? 0} by a declared identifier, ${manifest.counts.undecided} pairs left for adjudication).`,
   );
   l.push("");
 
@@ -168,7 +168,7 @@ function inventorySection(s: RunSummary): string[] {
   // citable fact and it is NOT an identity — so it gets counted separately.
   if (s.legalIds.total) {
     l.push(
-      `- **Legal identifiers found on the companies' own sites.** ${s.legalIds.total} read · ${s.legalIds.verified} verified and named by an authority · ${s.legalIds.attested} attested live but with no name disclosed · ${s.legalIds.unverified} nobody could answer on`,
+      `- **Legal identifiers declared in OSM or found on the companies' own sites.** ${s.legalIds.total} read · ${s.legalIds.verified} verified and named by an authority · ${s.legalIds.attested} attested live but with no name disclosed · ${s.legalIds.unverified} nobody could answer on`,
     );
   }
 

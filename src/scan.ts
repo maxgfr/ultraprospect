@@ -17,7 +17,7 @@
 //     entities plus a to-do, not one entity and a shrug.
 import { poiCategory, poiContacts, poiWebsite } from "./overpass.js";
 import { fetchOsmPois } from "./overpass.js";
-import { buildMatchTodo, matchLanes } from "./match.js";
+import { buildMatchTodo, type DeclaredIdentifier, matchLanes } from "./match.js";
 import { bandsAtLeast } from "./registry/fr-sirene.js";
 import { connectorById, connectorsFor, noSweepReason, unknownConnectorIds } from "./registry/index.js";
 import { recordKey } from "./registry/types.js";
@@ -144,9 +144,12 @@ function activityPrefix(rec: RegistryRecord): string {
   return connectorById(rec.connectorId)?.activityPrefix ?? "activity";
 }
 
-function mergeInto(poiPlace: Place, rec: RegistryRecord, confidence: number, by: string): void {
+function mergeInto(poiPlace: Place, rec: RegistryRecord, confidence: number, by: string, identifier?: DeclaredIdentifier): void {
   poiPlace.registry = rec;
-  poiPlace.registryEvidence = { mode: "sweep", how: "sweep-match" };
+  poiPlace.registryEvidence =
+    by === "identifier" && identifier
+      ? { mode: "sweep", how: "osm-identifier", from: `osm:${identifier.poiId}`, legalId: identifier.value }
+      : { mode: "sweep", how: "sweep-match" };
   poiPlace.sources = [...new Set([...poiPlace.sources, "registry" as const])];
   poiPlace.matchConfidence = Number(confidence.toFixed(3));
   poiPlace.matchedBy = by;
@@ -360,7 +363,15 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
 
   // ---- Fusion -------------------------------------------------------------
   const t0 = Date.now();
-  const { merged, undecided } = matchLanes(pois, records);
+  // A fixture with an empty register lane has no first record from which to
+  // infer its connector. The country selection still tells us which OSM refs
+  // to declare as unmatched; an empty lane must not erase identifiers.
+  const refConnectorId = sweepConnectorId ?? selection.sweep?.id;
+  const refKeys = refConnectorId ? (connectorById(refConnectorId)?.osmRefKeys ?? []) : [];
+  const { merged, undecided, declared } = matchLanes(pois, records, refKeys);
+  for (const [recordId, decision] of merged) {
+    if (decision.note) note(`match: osm:${decision.osmId} ↔ ${recordId}: ${decision.note}`);
+  }
   timings.match = Date.now() - t0;
 
   const places: Place[] = [];
@@ -376,11 +387,25 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
     const decision = merged.get(key);
     const host = decision ? poiPlaces.get(decision.osmId) : undefined;
     if (host && decision) {
-      mergeInto(host, rec, decision.score, decision.by);
+      const identifier = decision.by === "identifier" ? declared.find((item) => item.poiId === decision.osmId && item.recordId === key) : undefined;
+      mergeInto(host, rec, decision.score, decision.by, identifier);
       claimed.add(key);
     } else {
       places.push(placeFromRecord(rec));
     }
+  }
+
+  for (const identifier of declared) {
+    const host = poiPlaces.get(identifier.poiId);
+    if (!host) continue;
+    host.legalIds ??= [];
+    host.legalIds.push({
+      kind: identifier.kind,
+      value: identifier.value,
+      from: `osm:${identifier.poiId}`,
+      status: identifier.matched ? "verified" : "unverified",
+      authority: host.registry?.connectorId ?? refConnectorId,
+    });
   }
 
   // ---- Personal data --------------------------------------------------------
@@ -425,6 +450,7 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
     byConnector: sweepConnectorId && records.length ? { [sweepConnectorId]: records.length } : {},
     places: places.length,
     merged: claimed.size,
+    mergedByIdentifier: [...merged.values()].filter((decision) => decision.by === "identifier").length,
     undecided: undecided.length,
     withWebsite: places.filter((p) => p.website?.url).length,
   };

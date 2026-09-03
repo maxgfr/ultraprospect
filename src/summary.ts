@@ -135,6 +135,7 @@ const EVIDENCE_LABELS: Record<string, string> = {
   "verified-id": "by a published registration number",
   "name-lookup": "by a name lookup",
   "sweep-match": "by enumerating the territory",
+  "osm-identifier": "by an identifier declared in OSM",
 };
 
 export interface RunSummary {

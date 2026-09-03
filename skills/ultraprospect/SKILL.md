@@ -218,7 +218,14 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    Amtsgericht is ambiguous by construction — the same number exists at several
    courts — so the connector refuses a bare number that matches more than one.
 
-4. **Adjudicate `MATCH.todo.json`.** Each pair carries the OSM name, the register
+4. **Inspect exact joins, then adjudicate `MATCH.todo.json`.** Before scoring,
+   the matcher joins OSM-declared register identifiers exactly: a SIRET names an
+   establishment, while a SIREN must name exactly one record in this run. There
+   is no distance gate, unmatched identifiers stay declared rather than
+   producing a register record, and `manifest.counts.mergedByIdentifier` says
+   how many fusions this signal produced.
+
+   Each remaining pair carries the OSM name, the register
    name that *actually scored* (`matchedName` — often an enseigne, not the legal
    name), the distance in metres and the component scores. Answer with a JSON
    array of `{osmId, registryId, connectorId, merge, why}` and fold it back with
@@ -423,7 +430,7 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
     holds named individuals and that file says what follows from it.
 
 11. **Write from `places.json`.** Every field carries where it came from. A place
-   with `sources: ["osm","sirene"]` has both records attached; a place with one
+   with `sources: ["osm","registry"]` has both records attached; a place with one
    source has one, and the other half is not "missing data" you may fill in.
    OSM-declared emails, phones and social profiles are carried into `contacts`
    with an `osm:<id>` source, so they remain distinct from contacts observed on

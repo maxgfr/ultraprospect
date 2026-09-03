@@ -26,6 +26,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { readJsonSafe } from "./engine.js";
 import { poiContacts } from "./overpass.js";
+import { connectorById } from "./registry/index.js";
 import type { OsmPoi, Place, RunManifest } from "./types.js";
 import { foldAccents } from "./util.js";
 
@@ -120,6 +121,15 @@ export function runCheck(input: CheckInput): CheckReport {
   for (const poi of (readJsonSafe(join(runDir, "osm.json")) as OsmPoi[] | undefined) ?? []) {
     osmFeatures.set(`${poi.osmType[0]}${poi.osmId}`, poi);
   }
+  const stripLegalId = (value: string) => value.replace(/[\s.\-–—:/,\u00a0\u202f]/g, "").toLowerCase();
+  const osmCarriesIdentifier = (from: string, value: string): boolean => {
+    const match = /^osm:([nwr]\d+)$/.exec(from);
+    const poi = match ? osmFeatures.get(match[1]!) : undefined;
+    if (!poi) return false;
+    return Object.entries(poi.tags)
+      .filter(([tag]) => tag.startsWith("ref:"))
+      .some(([, raw]) => stripLegalId(raw).includes(stripLegalId(value)));
+  };
 
   // Every page id the run actually holds, with its text, read once.
   const pageText = new Map<string, string>();
@@ -221,6 +231,23 @@ export function runCheck(input: CheckInput): CheckReport {
         );
         continue;
       }
+      if (id.from.startsWith("osm:")) {
+        const match = /^osm:([nwr]\d+)$/.exec(id.from);
+        if (!match || !osmFeatures.has(match[1]!)) {
+          err(
+            "legal-id-unsourced",
+            `${place.id} · ${id.kind} ${id.value}`,
+            `claims to come from ${id.from}, which is not an OSM feature stored in this run's osm.json.`,
+          );
+        } else if (!osmCarriesIdentifier(id.from, id.value)) {
+          err(
+            "legal-id-not-on-page",
+            `${place.id} · ${id.kind} ${id.value}`,
+            `does not appear in the ref:* tags of ${id.from} stored in osm.json. Either it was misread, or the OSM feature changed before this run was recorded — both mean the identity built on it must not ship.`,
+          );
+        }
+        continue;
+      }
       const text = pageText.get(id.from);
       if (!text) {
         err("legal-id-unsourced", `${place.id} · ${id.kind} ${id.value}`, `claims to come from ${id.from}, which is not a stored page in this run.`);
@@ -238,9 +265,8 @@ export function runCheck(input: CheckInput): CheckReport {
       // failed this rule over a colon. A gate that rejects true evidence is not
       // strict, it is broken — people route around it, and then it stops
       // catching the fabricated ones it exists for.
-      const strip = (x: string) => x.replace(/[\s.\-–—:/,\u00a0\u202f]/g, "").toLowerCase();
-      const haystack = strip(text);
-      if (!haystack.includes(strip(id.value))) {
+      const haystack = stripLegalId(text);
+      if (!haystack.includes(stripLegalId(id.value))) {
         err(
           "legal-id-not-on-page",
           `${place.id} · ${id.kind} ${id.value}`,
@@ -254,12 +280,28 @@ export function runCheck(input: CheckInput): CheckReport {
   // such number recorded, cannot be audited at all.
   for (const place of places) {
     const ev = place.registryEvidence;
-    if (ev?.how !== "verified-id") continue;
-    if (!ev.legalId || !(place.legalIds ?? []).some((id) => id.value === ev.legalId)) {
+    if (ev?.how !== "verified-id" && ev?.how !== "osm-identifier") continue;
+    const legalId = ev.legalId ? (place.legalIds ?? []).find((id) => id.value === ev.legalId) : undefined;
+    const connector = place.registry ? connectorById(place.registry.connectorId) : undefined;
+    const registryCarriesIdentifier = Boolean(
+      place.registry &&
+        legalId &&
+        connector?.osmRefKeys?.some((key) => {
+          if (key.kind !== legalId.kind) return false;
+          const raw = key.level === "establishment" ? place.registry?.establishmentId : place.registry?.id;
+          return raw !== undefined && key.normalise(raw) === legalId.value;
+        }),
+    );
+    const backed = Boolean(
+      legalId &&
+        (ev.how !== "osm-identifier" ||
+          (ev.from?.startsWith("osm:") && legalId.from === ev.from && osmCarriesIdentifier(ev.from, legalId.value) && registryCarriesIdentifier)),
+    );
+    if (!backed) {
       err(
         "registry-evidence-unbacked",
         `${place.id}`,
-        `says its register record was confirmed from a published identifier, but the run holds no such identifier for it.`,
+        `says its register record was attached from a published identifier, but the cited source does not carry that identifier.`,
       );
     }
   }
