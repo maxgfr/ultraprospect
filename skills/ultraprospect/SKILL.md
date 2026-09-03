@@ -170,6 +170,9 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    straight back into `--category` on the next run. The scheme prefixes come off
    the connectors themselves, not a hardcoded list.
 
+   `--osm-groups` accepts the nine catalogue groups `shop`, `office`, `craft`,
+   `healthcare`, `industrial`, `amenity`, `tourism`, `leisure` and `club`.
+
    **It refuses rather than half-narrow.** Name only OSM tags where a register
    CAN be swept and the run stops, because the register lane would enumerate the
    whole territory beside your five cafés. Answer it by naming the other lane
@@ -450,6 +453,7 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 |---|---|
 | `where` exits 2 with a list | Working as designed. Several distinct places match; choose one. |
 | Very few OSM places | Overpass mirrors were busy. `doctor` shows which answered; re-run. |
+| Industrial sites are missing | Re-run the scan with the current build. The `industrial` catalogue group includes `man_made=works` and every feature carrying an `industrial` tag. |
 | Contacts are empty after `scan` although OSM has phone tags | They are now carried as declared contacts with an `osm:<id>` source. Re-run the scan with the current build. |
 | `truncated: true` on the register lane | A French territory exceeded the API's 10 000-result ceiling even after the NACE split, or `--max-results` produced a per-section sample after 21 section probes. It is not a prefix and not the whole; narrow the filters. |
 | Register lane `mode: "confirm"`, not `"sweep"` | Expected everywhere but France and the United Kingdom. OSM covered the ground; run `confirm` to attach register identities company by company. |

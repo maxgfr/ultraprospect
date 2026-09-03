@@ -7187,14 +7187,19 @@ var OVERPASS_MIRRORS = [
   "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
 ];
 var OSM_TAG_GROUPS = {
-  shop: '["shop"]',
-  office: '["office"]',
-  craft: '["craft"]',
-  healthcare: '["healthcare"]',
-  club: '["club"]',
-  amenity: '["amenity"~"^(restaurant|cafe|bar|pub|fast_food|food_court|ice_cream|biergarten|bank|bureau_de_change|atm|pharmacy|clinic|doctors|dentist|veterinary|driving_school|language_school|prep_school|music_school|training|childcare|kindergarten|school|college|university|hospital|nursing_home|social_facility|funeral_directors|fuel|car_wash|car_rental|car_sharing|charging_station|cinema|theatre|nightclub|casino|marketplace|post_office|coworking_space|studio|internet_cafe|animal_boarding|animal_shelter|vehicle_inspection)$"]',
-  tourism: '["tourism"~"^(hotel|motel|hostel|guest_house|apartment|chalet|camp_site|caravan_site|museum|gallery)$"]',
-  leisure: '["leisure"~"^(fitness_centre|sports_centre|sports_hall|dance|escape_game|bowling_alley|amusement_arcade|adult_gaming_centre|horse_riding|golf_course|marina|hackerspace|trampoline_park)$"]'
+  shop: ['["shop"]'],
+  office: ['["office"]'],
+  craft: ['["craft"]'],
+  healthcare: ['["healthcare"]'],
+  industrial: ['["man_made"="works"]', '["industrial"]'],
+  club: ['["club"]'],
+  amenity: [
+    '["amenity"~"^(restaurant|cafe|bar|pub|fast_food|food_court|ice_cream|biergarten|bank|bureau_de_change|pharmacy|clinic|doctors|dentist|veterinary|driving_school|language_school|prep_school|music_school|training|childcare|kindergarten|school|college|university|hospital|nursing_home|social_facility|funeral_directors|fuel|car_wash|car_rental|car_sharing|charging_station|cinema|theatre|nightclub|casino|marketplace|post_office|coworking_space|studio|internet_cafe|animal_boarding|animal_shelter|vehicle_inspection|conference_centre|events_venue|exhibition_centre|boat_rental|bicycle_rental|dancing_school|flight_school|research_institute)$"]'
+  ],
+  tourism: ['["tourism"~"^(hotel|motel|hostel|guest_house|apartment|chalet|camp_site|caravan_site|museum|gallery|theme_park|zoo|aquarium|resort)$"]'],
+  leisure: [
+    '["leisure"~"^(fitness_centre|sports_centre|sports_hall|dance|escape_game|bowling_alley|amusement_arcade|adult_gaming_centre|horse_riding|golf_course|marina|hackerspace|trampoline_park|water_park|sauna|ice_rink|miniature_golf|indoor_play|tanning_salon)$"]'
+  ]
 };
 var OSM_CONTACT_KEYS = {
   emails: ["email", "contact:email"],
@@ -7214,7 +7219,7 @@ function scopeClause(area, bbox) {
 function buildQuery(area, bbox, opts = {}) {
   const fallback = opts.extraFilters?.length ? [] : Object.keys(OSM_TAG_GROUPS);
   const groups = opts.groups?.length ? opts.groups : fallback;
-  const filters = [...groups.map((g) => OSM_TAG_GROUPS[g]).filter((f) => Boolean(f)), ...opts.extraFilters ?? []];
+  const filters = [...groups.flatMap((g) => OSM_TAG_GROUPS[g] ?? []), ...opts.extraFilters ?? []];
   const { header: header2, suffix } = scopeClause(area, bbox);
   const body = filters.map((f) => `  nwr${f}${suffix};`).join("\n");
   return `[out:json][timeout:${opts.timeoutS ?? 90}];
@@ -7341,7 +7346,7 @@ async function fetchOsmPois(target, opts = {}) {
   };
 }
 function poiCategory(poi) {
-  for (const key of ["shop", "office", "craft", "healthcare", "amenity", "tourism", "leisure", "club"]) {
+  for (const key of ["shop", "office", "craft", "healthcare", "amenity", "tourism", "leisure", "club", "man_made", "industrial"]) {
     const v = poi.tags[key];
     if (v && v !== "yes") return `${key}=${v}`;
     if (v === "yes") return key;
@@ -12852,7 +12857,7 @@ FILTERS (scan)
                          each reach only their own lane, which is the mismatch this closes.
   --category-lane <l>    osm | registry | both. Say that aiming only one lane is
                          deliberate, and accept the other sweeping the whole territory.
-  --osm-groups <list>    OSM catalogue groups: shop,office,craft,healthcare,amenity,tourism,leisure,club.
+  --osm-groups <list>    OSM catalogue groups: shop,office,craft,healthcare,industrial,amenity,tourism,leisure,club.
   --activity <list>      Activity codes in the register's own scheme, e.g. 62.01Z,70.22Z (NAF, France).
   --section <list>       Section letters in the country's own scheme, e.g. J,M (NACE across Europe).
   --size-band <list>     The register's own headcount band codes, e.g. 11,12,21 (INSEE, France).

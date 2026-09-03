@@ -58,23 +58,27 @@ export const OVERPASS_MIRRORS = [
  * OSM has no `business=yes`. Commercial activity is spread across a dozen keys
  * by category, so the catalogue is explicit rather than clever. Whole keys are
  * taken where the key itself means commerce (`shop`, `office`, `craft`,
- * `healthcare`); keys that mix commerce with street furniture (`amenity` also
- * covers benches and drinking fountains) are enumerated value by value.
+ * `healthcare`, `industrial`); keys that mix commerce with street furniture
+ * (`amenity` also covers benches and drinking fountains) are enumerated value
+ * by value.
  *
  * Erring towards inclusion: a false positive is a row the agent discards, a
  * false negative is a prospect nobody ever learns existed.
  */
-export const OSM_TAG_GROUPS: Record<string, string> = {
-  shop: '["shop"]',
-  office: '["office"]',
-  craft: '["craft"]',
-  healthcare: '["healthcare"]',
-  club: '["club"]',
-  amenity:
-    '["amenity"~"^(restaurant|cafe|bar|pub|fast_food|food_court|ice_cream|biergarten|bank|bureau_de_change|atm|pharmacy|clinic|doctors|dentist|veterinary|driving_school|language_school|prep_school|music_school|training|childcare|kindergarten|school|college|university|hospital|nursing_home|social_facility|funeral_directors|fuel|car_wash|car_rental|car_sharing|charging_station|cinema|theatre|nightclub|casino|marketplace|post_office|coworking_space|studio|internet_cafe|animal_boarding|animal_shelter|vehicle_inspection)$"]',
-  tourism: '["tourism"~"^(hotel|motel|hostel|guest_house|apartment|chalet|camp_site|caravan_site|museum|gallery)$"]',
-  leisure:
-    '["leisure"~"^(fitness_centre|sports_centre|sports_hall|dance|escape_game|bowling_alley|amusement_arcade|adult_gaming_centre|horse_riding|golf_course|marina|hackerspace|trampoline_park)$"]',
+export const OSM_TAG_GROUPS: Record<string, readonly string[]> = {
+  shop: ['["shop"]'],
+  office: ['["office"]'],
+  craft: ['["craft"]'],
+  healthcare: ['["healthcare"]'],
+  industrial: ['["man_made"="works"]', '["industrial"]'],
+  club: ['["club"]'],
+  amenity: [
+    '["amenity"~"^(restaurant|cafe|bar|pub|fast_food|food_court|ice_cream|biergarten|bank|bureau_de_change|pharmacy|clinic|doctors|dentist|veterinary|driving_school|language_school|prep_school|music_school|training|childcare|kindergarten|school|college|university|hospital|nursing_home|social_facility|funeral_directors|fuel|car_wash|car_rental|car_sharing|charging_station|cinema|theatre|nightclub|casino|marketplace|post_office|coworking_space|studio|internet_cafe|animal_boarding|animal_shelter|vehicle_inspection|conference_centre|events_venue|exhibition_centre|boat_rental|bicycle_rental|dancing_school|flight_school|research_institute)$"]',
+  ],
+  tourism: ['["tourism"~"^(hotel|motel|hostel|guest_house|apartment|chalet|camp_site|caravan_site|museum|gallery|theme_park|zoo|aquarium|resort)$"]'],
+  leisure: [
+    '["leisure"~"^(fitness_centre|sports_centre|sports_hall|dance|escape_game|bowling_alley|amusement_arcade|adult_gaming_centre|horse_riding|golf_course|marina|hackerspace|trampoline_park|water_park|sauna|ice_rink|miniature_golf|indoor_play|tanning_salon)$"]',
+  ],
 };
 
 /** OSM tags whose values are declared contact details for the mapped feature. */
@@ -130,7 +134,7 @@ export function buildQuery(area: number | undefined, bbox: [number, number, numb
   // whole town — the exact failure the flag exists to remove.
   const fallback = opts.extraFilters?.length ? [] : Object.keys(OSM_TAG_GROUPS);
   const groups = opts.groups?.length ? opts.groups : fallback;
-  const filters = [...groups.map((g) => OSM_TAG_GROUPS[g]).filter((f): f is string => Boolean(f)), ...(opts.extraFilters ?? [])];
+  const filters = [...groups.flatMap((g) => OSM_TAG_GROUPS[g] ?? []), ...(opts.extraFilters ?? [])];
   const { header, suffix } = scopeClause(area, bbox);
   const body = filters.map((f) => `  nwr${f}${suffix};`).join("\n");
   // `out center tags` gives one representative coordinate for ways and
@@ -308,7 +312,7 @@ export async function fetchOsmPois(target: GeoTarget, opts: OverpassOptions = {}
 
 /** Best-effort category label for a POI, for the report and the CSV. */
 export function poiCategory(poi: OsmPoi): string | undefined {
-  for (const key of ["shop", "office", "craft", "healthcare", "amenity", "tourism", "leisure", "club"]) {
+  for (const key of ["shop", "office", "craft", "healthcare", "amenity", "tourism", "leisure", "club", "man_made", "industrial"]) {
     const v = poi.tags[key];
     if (v && v !== "yes") return `${key}=${v}`;
     if (v === "yes") return key;
