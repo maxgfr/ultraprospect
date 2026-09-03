@@ -23,6 +23,7 @@
 
 import { NACE_SECTIONS } from "./classification/nace.js";
 import { CONNECTORS } from "./registry/index.js";
+import type { RegistryConnector, RegistryFilters } from "./registry/types.js";
 
 /**
  * The scheme prefixes that mean "this is a register code", not an OSM key.
@@ -235,4 +236,14 @@ export function laneGateRefusal(category: CategoryParse, reality: LaneReality): 
   const aimed = open[0] === "osm" ? "registry" : "osm";
   const excuse = bothOpen ? "" : `, or say the asymmetry is deliberate with --category-lane ${aimed}`;
   return `--category left the ${open.join(" and ")} lane sweeping the whole territory unfiltered, which is the mismatch --category exists to prevent. Either ${hint}${excuse}.`;
+}
+
+/** Refuse legal-form filters that a territory's sweep connector would ignore. */
+export function legalFormGateRefusal(
+  filters: Pick<RegistryFilters, "legalForms" | "excludeLegalForms">,
+  connector: Pick<RegistryConnector, "id" | "sweep" | "sweepFiltersLegalForm"> | undefined,
+): string | undefined {
+  if (!filters.legalForms?.length && !filters.excludeLegalForms?.length) return undefined;
+  if (!connector?.sweep || connector.sweepFiltersLegalForm) return undefined;
+  return `${connector.id} enumerates this territory but cannot narrow a sweep by legal form, so --legal-form / --exclude-legal-form would be accepted and ignored. Drop those filters or choose a connector that declares legal-form filtering.`;
 }

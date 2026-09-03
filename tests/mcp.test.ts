@@ -124,6 +124,24 @@ describe("the tool list", () => {
     }
   });
 
+  it("keeps the scan schema's legal-form filters on the MCP surface", () => {
+    const scan = tools.find((tool) => tool.name === "ultraprospect_scan");
+    if (!scan) throw new Error("ultraprospect_scan is missing");
+    expect(Object.keys((scan.inputSchema as any).properties)).toMatchInlineSnapshot(`
+      [
+        "query",
+        "country",
+        "radius",
+        "section",
+        "legalForms",
+        "excludeLegalForms",
+        "minEmployees",
+        "maxResults",
+        "out",
+      ]
+    `);
+  });
+
   it("keeps the two --apply folds off the surface", () => {
     // A tool call is the wrong shape for handing over forty considered verdicts,
     // and an agent that answers them in one argument is rubber-stamping them.

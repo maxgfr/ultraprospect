@@ -131,6 +131,13 @@ describe("eu-vies", () => {
 });
 
 describe("fr-sirene", () => {
+  it("declares legal-form sweep filtering and the filed public-body rule", () => {
+    expect(frSirene.sweepFiltersLegalForm).toBe(true);
+    expect(frSirene.legalFormIsPublic?.("7210")).toBe(true);
+    expect(frSirene.legalFormIsPublic?.("4710")).toBe(true);
+    expect(frSirene.legalFormIsPublic?.("5710")).toBe(false);
+  });
+
   it("declares the French OSM establishment and legal-unit references", () => {
     expect(frSirene.osmRefKeys?.map(({ tag, level, kind }) => ({ tag, level, kind }))).toEqual([
       { tag: "ref:FR:SIRET", level: "establishment", kind: "siret" },

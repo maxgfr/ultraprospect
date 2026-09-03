@@ -4274,6 +4274,7 @@ function buildUrl(query, page, perPage) {
     if (query.codeCommune?.length) url.searchParams.set("code_commune", query.codeCommune.join(","));
     if (query.etatAdministratif) url.searchParams.set("etat_administratif", query.etatAdministratif);
     if (query.tranchesEffectif?.length) url.searchParams.set("tranche_effectif_salarie", query.tranchesEffectif.join(","));
+    if (query.legalForms?.length) url.searchParams.set("nature_juridique", query.legalForms.join(","));
   }
   if (query.sections?.length) url.searchParams.set("section_activite_principale", query.sections.join(","));
   if (query.activitePrincipale?.length) url.searchParams.set("activite_principale", query.activitePrincipale.join(","));
@@ -4414,6 +4415,14 @@ function applyClientFilters(records, query, endpoint) {
   if (endpoint === "near_point" && query.tranchesEffectif?.length) {
     const wanted = new Set(query.tranchesEffectif);
     out2 = out2.filter((r) => r.sizeBand && wanted.has(r.sizeBand));
+  }
+  if (endpoint === "near_point" && query.legalForms?.length) {
+    const wanted = new Set(query.legalForms);
+    out2 = out2.filter((r) => r.legalForm && wanted.has(r.legalForm));
+  }
+  if (query.excludeLegalForms?.length) {
+    const excluded = new Set(query.excludeLegalForms);
+    out2 = out2.filter((r) => !r.legalForm || !excluded.has(r.legalForm));
   }
   return out2;
 }
@@ -4568,6 +4577,8 @@ var frSirene = {
   activityPrefix: "naf",
   // The API/snapshot filters on the activity code server-side.
   sweepFiltersActivity: true,
+  sweepFiltersLegalForm: true,
+  legalFormIsPublic: (code) => /^[47]\d{3}$/.test(code),
   docsUrl: "https://recherche-entreprises.api.gouv.fr/docs/",
   sizeBands: EFFECTIF_BANDS,
   osmRefKeys: [
@@ -4603,6 +4614,8 @@ var frSirene = {
         sections: filters.sections,
         activitePrincipale: filters.activityCodes,
         tranchesEffectif: filters.sizeBands,
+        legalForms: filters.legalForms,
+        excludeLegalForms: filters.excludeLegalForms,
         etatAdministratif: filters.includeCeased ? void 0 : "A"
       },
       { maxResults: filters.maxResults, onNote: ctx.onNote, onProgress: ctx.onProgress }
@@ -4656,6 +4669,12 @@ var frSirene = {
       name: "/near_point still IGNORES etat_administratif",
       ok: withFilter.data?.total_results === without.data?.total_results,
       detail: "if it now honours it, the client-side filter is redundant"
+    });
+    const legalForms = await get2(`${BASE4}/search?nature_juridique=9110,5710&per_page=1`);
+    const legalFormResults = legalForms.data?.results;
+    checks.push({
+      name: "register still filters /search by nature_juridique",
+      ok: Array.isArray(legalFormResults) && legalFormResults.length > 0 && legalFormResults.every((entity) => entity?.nature_juridique === "9110" || entity?.nature_juridique === "5710")
     });
     const rejected = await get2(`${BASE4}/search?activite_principale=__invalid__&per_page=1`);
     const listed = [...String(rejected.data?.erreur ?? "").matchAll(/'(\d{2}\.\d{2}[A-Z])'/g)].length;
@@ -7965,6 +7984,11 @@ function laneGateRefusal(category, reality) {
   const excuse = bothOpen ? "" : `, or say the asymmetry is deliberate with --category-lane ${aimed}`;
   return `--category left the ${open2.join(" and ")} lane sweeping the whole territory unfiltered, which is the mismatch --category exists to prevent. Either ${hint}${excuse}.`;
 }
+function legalFormGateRefusal(filters, connector) {
+  if (!filters.legalForms?.length && !filters.excludeLegalForms?.length) return void 0;
+  if (!connector?.sweep || connector.sweepFiltersLegalForm) return void 0;
+  return `${connector.id} enumerates this territory but cannot narrow a sweep by legal form, so --legal-form / --exclude-legal-form would be accepted and ignored. Drop those filters or choose a connector that declares legal-form filtering.`;
+}
 
 // src/scan.ts
 function placeFromPoi(poi) {
@@ -8059,6 +8083,8 @@ async function runScan(target, opts = {}) {
     );
   }
   const registrySweep = opts.noRegistry || replay ? void 0 : connectorsFor(target.countryCode, { only: opts.registryIds }).sweep;
+  const legalFormRefusal = legalFormGateRefusal(opts, registrySweep);
+  if (legalFormRefusal) throw Object.assign(new Error(legalFormRefusal), { exitCode: 2 });
   if (category?.targetsRegistry && registrySweep?.sweep && !registrySweep.sweepFiltersActivity) {
     throw Object.assign(
       new Error(
@@ -8136,6 +8162,8 @@ async function runScan(target, opts = {}) {
         sections: sections.length ? sections : void 0,
         activityCodes: activityCodes.length ? activityCodes : void 0,
         sizeBands,
+        legalForms: opts.legalForms,
+        excludeLegalForms: opts.excludeLegalForms,
         includeCeased: opts.includeCeased,
         maxResults: opts.maxResults
       },
@@ -8226,6 +8254,8 @@ async function runScan(target, opts = {}) {
     activityCodes: activityCodes.length ? activityCodes : null,
     sections: sections.length ? sections : null,
     sizeBands: sizeBands ?? null,
+    legalForms: opts.legalForms ?? null,
+    excludeLegalForms: opts.excludeLegalForms ?? null,
     includeCeased: Boolean(opts.includeCeased),
     maxResults: opts.maxResults ?? null,
     registryIds: opts.registryIds ?? null
@@ -8534,7 +8564,9 @@ function skipReasonsFor(place) {
   if (tags.brand || tags["brand:wikidata"]) reasons.push("chain");
   if (isUnnamed(place)) reasons.push("unnamed");
   const operatorType = tags["operator:type"]?.toLowerCase();
-  if (operatorType && PUBLIC_OPERATORS.has(operatorType)) reasons.push("public");
+  const registry = place.registry;
+  const filedPublic = Boolean(registry?.legalForm && connectorById(registry.connectorId)?.legalFormIsPublic?.(registry.legalForm));
+  if (operatorType && PUBLIC_OPERATORS.has(operatorType) || filedPublic) reasons.push("public");
   const vacant = tags.shop === "vacant" || tags.office === "vacant" || tags.disused === "yes" || // `disused:` and `abandoned:` prefix a feature that is GONE. `was:` does
   // not: a restaurant that used to be a bakery keeps `was:shop=bakery` while
   // trading perfectly well, so counting it as vacant skips a live business.
@@ -11955,6 +11987,8 @@ var TOOLS = [
         country: { type: "string" },
         radius: { type: "string", description: "For a point search: 800, 800m, 2km." },
         section: { type: "string", description: "Activity section letters in the country's own scheme, comma-separated. NACE A-U across Europe, e.g. J,M." },
+        legalForms: { type: "string", description: "Filed legal-form codes to include, comma-separated." },
+        excludeLegalForms: { type: "string", description: "Filed legal-form codes to exclude, comma-separated. Applied client-side in France." },
         minEmployees: { type: "number", description: "Keep companies with at least this many employees, where the register publishes size." },
         maxResults: { type: "number", description: "Register rows before the lane declares itself partial." },
         out: { type: "string", description: "Run root. Defaults to ./.ultraprospect" }
@@ -12118,6 +12152,8 @@ function createAdapter() {
           if (!resolved.ok) throw new ToolError(`${resolved.reason}. Call ultraprospect_where first, then pass its pick.`);
           const outcome = await runScan(resolved.target, {
             sections: typeof args.section === "string" ? args.section.split(",").map((s) => s.trim()) : void 0,
+            legalForms: typeof args.legalForms === "string" ? args.legalForms.split(",").map((s) => s.trim()) : void 0,
+            excludeLegalForms: typeof args.excludeLegalForms === "string" ? args.excludeLegalForms.split(",").map((s) => s.trim()) : void 0,
             minEmployees: typeof args.minEmployees === "number" ? args.minEmployees : void 0,
             maxResults: typeof args.maxResults === "number" ? clampInt(args.maxResults, 1, 1e4, 3e3) : void 0
           });
@@ -12673,6 +12709,8 @@ var VALUE_FLAGS = [
   "activity",
   "section",
   "size-band",
+  "legal-form",
+  "exclude-legal-form",
   "min-employees",
   "registry",
   "companies-house-key",
@@ -12763,6 +12801,8 @@ FILTERS (scan)
   --activity <list>      Activity codes in the register's own scheme, e.g. 62.01Z,70.22Z (NAF, France).
   --section <list>       Section letters in the country's own scheme, e.g. J,M (NACE across Europe).
   --size-band <list>     The register's own headcount band codes, e.g. 11,12,21 (INSEE, France).
+  --legal-form <list>    Include filed legal-form codes, e.g. 5710,5499 (INSEE, France).
+  --exclude-legal-form <list>  Exclude filed legal-form codes, e.g. 9110,9220 (client-side in France).
   --min-employees <n>    Keep companies with at least n employees, where the register publishes size.
   --include-ceased       Include companies the register marks as ceased. Off by default.
   --max-results <n>      Cap on register rows before the lane declares itself partial (default 3000).
@@ -12780,8 +12820,9 @@ WEBSITE DISCOVERY (resolve)
   --limit <n>            Only resolve this many places.
   --skip <reasons>       Spend no search on rows that cannot become a prospect:
                          chain,unnamed,public,vacant. Each reads a tag a mapper
-                         asserted (brand:wikidata, operator:type, shop=vacant, no
-                         name), never a guess from the name. Counted and reported;
+                         asserted (brand:wikidata, operator:type, a filed public
+                         legal form, shop=vacant, no name), never a guess from the
+                         name. Counted and reported;
                          the rows stay in places.json with their reason.
   --queries-per-place <n>  Distinct search angles per place (default 3, max 8). You run each
                          one by hand, so this is a budget: raise it on an aimed run of forty,
@@ -13112,6 +13153,13 @@ next: ultraprospect scan --where ${JSON.stringify(target.query)}`);
   return EXIT_OK;
 }
 async function cmdScan(values, bools, positional) {
+  const legalForms = list(values["legal-form"]);
+  const excludeLegalForms = list(values["exclude-legal-form"]);
+  const excluded = new Set(excludeLegalForms);
+  const contradictory = legalForms?.filter((code) => excluded.has(code)) ?? [];
+  if (contradictory.length) {
+    throw new UsageError(`legal-form code(s) ${contradictory.join(", ")} appear in both --legal-form and --exclude-legal-form`);
+  }
   const target = values.fixture ? loadFixture(values.fixture).target : await targetFrom(values, positional);
   say(`ultraprospect: scanning ${target.label}`);
   const outcome = await runScan(target, {
@@ -13121,6 +13169,8 @@ async function cmdScan(values, bools, positional) {
     activityCodes: list(values.activity),
     sections: list(values.section),
     sizeBands: list(values["size-band"]),
+    legalForms,
+    excludeLegalForms,
     minEmployees: values["min-employees"] ? clampInt(values["min-employees"], 0, 1e5, 0) : void 0,
     includeCeased: bools.has("include-ceased"),
     noOsm: bools.has("no-osm"),

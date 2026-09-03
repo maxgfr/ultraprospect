@@ -136,6 +136,8 @@ export const VALUE_FLAGS = [
   "activity",
   "section",
   "size-band",
+  "legal-form",
+  "exclude-legal-form",
   "min-employees",
   "registry",
   "companies-house-key",
@@ -228,6 +230,8 @@ FILTERS (scan)
   --activity <list>      Activity codes in the register's own scheme, e.g. 62.01Z,70.22Z (NAF, France).
   --section <list>       Section letters in the country's own scheme, e.g. J,M (NACE across Europe).
   --size-band <list>     The register's own headcount band codes, e.g. 11,12,21 (INSEE, France).
+  --legal-form <list>    Include filed legal-form codes, e.g. 5710,5499 (INSEE, France).
+  --exclude-legal-form <list>  Exclude filed legal-form codes, e.g. 9110,9220 (client-side in France).
   --min-employees <n>    Keep companies with at least n employees, where the register publishes size.
   --include-ceased       Include companies the register marks as ceased. Off by default.
   --max-results <n>      Cap on register rows before the lane declares itself partial (default 3000).
@@ -245,8 +249,9 @@ WEBSITE DISCOVERY (resolve)
   --limit <n>            Only resolve this many places.
   --skip <reasons>       Spend no search on rows that cannot become a prospect:
                          chain,unnamed,public,vacant. Each reads a tag a mapper
-                         asserted (brand:wikidata, operator:type, shop=vacant, no
-                         name), never a guess from the name. Counted and reported;
+                         asserted (brand:wikidata, operator:type, a filed public
+                         legal form, shop=vacant, no name), never a guess from the
+                         name. Counted and reported;
                          the rows stay in places.json with their reason.
   --queries-per-place <n>  Distinct search angles per place (default 3, max 8). You run each
                          one by hand, so this is a budget: raise it on an aimed run of forty,
@@ -664,6 +669,13 @@ async function cmdWhere(values: Record<string, string>, bools: ReadonlySet<strin
 }
 
 async function cmdScan(values: Record<string, string>, bools: ReadonlySet<string>, positional: string): Promise<number> {
+  const legalForms = list(values["legal-form"]);
+  const excludeLegalForms = list(values["exclude-legal-form"]);
+  const excluded = new Set(excludeLegalForms);
+  const contradictory = legalForms?.filter((code) => excluded.has(code)) ?? [];
+  if (contradictory.length) {
+    throw new UsageError(`legal-form code(s) ${contradictory.join(", ")} appear in both --legal-form and --exclude-legal-form`);
+  }
   // A fixture carries the target it was recorded for. Geocoding again would be
   // a live call in what is meant to be an offline run, and would resolve
   // against today's Nominatim rather than the one the sweep was recorded with.
@@ -677,6 +689,8 @@ async function cmdScan(values: Record<string, string>, bools: ReadonlySet<string
     activityCodes: list(values.activity),
     sections: list(values.section),
     sizeBands: list(values["size-band"]),
+    legalForms,
+    excludeLegalForms,
     minEmployees: values["min-employees"] ? clampInt(values["min-employees"], 0, 100_000, 0) : undefined,
     includeCeased: bools.has("include-ceased"),
     noOsm: bools.has("no-osm"),

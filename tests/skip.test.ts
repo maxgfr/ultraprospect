@@ -74,6 +74,18 @@ describe("skipReasonsFor — every test reads a tag somebody asserted", () => {
     expect(skipReasonsFor(place({ osm: poi({ amenity: "school", "operator:type": "private" }, "Saint-Michel") }))).not.toContain("public");
   });
 
+  it("calls a French legal unit with filed legal form 7210 a public body", () => {
+    expect(skipReasonsFor(place({ registry: rec({ legalForm: "7210" }) }))).toContain("public");
+  });
+
+  it("does not call filed legal form 5710 a public body", () => {
+    expect(skipReasonsFor(place({ registry: rec({ legalForm: "5710" }) }))).not.toContain("public");
+  });
+
+  it("does not interpret a GB legal form without a connector rule", () => {
+    expect(skipReasonsFor(place({ registry: rec({ connectorId: "gb-companies-house", countryCode: "gb", legalForm: "7210" }) }))).not.toContain("public");
+  });
+
   it("calls shop=vacant and disused:* vacant", () => {
     expect(skipReasonsFor(place({ osm: poi({ shop: "vacant" }) }))).toContain("vacant");
     expect(skipReasonsFor(place({ osm: poi({ "disused:shop": "bakery" }) }))).toContain("vacant");

@@ -14,26 +14,28 @@
 // 76 distinct rows of 420, five of them under two reasons at once: 104 searches
 // that were never going to find a prospect.
 //
-// The rule these follow is what makes them safe: EVERY TEST BELOW READS A TAG
+// The rule these follow is what makes them safe: EVERY TEST BELOW READS A FIELD
 // SOMEBODY ASSERTED. None of them guesses from a name, and none encodes an
 // opinion about an industry. `brand:wikidata` on a Franprix is a mapper saying
-// "this is an outlet of that chain"; we are not inferring it from the string.
-// So a skip is always explainable in one sentence that points at the data.
+// "this is an outlet of that chain"; a legal form is what the legal unit filed,
+// interpreted only by its own connector. So a skip is always explainable in one
+// sentence that points at the data.
 //
 // And nothing here deletes: skipping is a decision about where to spend
 // searches, recorded per row and reversible, never a row removed from
 // `places.json`.
 
 import type { Place } from "./types.js";
+import { connectorById } from "./registry/index.js";
 
-/** The reasons a place can be skipped. Each maps to one asserted tag. */
+/** The reasons a place can be skipped. Each maps to an asserted source field. */
 export const SKIP_REASONS = ["chain", "unnamed", "public", "vacant"] as const;
 export type SkipReason = (typeof SKIP_REASONS)[number];
 
 export const SKIP_REASON_LABELS: Record<SkipReason, string> = {
   chain: "an outlet of a brand the mapper named (`brand` / `brand:wikidata`)",
   unnamed: "no name on the row — nothing to search for",
-  public: "a public body (`operator:type=public|government`)",
+  public: "a public body (`operator:type=public|government` or a filed public legal form)",
   vacant: "an empty or disused unit (`shop=vacant`, `disused:*`, `abandoned:*`)",
 };
 
@@ -81,7 +83,9 @@ export function skipReasonsFor(place: Place): SkipReason[] {
   if (isUnnamed(place)) reasons.push("unnamed");
 
   const operatorType = tags["operator:type"]?.toLowerCase();
-  if (operatorType && PUBLIC_OPERATORS.has(operatorType)) reasons.push("public");
+  const registry = place.registry;
+  const filedPublic = Boolean(registry?.legalForm && connectorById(registry.connectorId)?.legalFormIsPublic?.(registry.legalForm));
+  if ((operatorType && PUBLIC_OPERATORS.has(operatorType)) || filedPublic) reasons.push("public");
 
   const vacant =
     tags.shop === "vacant" ||

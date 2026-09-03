@@ -50,6 +50,14 @@ describe("fixture identifier fusion", () => {
     expect(readFileSync(join(firstDir, "places.json"), "utf8")).toBe(readFileSync(join(secondDir, "places.json"), "utf8"));
   });
 
+  it("records legal-form include and exclude lists in the manifest", async () => {
+    const target = loadFixture(fixture).target;
+    const outcome = await runScan(target, { fixture, legalForms: ["5710"], excludeLegalForms: ["9110", "9220"] });
+
+    expect(outcome.manifest.filters.legalForms).toEqual(["5710"]);
+    expect(outcome.manifest.filters.excludeLegalForms).toEqual(["9110", "9220"]);
+  });
+
   it("persists a note when identifier coordinates exceed the scoring gate", async () => {
     const dir = outDir();
     const target: GeoTarget = {

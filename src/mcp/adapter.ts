@@ -96,6 +96,8 @@ const TOOLS: ToolDecl[] = [
         country: { type: "string" },
         radius: { type: "string", description: "For a point search: 800, 800m, 2km." },
         section: { type: "string", description: "Activity section letters in the country's own scheme, comma-separated. NACE A-U across Europe, e.g. J,M." },
+        legalForms: { type: "string", description: "Filed legal-form codes to include, comma-separated." },
+        excludeLegalForms: { type: "string", description: "Filed legal-form codes to exclude, comma-separated. Applied client-side in France." },
         minEmployees: { type: "number", description: "Keep companies with at least this many employees, where the register publishes size." },
         maxResults: { type: "number", description: "Register rows before the lane declares itself partial." },
         out: { type: "string", description: "Run root. Defaults to ./.ultraprospect" },
@@ -274,6 +276,8 @@ export function createAdapter(): McpAdapter {
 
           const outcome = await runScan(resolved.target, {
             sections: typeof args.section === "string" ? args.section.split(",").map((s) => s.trim()) : undefined,
+            legalForms: typeof args.legalForms === "string" ? args.legalForms.split(",").map((s) => s.trim()) : undefined,
+            excludeLegalForms: typeof args.excludeLegalForms === "string" ? args.excludeLegalForms.split(",").map((s) => s.trim()) : undefined,
             minEmployees: typeof args.minEmployees === "number" ? args.minEmployees : undefined,
             maxResults: typeof args.maxResults === "number" ? clampInt(args.maxResults, 1, 10_000, 3000) : undefined,
           });

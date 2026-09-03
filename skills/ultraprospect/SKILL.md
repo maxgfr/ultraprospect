@@ -97,6 +97,7 @@ ultraprospect where "Vincennes" --country fr                  # resolve, or list
 ultraprospect scan --where "Vincennes" --country fr           # both lanes, fused
 ultraprospect scan --lat 48.8566 --long 2.3522 --radius 500m  # a point and a radius
 ultraprospect scan --where "Lyon" --section M --min-employees 20 --out ./runs
+ultraprospect scan --where "Saint-Mandé" --country fr --exclude-legal-form 9110,6540,9220
 ultraprospect scan --where "Vincennes" --country fr --category amenity=cafe,naf=56.30Z   # ONE trade, BOTH lanes
 ultraprospect scan --where "Kreuzberg, Berlin" --country de --category office=it          # where no register sweeps, OSM alone
 ultraprospect resolve --run <dir> --queries --skip chain,unnamed,public,vacant            # spend no search on a bank branch
@@ -137,9 +138,13 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 2. **Scan, with filters if the territory is dense.** This matters in France,
    where the register IS swept: a French commune holds tens of thousands of
    registered units, most of them dormant micro-entrepreneurs.
-   `--min-employees`, `--section` and `--activity` are how a run stays useful; the
-   register lane stops at `--max-results` and declares itself partial rather
-   than spending twenty minutes.
+   `--min-employees`, `--section` and `--activity` are how a run stays useful.
+   `--legal-form` keeps only the filed INSEE legal-form codes named;
+   `--exclude-legal-form` removes codes such as 9110 (condominium syndicates) or
+   9220 (associations). Includes are sent to `/search`; exclusions have no API
+   negation and are always applied client-side before a row spends the
+   `--max-results` budget. The register lane stops at that budget and declares
+   itself partial rather than spending twenty minutes.
 
 2a. **`--category` is the only filter that aims BOTH lanes. Reach for it first.**
 
@@ -278,8 +283,9 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    **Spend the searches on rows that could buy something.** `--skip` drops the
    ones that cannot, and every test reads a tag a mapper ASSERTED rather than
    guessing from a name: `chain` reads `brand`/`brand:wikidata`, `public` reads
-   `operator:type`, `vacant` reads `shop=vacant` and `disused:*`, `unnamed` is a
-   row whose name is literally its own tag. Measured on the Saint-Mandé sweep:
+   `operator:type` or the legal unit's filed legal form through its register's
+   own rule, `vacant` reads `shop=vacant` and `disused:*`, `unnamed` is a row
+   whose name is literally its own tag. Measured on the Saint-Mandé sweep:
    76 of 420 rows skipped — 42 chain, 24 unnamed, 9 public, 6 vacant, five of them
    counted twice — which is 104 searches not run on BNP Paribas branches and
    primary schools. Nothing is
@@ -455,6 +461,7 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | `confirm` found nothing at all in the US | Expected. There is no US company register and no published company number; identity there rests on address and name. |
 | A merged place looks like two companies | Adjudication was skipped or answered too generously. Check `matchConfidence` and the raw lanes in `osm.json` / `registry.json`. |
 | Thousands of dormant one-person companies | Add `--min-employees`; ceased companies are already excluded unless `--include-ceased`. |
+| 950 rows of which 169 are condominium syndicates | Add `--exclude-legal-form 9110`; the exclusion is applied before the result budget. |
 | The run is full of schools, bank branches and EV chargers | `--osm-groups amenity` is a whole catalogue group, not a trade. Aim it with `--category amenity=cafe,…`, and drop what cannot buy with `resolve --skip chain,public`. |
 | `scan` refused: "left the … lane sweeping unfiltered" | Working as designed. A `--category` list that narrows one lane and not the other produces a run whose halves cover different territories. Name a term for the other lane, or `--category-lane <the one you meant>`. |
 | `scan` refused: activity codes "fall outside the sections asked for" | The register ANDs section and activity code, so `nace=I,naf=10.71C` would return zero rows and read as an empty trade. Ask for one or the other. |

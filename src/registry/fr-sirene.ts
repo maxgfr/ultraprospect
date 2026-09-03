@@ -115,6 +115,10 @@ export interface SireneQuery {
   sections?: string[];
   /** INSEE employee-band codes. */
   tranchesEffectif?: string[];
+  /** INSEE nature juridique codes to include. */
+  legalForms?: string[];
+  /** INSEE nature juridique codes to exclude client-side. */
+  excludeLegalForms?: string[];
   /** "A" (active) or "C" (ceased). Applied client-side on the point endpoint. */
   etatAdministratif?: "A" | "C";
 }
@@ -165,6 +169,7 @@ export function buildUrl(query: SireneQuery, page: number, perPage: number): str
     // Only `/search` implements this one; see the header note.
     if (query.etatAdministratif) url.searchParams.set("etat_administratif", query.etatAdministratif);
     if (query.tranchesEffectif?.length) url.searchParams.set("tranche_effectif_salarie", query.tranchesEffectif.join(","));
+    if (query.legalForms?.length) url.searchParams.set("nature_juridique", query.legalForms.join(","));
   }
   if (query.sections?.length) url.searchParams.set("section_activite_principale", query.sections.join(","));
   if (query.activitePrincipale?.length) url.searchParams.set("activite_principale", query.activitePrincipale.join(","));
@@ -366,6 +371,14 @@ function applyClientFilters(records: RegistryRecord[], query: SireneQuery, endpo
   if (endpoint === "near_point" && query.tranchesEffectif?.length) {
     const wanted = new Set(query.tranchesEffectif);
     out = out.filter((r) => r.sizeBand && wanted.has(r.sizeBand));
+  }
+  if (endpoint === "near_point" && query.legalForms?.length) {
+    const wanted = new Set(query.legalForms);
+    out = out.filter((r) => r.legalForm && wanted.has(r.legalForm));
+  }
+  if (query.excludeLegalForms?.length) {
+    const excluded = new Set(query.excludeLegalForms);
+    out = out.filter((r) => !r.legalForm || !excluded.has(r.legalForm));
   }
   return out;
 }
@@ -584,6 +597,8 @@ export const frSirene: RegistryConnector = {
   activityPrefix: "naf",
   // The API/snapshot filters on the activity code server-side.
   sweepFiltersActivity: true,
+  sweepFiltersLegalForm: true,
+  legalFormIsPublic: (code) => /^[47]\d{3}$/.test(code),
   docsUrl: "https://recherche-entreprises.api.gouv.fr/docs/",
   sizeBands: EFFECTIF_BANDS,
   osmRefKeys: [
@@ -621,6 +636,8 @@ export const frSirene: RegistryConnector = {
         sections: filters.sections,
         activitePrincipale: filters.activityCodes,
         tranchesEffectif: filters.sizeBands,
+        legalForms: filters.legalForms,
+        excludeLegalForms: filters.excludeLegalForms,
         etatAdministratif: filters.includeCeased ? undefined : "A",
       },
       { maxResults: filters.maxResults, onNote: ctx.onNote, onProgress: ctx.onProgress },
@@ -689,6 +706,16 @@ export const frSirene: RegistryConnector = {
       name: "/near_point still IGNORES etat_administratif",
       ok: withFilter.data?.total_results === without.data?.total_results,
       detail: "if it now honours it, the client-side filter is redundant",
+    });
+
+    const legalForms = await get(`${BASE}/search?nature_juridique=9110,5710&per_page=1`);
+    const legalFormResults = legalForms.data?.results;
+    checks.push({
+      name: "register still filters /search by nature_juridique",
+      ok:
+        Array.isArray(legalFormResults) &&
+        legalFormResults.length > 0 &&
+        legalFormResults.every((entity: any) => entity?.nature_juridique === "9110" || entity?.nature_juridique === "5710"),
     });
 
     // The activity catalogue is harvested from this endpoint's own rejection
