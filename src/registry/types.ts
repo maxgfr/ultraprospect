@@ -261,6 +261,10 @@ export interface RegistryConnector {
    * have no way to filter a sweep by them.
    */
   sweepFiltersActivity?: boolean;
+  /** Does `sweep` honour size-band filters, including a translated minimum headcount? */
+  sweepFiltersSize?: true;
+  /** Translate a minimum headcount into this register's own ordered size-band codes. */
+  sizeBandsAtLeast?(min: number): string[];
   /** Does `sweep` honour legal-form include and exclude filters? */
   sweepFiltersLegalForm?: true;
   /** Interpret one of this register's filed legal-form codes as public or private. */

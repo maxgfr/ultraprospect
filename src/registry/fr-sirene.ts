@@ -651,6 +651,8 @@ export const frSirene: RegistryConnector = {
   activityPrefix: "naf",
   // The API/snapshot filters on the activity code server-side.
   sweepFiltersActivity: true,
+  sweepFiltersSize: true,
+  sizeBandsAtLeast: bandsAtLeast,
   sweepFiltersLegalForm: true,
   legalFormIsPublic: (code) => /^[47]\d{3}$/.test(code),
   docsUrl: "https://recherche-entreprises.api.gouv.fr/docs/",

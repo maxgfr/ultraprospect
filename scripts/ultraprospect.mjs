@@ -4644,6 +4644,8 @@ var frSirene = {
   activityPrefix: "naf",
   // The API/snapshot filters on the activity code server-side.
   sweepFiltersActivity: true,
+  sweepFiltersSize: true,
+  sizeBandsAtLeast: bandsAtLeast,
   sweepFiltersLegalForm: true,
   legalFormIsPublic: (code) => /^[47]\d{3}$/.test(code),
   docsUrl: "https://recherche-entreprises.api.gouv.fr/docs/",
@@ -7782,6 +7784,7 @@ function toCandidate2(poi, rec, scored) {
 }
 function matchLanes(pois, records, refKeys = []) {
   const identifiers = identifierJoins(pois, records, refKeys);
+  const unlocated = records.filter((record) => typeof record.lat !== "number" || typeof record.lon !== "number");
   const index = buildIndex(records);
   const scored = [];
   const usedPoi = new Set(identifiers.declared.map((identifier) => identifier.poiId));
@@ -7809,7 +7812,7 @@ function matchLanes(pois, records, refKeys = []) {
       undecided.push(toCandidate2(poi, rec, s));
     }
   }
-  return { merged, undecided, declared: identifiers.declared };
+  return { merged, undecided, declared: identifiers.declared, unlocated };
 }
 function buildMatchTodo(undecided) {
   return {
@@ -7941,6 +7944,7 @@ function emptyManifest(label) {
     counts: {
       osm: 0,
       registry: 0,
+      registryWithCoordinates: 0,
       byConnector: {},
       places: 0,
       merged: 0,
@@ -8061,6 +8065,11 @@ function legalFormGateRefusal(filters, connector) {
   if (!connector?.sweep || connector.sweepFiltersLegalForm) return void 0;
   return `${connector.id} enumerates this territory but cannot narrow a sweep by legal form, so --legal-form / --exclude-legal-form would be accepted and ignored. Drop those filters or choose a connector that declares legal-form filtering.`;
 }
+function sizeGateRefusal(filters, connector) {
+  if (!filters.sizeBands?.length && filters.minEmployees === void 0) return void 0;
+  if (!connector?.sweep || connector.sweepFiltersSize) return void 0;
+  return `${connector.id} enumerates this territory but cannot narrow a sweep by company size, so --min-employees / --size-band would be accepted and ignored. Drop those filters or choose a connector that declares size filtering.`;
+}
 
 // src/scan.ts
 function placeFromPoi(poi) {
@@ -8128,9 +8137,9 @@ async function runScan(target, opts = {}) {
   };
   const lanes = [];
   const timings = {};
-  const sizeBands = opts.sizeBands?.length ? opts.sizeBands : opts.minEmployees ? bandsAtLeast(opts.minEmployees) : void 0;
   const ctx = { keys: opts.keys, onNote: note };
   const replay = opts.fixture ? loadFixture(opts.fixture) : void 0;
+  const selection = connectorsFor(target.countryCode, { only: opts.registryIds, ctx });
   if (replay) {
     note(`fixture: replaying a recorded sweep from ${opts.fixture}`);
     lanes.push({ lane: "osm", requested: 0, returned: replay.osm.length, truncated: false, reason: "replayed from a fixture", partitions: 1 });
@@ -8154,9 +8163,13 @@ async function runScan(target, opts = {}) {
       `--category: not a term in any vocabulary \u2014 ${category.unknown.join(", ")}. Use an OSM tag (amenity=cafe, shop) or a register code (naf=56.30Z, nace=I).`
     );
   }
-  const registrySweep = opts.noRegistry || replay ? void 0 : connectorsFor(target.countryCode, { only: opts.registryIds }).sweep;
+  const registrySweep = opts.noRegistry || replay ? void 0 : selection.sweep;
+  const filterSweep = opts.noRegistry ? void 0 : replay?.connectorId ? connectorById(replay.connectorId) : selection.sweep;
   const legalFormRefusal = legalFormGateRefusal(opts, registrySweep);
   if (legalFormRefusal) throw Object.assign(new Error(legalFormRefusal), { exitCode: 2 });
+  const sizeRefusal = sizeGateRefusal(opts, filterSweep);
+  if (sizeRefusal) throw Object.assign(new Error(sizeRefusal), { exitCode: 2 });
+  const sizeBands = opts.sizeBands?.length ? opts.sizeBands : opts.minEmployees !== void 0 ? filterSweep?.sizeBandsAtLeast?.(opts.minEmployees) : void 0;
   if (category?.targetsRegistry && registrySweep?.sweep && !registrySweep.sweepFiltersActivity) {
     throw Object.assign(
       new Error(
@@ -8218,7 +8231,6 @@ async function runScan(target, opts = {}) {
   }
   let records = replay?.registry ?? [];
   let sweepConnectorId = replay?.connectorId;
-  const selection = connectorsFor(target.countryCode, { only: opts.registryIds, ctx });
   const bogus = unknownConnectorIds(opts.registryIds);
   if (bogus.length) note(`--registry: no connector is called ${bogus.join(", ")} \u2014 run \`doctor\` for the list`);
   for (const { connector, availability } of selection.unavailable) {
@@ -8267,7 +8279,15 @@ async function runScan(target, opts = {}) {
   const t0 = Date.now();
   const refConnectorId = sweepConnectorId ?? selection.sweep?.id;
   const refKeys = refConnectorId ? connectorById(refConnectorId)?.osmRefKeys ?? [] : [];
-  const { merged, undecided, declared } = matchLanes(pois, records, refKeys);
+  const { merged, undecided, declared, unlocated } = matchLanes(pois, records, refKeys);
+  const registryWithCoordinates = records.length - unlocated.length;
+  const registryLane = lanes.find((lane) => lane.lane === "registry");
+  if (registryLane) registryLane.withCoordinates = registryWithCoordinates;
+  if (registryLane && records.length > 0 && registryWithCoordinates === 0) {
+    const explanation = `None of its ${records.length} records carries coordinates, so the scored fusion could not run: merged is 0 by construction, not because nothing matched.`;
+    const existing = registryLane.reason?.trim();
+    registryLane.reason = existing ? `${existing}${/[.!?]$/.test(existing) ? "" : "."} ${explanation}` : explanation;
+  }
   for (const [recordId, decision] of merged) {
     if (decision.note) note(`match: osm:${decision.osmId} \u2194 ${recordId}: ${decision.note}`);
   }
@@ -8315,6 +8335,13 @@ async function runScan(target, opts = {}) {
     }
     note(`--no-people: removed ${stripped} named individual(s); the run holds organisation data only`);
   }
+  const registryOnlyFilterWasSet = Boolean(
+    opts.sections?.length || opts.activityCodes?.length || opts.sizeBands?.length || opts.minEmployees !== void 0 || opts.legalForms?.length
+  );
+  const narrowedLanes = !category && registryOnlyFilterWasSet && (Boolean(replay) || !opts.noOsm) ? ["registry"] : void 0;
+  if (narrowedLanes) {
+    note(`these filters narrow only the register lane; the OSM lane swept the whole catalogue (${pois.length} rows) \u2014 pass --category to narrow both`);
+  }
   const manifest = emptyManifest(target.label || target.query);
   manifest.target = target;
   manifest.filters = {
@@ -8326,11 +8353,13 @@ async function runScan(target, opts = {}) {
     activityCodes: activityCodes.length ? activityCodes : null,
     sections: sections.length ? sections : null,
     sizeBands: sizeBands ?? null,
+    minEmployees: opts.minEmployees ?? null,
     legalForms: opts.legalForms ?? null,
     excludeLegalForms: opts.excludeLegalForms ?? null,
     includeCeased: Boolean(opts.includeCeased),
     maxResults: opts.maxResults ?? null,
-    registryIds: opts.registryIds ?? null
+    registryIds: opts.registryIds ?? null,
+    ...narrowedLanes ? { narrowedLanes } : {}
   };
   manifest.lanes = lanes;
   manifest.timings = timings;
@@ -8338,6 +8367,7 @@ async function runScan(target, opts = {}) {
     ...manifest.counts,
     osm: pois.length,
     registry: records.length,
+    registryWithCoordinates,
     byConnector: sweepConnectorId && records.length ? { [sweepConnectorId]: records.length } : {},
     places: places.length,
     merged: claimed.size,

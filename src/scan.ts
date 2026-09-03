@@ -18,14 +18,13 @@
 import { poiCategory, poiContacts, poiWebsite } from "./overpass.js";
 import { fetchOsmPois } from "./overpass.js";
 import { buildMatchTodo, type DeclaredIdentifier, matchLanes } from "./match.js";
-import { bandsAtLeast } from "./registry/fr-sirene.js";
 import { connectorById, connectorsFor, noSweepReason, unknownConnectorIds } from "./registry/index.js";
 import { recordKey } from "./registry/types.js";
 import type { ConnectorContext, RegistryRecord } from "./registry/types.js";
 import type { GeoTarget, LaneCoverage, MatchCandidate, OsmPoi, Place, RunManifest } from "./types.js";
 import { emptyManifest, licencesFor, writeJson, writePlaces, writeRunManifest } from "./run.js";
 import { loadFixture } from "./fixture.js";
-import { laneGateRefusal, legalFormGateRefusal, parseCategories } from "./category.js";
+import { laneGateRefusal, legalFormGateRefusal, parseCategories, sizeGateRefusal } from "./category.js";
 import { naceSection } from "./classification/nace.js";
 import { firstText } from "./util.js";
 
@@ -176,17 +175,13 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
   const lanes: LaneCoverage[] = [];
   const timings: Record<string, number> = {};
 
-  // `--min-employees` is expressed in people; a register that files bands needs
-  // it expressed in bands. Only the French connector publishes bands today, so
-  // only it needs the translation — a connector that files an exact headcount
-  // filters on the number directly.
-  const sizeBands = opts.sizeBands?.length ? opts.sizeBands : opts.minEmployees ? bandsAtLeast(opts.minEmployees) : undefined;
   const ctx: ConnectorContext = { keys: opts.keys, onNote: note };
 
   // ---- Replay ---------------------------------------------------------------
   // A recorded sweep short-circuits both lanes. Everything after this point —
   // fusion, coverage accounting, the manifest — runs exactly as it does live.
   const replay = opts.fixture ? loadFixture(opts.fixture) : undefined;
+  const selection = connectorsFor(target.countryCode, { only: opts.registryIds, ctx });
   if (replay) {
     note(`fixture: replaying a recorded sweep from ${opts.fixture}`);
     lanes.push({ lane: "osm", requested: 0, returned: replay.osm.length, truncated: false, reason: "replayed from a fixture", partitions: 1 });
@@ -222,10 +217,18 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
   // Which connector, if any, will enumerate this territory. Needed BEFORE the
   // OSM lane runs, because the gate's whole job is to refuse before either lane
   // has spent anything.
-  const registrySweep = opts.noRegistry || replay ? undefined : connectorsFor(target.countryCode, { only: opts.registryIds }).sweep;
+  const registrySweep = opts.noRegistry || replay ? undefined : selection.sweep;
+  const filterSweep = opts.noRegistry ? undefined : replay?.connectorId ? connectorById(replay.connectorId) : selection.sweep;
 
   const legalFormRefusal = legalFormGateRefusal(opts, registrySweep);
   if (legalFormRefusal) throw Object.assign(new Error(legalFormRefusal), { exitCode: 2 });
+
+  const sizeRefusal = sizeGateRefusal(opts, filterSweep);
+  if (sizeRefusal) throw Object.assign(new Error(sizeRefusal), { exitCode: 2 });
+
+  // A headcount threshold has meaning only through the connector that will
+  // sweep: each register owns its band vocabulary, and some own none at all.
+  const sizeBands = opts.sizeBands?.length ? opts.sizeBands : opts.minEmployees !== undefined ? filterSweep?.sizeBandsAtLeast?.(opts.minEmployees) : undefined;
 
   // A register that enumerates but cannot be NARROWED by activity would accept
   // the register terms and drop them, handing back the whole register beside a
@@ -322,7 +325,6 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
   // entry says so in words a report can print verbatim.
   let records: RegistryRecord[] = replay?.registry ?? [];
   let sweepConnectorId = replay?.connectorId;
-  const selection = connectorsFor(target.countryCode, { only: opts.registryIds, ctx });
   const bogus = unknownConnectorIds(opts.registryIds);
   if (bogus.length) note(`--registry: no connector is called ${bogus.join(", ")} — run \`doctor\` for the list`);
   for (const { connector, availability } of selection.unavailable) {
@@ -377,7 +379,15 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
   // to declare as unmatched; an empty lane must not erase identifiers.
   const refConnectorId = sweepConnectorId ?? selection.sweep?.id;
   const refKeys = refConnectorId ? (connectorById(refConnectorId)?.osmRefKeys ?? []) : [];
-  const { merged, undecided, declared } = matchLanes(pois, records, refKeys);
+  const { merged, undecided, declared, unlocated } = matchLanes(pois, records, refKeys);
+  const registryWithCoordinates = records.length - unlocated.length;
+  const registryLane = lanes.find((lane) => lane.lane === "registry");
+  if (registryLane) registryLane.withCoordinates = registryWithCoordinates;
+  if (registryLane && records.length > 0 && registryWithCoordinates === 0) {
+    const explanation = `None of its ${records.length} records carries coordinates, so the scored fusion could not run: merged is 0 by construction, not because nothing matched.`;
+    const existing = registryLane.reason?.trim();
+    registryLane.reason = existing ? `${existing}${/[.!?]$/.test(existing) ? "" : "."} ${explanation}` : explanation;
+  }
   for (const [recordId, decision] of merged) {
     if (decision.note) note(`match: osm:${decision.osmId} ↔ ${recordId}: ${decision.note}`);
   }
@@ -435,6 +445,14 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
     note(`--no-people: removed ${stripped} named individual(s); the run holds organisation data only`);
   }
 
+  const registryOnlyFilterWasSet = Boolean(
+    opts.sections?.length || opts.activityCodes?.length || opts.sizeBands?.length || opts.minEmployees !== undefined || opts.legalForms?.length,
+  );
+  const narrowedLanes = !category && registryOnlyFilterWasSet && (Boolean(replay) || !opts.noOsm) ? ["registry"] : undefined;
+  if (narrowedLanes) {
+    note(`these filters narrow only the register lane; the OSM lane swept the whole catalogue (${pois.length} rows) — pass --category to narrow both`);
+  }
+
   const manifest = emptyManifest(target.label || target.query);
   manifest.target = target;
   manifest.filters = {
@@ -446,11 +464,13 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
     activityCodes: activityCodes.length ? activityCodes : null,
     sections: sections.length ? sections : null,
     sizeBands: sizeBands ?? null,
+    minEmployees: opts.minEmployees ?? null,
     legalForms: opts.legalForms ?? null,
     excludeLegalForms: opts.excludeLegalForms ?? null,
     includeCeased: Boolean(opts.includeCeased),
     maxResults: opts.maxResults ?? null,
     registryIds: opts.registryIds ?? null,
+    ...(narrowedLanes ? { narrowedLanes } : {}),
   };
   manifest.lanes = lanes;
   manifest.timings = timings;
@@ -458,6 +478,7 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
     ...manifest.counts,
     osm: pois.length,
     registry: records.length,
+    registryWithCoordinates,
     byConnector: sweepConnectorId && records.length ? { [sweepConnectorId]: records.length } : {},
     places: places.length,
     merged: claimed.size,

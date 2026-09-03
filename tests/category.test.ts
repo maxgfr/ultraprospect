@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileOsmFilter, laneGateRefusal, legalFormGateRefusal, parseCategories } from "../src/category.js";
+import { compileOsmFilter, laneGateRefusal, legalFormGateRefusal, parseCategories, sizeGateRefusal } from "../src/category.js";
 import { OSM_TAG_GROUPS, buildQuery } from "../src/overpass.js";
 import { CONNECTORS } from "../src/registry/index.js";
 
@@ -203,5 +203,24 @@ describe("legalFormGateRefusal", () => {
   it("is silent when the sweep connector declares support", () => {
     expect(legalFormGateRefusal({ legalForms: ["5710"] }, capable)).toBeUndefined();
     expect(legalFormGateRefusal({ excludeLegalForms: ["9110"] }, capable)).toBeUndefined();
+  });
+});
+
+describe("sizeGateRefusal", () => {
+  const incapable = { id: "other-register", sweep: async () => ({ records: [], notes: [], coverage: {} as never }) } as any;
+  const capable = { ...incapable, sweepFiltersSize: true } as any;
+
+  it("refuses minimum-employee or size-band filters when the sweep connector cannot honour them", () => {
+    expect(sizeGateRefusal({ minEmployees: 10 }, incapable)).toMatch(/other-register.*size/i);
+    expect(sizeGateRefusal({ sizeBands: ["11"] }, incapable)).toMatch(/other-register.*size/i);
+  });
+
+  it("is silent when no size filter was requested", () => {
+    expect(sizeGateRefusal({}, incapable)).toBeUndefined();
+  });
+
+  it("is silent when the sweep connector declares support", () => {
+    expect(sizeGateRefusal({ minEmployees: 10 }, capable)).toBeUndefined();
+    expect(sizeGateRefusal({ sizeBands: ["11"] }, capable)).toBeUndefined();
   });
 });

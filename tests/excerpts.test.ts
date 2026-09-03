@@ -32,6 +32,7 @@ function manifest(): RunManifest {
     counts: {
       osm: 0,
       registry: 0,
+      registryWithCoordinates: 0,
       byConnector: {},
       places: 0,
       merged: 0,
