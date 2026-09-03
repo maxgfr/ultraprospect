@@ -7212,6 +7212,12 @@ function areaIdFor(target) {
   if (target.osmType !== "relation" || typeof target.osmId !== "number") return void 0;
   return 36e8 + target.osmId;
 }
+function withinRadius(pois, target) {
+  const radiusM = target.radiusM;
+  if (!radiusM) return { kept: [...pois], dropped: 0 };
+  const kept = pois.filter((poi) => haversineM(target.lat, target.lon, poi.lat, poi.lon) <= radiusM);
+  return { kept, dropped: pois.length - kept.length };
+}
 function scopeClause(area, bbox) {
   if (area !== void 0) return { header: `area(${area})->.searchArea;
 `, suffix: "(area.searchArea)" };
@@ -7339,12 +7345,20 @@ async function fetchOsmPois(target, opts = {}) {
     }
   }
   await walk(rootBbox, area, 0);
+  const { kept, dropped } = withinRadius([...byId.values()], target);
+  if (dropped > 0) {
+    notes.push(
+      `overpass: ${dropped} feature${dropped === 1 ? "" : "s"} inside the bounding box but outside the ${target.radiusM} m circle were dropped so both lanes cover the same disc`
+    );
+    opts.onNote?.(`overpass: dropped ${dropped} feature${dropped === 1 ? "" : "s"} outside the ${target.radiusM} m radius`);
+  }
   return {
-    pois: [...byId.values()],
+    pois: kept,
     mirrorsUsed: [...mirrorsUsed],
     partitions: Math.max(1, partitions),
     notes,
-    incomplete
+    incomplete,
+    outsideRadius: dropped
   };
 }
 function poiCategory(poi) {
@@ -12873,7 +12887,9 @@ COMMANDS
 TARGETING (scan, where)
   --where <query>        Place name: a town, a street, an address.
   --lat <deg> --long <deg>   Point search. Requires --radius.
-  --radius <dist>        Search radius: 800, 800m, 2km. Point searches only.
+  --radius <dist>        Search radius: 800, 800m, 2km. Point searches only. A disc:
+                         Overpass is asked for the bounding box, then the OSM lane is
+                         trimmed to the circle so both lanes cover the same ground.
   --bbox <s,w,n,e>       Explicit bounding box, skipping the geocoder.
   --country <cc>         ISO-3166-1 alpha-2 hint for the geocoder, e.g. fr.
   --lang <code>          Preferred language for geocoder labels.

@@ -25,7 +25,7 @@ import { awaitHostSlot, httpGet } from "./engine.js";
 import { politeUa } from "./net.js";
 import { normalizePhoneValue } from "./signals.js";
 import type { GeoTarget, OsmPoi, SourcedValue } from "./types.js";
-import { bboxAround, bboxQuadrants } from "./util.js";
+import { bboxAround, bboxQuadrants, haversineM } from "./util.js";
 
 /**
  * Public Overpass instances, in the order they are tried.
@@ -112,12 +112,41 @@ export interface OverpassResult {
   notes: string[];
   /** True when a leaf query still failed after the split budget ran out. */
   incomplete: boolean;
+  /**
+   * Features returned inside the bounding square but outside the `--radius`
+   * disc, and therefore dropped. 0 for an area search, which has no radius.
+   */
+  outsideRadius: number;
 }
 
 /** An Overpass `area` id is the OSM relation id offset by 3600000000. */
 export function areaIdFor(target: Pick<GeoTarget, "osmType" | "osmId">): number | undefined {
   if (target.osmType !== "relation" || typeof target.osmId !== "number") return undefined;
   return 3_600_000_000 + target.osmId;
+}
+
+/**
+ * Trim a point search back to the disc the user actually asked for.
+ *
+ * Overpass has no circle. `--radius 800m` is served by `bboxAround`, a bounding
+ * SQUARE whose corners sit at 800·√2 ≈ 1131 m — 27% more area than the disc,
+ * all of it in the corners. The register lane next door does have a circle:
+ * SIRENE's `/near_point` takes a radius. So without this the two lanes cover
+ * different territories, a shop 1.1 km away appears in the OSM lane and is
+ * absent from the register lane, and the manifest calls both of them "radius".
+ *
+ * The boundary is inclusive: a feature measured at exactly the radius is inside
+ * it. Both numbers are approximations anyway — OSM coordinates are surveyed by
+ * hand and the radius is one the user rounded — so dropping something for a
+ * floating-point metre would be false precision, not rigour.
+ *
+ * A target with no `radiusM` is an area or a bbox search and keeps everything.
+ */
+export function withinRadius(pois: readonly OsmPoi[], target: Pick<GeoTarget, "lat" | "lon" | "radiusM">): { kept: OsmPoi[]; dropped: number } {
+  const radiusM = target.radiusM;
+  if (!radiusM) return { kept: [...pois], dropped: 0 };
+  const kept = pois.filter((poi) => haversineM(target.lat, target.lon, poi.lat, poi.lon) <= radiusM);
+  return { kept, dropped: pois.length - kept.length };
 }
 
 /** The scope clause every tag filter is bound to: a real boundary, or a box. */
@@ -301,12 +330,24 @@ export async function fetchOsmPois(target: GeoTarget, opts: OverpassOptions = {}
 
   await walk(rootBbox, area, 0);
 
+  // The query was a square; the user asked for a disc. Trim, and say by how
+  // much — a lane that silently returns fewer features than it fetched is the
+  // kind of quiet arithmetic this tool refuses everywhere else.
+  const { kept, dropped } = withinRadius([...byId.values()], target);
+  if (dropped > 0) {
+    notes.push(
+      `overpass: ${dropped} feature${dropped === 1 ? "" : "s"} inside the bounding box but outside the ${target.radiusM} m circle were dropped so both lanes cover the same disc`,
+    );
+    opts.onNote?.(`overpass: dropped ${dropped} feature${dropped === 1 ? "" : "s"} outside the ${target.radiusM} m radius`);
+  }
+
   return {
-    pois: [...byId.values()],
+    pois: kept,
     mirrorsUsed: [...mirrorsUsed],
     partitions: Math.max(1, partitions),
     notes,
     incomplete,
+    outsideRadius: dropped,
   };
 }
 

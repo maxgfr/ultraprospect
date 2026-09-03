@@ -11,10 +11,12 @@ import {
   poiCategory,
   poiContacts,
   poiWebsite,
+  withinRadius,
 } from "../src/overpass.js";
 import { NACE_SECTIONS, naceSection } from "../src/classification/nace.js";
 import { NAF_CODES, divisionsOfSection } from "../src/classification/naf-codes.js";
 import type { OsmPoi } from "../src/types.js";
+import { bboxAround, haversineM } from "../src/util.js";
 
 describe("areaIdFor", () => {
   it("offsets a relation id into Overpass's area space", () => {
@@ -209,6 +211,55 @@ describe("poiContacts", () => {
 
   it("does not turn a WhatsApp URL into a malformed phone number", () => {
     expect(poiContacts({ ...base, tags: { "contact:whatsapp": "https://wa.me/33143283007" } }).phones).toEqual([]);
+  });
+});
+
+describe("withinRadius — the square the query used is not the disc the user asked for", () => {
+  // Overpass has no circle: `--radius 800m` is served by the bounding SQUARE
+  // around the point, whose corners sit at 800·√2 ≈ 1131 m out. SIRENE's
+  // `/near_point` is a real disc. Left alone the two lanes cover different
+  // territories while the manifest calls both of them "radius".
+  const target = { lat: 48.8479, lon: 2.4372, radiusM: 800 };
+  const EARTH_R = 6371008.8;
+
+  /** A point exactly `m` metres due north — the haversine of a pure latitude step. */
+  function north(m: number): { lat: number; lon: number } {
+    return { lat: target.lat + (m / EARTH_R) * (180 / Math.PI), lon: target.lon };
+  }
+
+  function at(id: string, point: { lat: number; lon: number }): OsmPoi {
+    return { id, osmType: "node", osmId: Number(id.slice(1)), lat: point.lat, lon: point.lon, tags: {} };
+  }
+
+  const box = bboxAround(target.lat, target.lon, target.radiusM);
+  const inside = at("n1", north(target.radiusM * 0.7));
+  const edge = at("n2", north(target.radiusM));
+  const corner = at("n3", { lat: box[1], lon: box[3] });
+
+  it("keeps a POI well inside the disc", () => {
+    expect(withinRadius([inside], target).kept.map((p) => p.id)).toEqual(["n1"]);
+  });
+
+  it("drops the POI at the square's corner, which is r·√2 from the centre", () => {
+    expect(haversineM(target.lat, target.lon, corner.lat, corner.lon)).toBeGreaterThan(target.radiusM * 1.4);
+    expect(withinRadius([corner], target).kept).toEqual([]);
+  });
+
+  it("keeps a POI exactly on the edge — the boundary is inclusive", () => {
+    expect(haversineM(target.lat, target.lon, edge.lat, edge.lon)).toBeCloseTo(target.radiusM, 6);
+    expect(withinRadius([edge], target).kept.map((p) => p.id)).toEqual(["n2"]);
+  });
+
+  it("counts what it dropped", () => {
+    const result = withinRadius([inside, edge, corner], target);
+    expect(result.kept.map((p) => p.id)).toEqual(["n1", "n2"]);
+    expect(result.dropped).toBe(1);
+  });
+
+  it("drops nothing when the target is an area rather than a point", () => {
+    const result = withinRadius([inside, edge, corner], { lat: target.lat, lon: target.lon });
+    expect(result.kept).toHaveLength(3);
+    expect(result.dropped).toBe(0);
   });
 });
 
