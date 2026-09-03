@@ -195,6 +195,8 @@ export interface MatchOutcome {
   undecided: MatchCandidate[];
   /** Every valid OSM identifier read, including ones absent or ambiguous in this run. */
   declared: DeclaredIdentifier[];
+  /** Register records that scored fusion cannot consider because they carry no coordinates. */
+  unlocated: RegistryRecord[];
 }
 
 type OsmRefKey = NonNullable<RegistryConnector["osmRefKeys"]>[number];
@@ -321,6 +323,7 @@ function toCandidate(poi: OsmPoi, rec: RegistryRecord, scored: PairScore): Match
  */
 export function matchLanes(pois: readonly OsmPoi[], records: readonly RegistryRecord[], refKeys: readonly OsmRefKey[] = []): MatchOutcome {
   const identifiers = identifierJoins(pois, records, refKeys);
+  const unlocated = records.filter((record) => typeof record.lat !== "number" || typeof record.lon !== "number");
   const index = buildIndex(records);
   const scored: { poi: OsmPoi; rec: RegistryRecord; s: PairScore }[] = [];
   // A valid declared identifier is stronger than every scored signal. When it
@@ -361,7 +364,7 @@ export function matchLanes(pois: readonly OsmPoi[], records: readonly RegistryRe
     }
   }
 
-  return { merged, undecided, declared: identifiers.declared };
+  return { merged, undecided, declared: identifiers.declared, unlocated };
 }
 
 export function buildMatchTodo(undecided: readonly MatchCandidate[]): MatchTodo {

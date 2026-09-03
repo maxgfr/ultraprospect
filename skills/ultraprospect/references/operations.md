@@ -49,6 +49,16 @@ the filed legal-form codes passed to `--legal-form` and
 `--exclude-legal-form`. `null` means no such filter was requested. Exclusions
 are client-side because the French API offers no negation.
 
+`manifest.filters.minEmployees` preserves the numeric threshold passed to
+`--min-employees`; `manifest.filters.sizeBands` records the sweep connector's
+own band codes used to carry it out. A connector that cannot filter its sweep by
+size refuses `--min-employees` and `--size-band` with exit 2 instead of printing
+filters it ignored. When a register-only filter (`sections`, `activityCodes`,
+`sizeBands`, `minEmployees`, or `legalForms`) was used without `--category` and
+OSM also ran, `manifest.filters.narrowedLanes` is `["registry"]` and a manifest
+note reports that OSM swept the whole catalogue. Pass `--category` when both
+lanes must be narrowed.
+
 When the French register spreads `--max-results` across NACE sections,
 `sectionTotals` records the total reported by each section's probe and
 `sectionReturned` records how many rows its quota returned. Both maps use NACE
@@ -59,11 +69,14 @@ number of populated sections, the reason states how many populated sections
 necessarily received a zero quota.
 
 `lanes[]` is the honest part. Each entry has `returned`, `truncated`, a
-`reason`, and how many partitions the lane needed:
+`reason`, and how many partitions the lane needed. Register lanes also carry
+`withCoordinates`: the number of returned records the scored fusion could
+actually consider. The same measured total is available as
+`manifest.counts.registryWithCoordinates`:
 
 ```json
 { "lane": "registry", "mode": "sweep", "connectorId": "fr-sirene",
-  "returned": 672, "truncated": false, "partitions": 1 }
+  "returned": 672, "withCoordinates": 672, "truncated": false, "partitions": 1 }
 { "lane": "registry", "mode": "sweep", "connectorId": "fr-sirene",
   "returned": 3000, "truncated": true,
   "reason": "the --max-results budget of 3000 was spread across 21 NACE sections after 21 extra probes; the lane is a per-section SAMPLE, not a prefix and not the whole",
@@ -76,8 +89,8 @@ necessarily received a zero quota.
   "returned": 12, "truncated": false,
   "reason": "confirmed one company at a time: 4 by a published registration number, 8 by a name lookup, 31 not found. This is NOT a sweep — companies absent from OSM are absent from this run." }
 { "lane": "registry", "mode": "sweep", "connectorId": "gb-companies-house",
-  "returned": 214, "truncated": false,
-  "reason": "enumerated from the Companies House monthly snapshot by POST TOWN \"Hebden Bridge\" — every company the register files there. A post town is not a bounding box, so this lane's shape does not coincide with the OSM lane's, and a company registered at an accountant's address in another town is absent from it." }
+  "returned": 214, "withCoordinates": 0, "truncated": false,
+  "reason": "enumerated from the Companies House monthly snapshot by POST TOWN \"Hebden Bridge\" — every company the register files there. A post town is not a bounding box, so this lane's shape does not coincide with the OSM lane's, and a company registered at an accountant's address in another town is absent from it. None of its 214 records carries coordinates, so the scored fusion could not run: merged is 0 by construction, not because nothing matched." }
 ```
 
 **`mode` is the field to read first**, and the report prints it as a column.

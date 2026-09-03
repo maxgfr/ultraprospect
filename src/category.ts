@@ -247,3 +247,13 @@ export function legalFormGateRefusal(
   if (!connector?.sweep || connector.sweepFiltersLegalForm) return undefined;
   return `${connector.id} enumerates this territory but cannot narrow a sweep by legal form, so --legal-form / --exclude-legal-form would be accepted and ignored. Drop those filters or choose a connector that declares legal-form filtering.`;
 }
+
+/** Refuse size filters that a territory's sweep connector would ignore. */
+export function sizeGateRefusal(
+  filters: Pick<RegistryFilters, "sizeBands"> & { minEmployees?: number },
+  connector: Pick<RegistryConnector, "id" | "sweep" | "sweepFiltersSize"> | undefined,
+): string | undefined {
+  if (!filters.sizeBands?.length && filters.minEmployees === undefined) return undefined;
+  if (!connector?.sweep || connector.sweepFiltersSize) return undefined;
+  return `${connector.id} enumerates this territory but cannot narrow a sweep by company size, so --min-employees / --size-band would be accepted and ignored. Drop those filters or choose a connector that declares size filtering.`;
+}

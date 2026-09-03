@@ -327,6 +327,8 @@ export interface LaneCoverage {
   connectorId?: string;
   requested: number;
   returned: number;
+  /** Register records available to scored fusion because they carry coordinates. */
+  withCoordinates?: number;
   /** True when an upstream limit stopped us short of everything that exists. */
   truncated: boolean;
   /** Human-readable reason, printed at the top of the report when truncated. */
@@ -352,6 +354,8 @@ export interface RunManifest {
     osm: number;
     /** Register records, from every connector that ran. */
     registry: number;
+    /** Register records carrying coordinates and therefore available to scored fusion. */
+    registryWithCoordinates: number;
     /** The same total, split by connector id, so a multi-connector run is legible. */
     byConnector: Record<string, number>;
     places: number;

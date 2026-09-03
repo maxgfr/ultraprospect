@@ -85,6 +85,16 @@ describe("scorePair", () => {
 });
 
 describe("matchLanes", () => {
+  it("returns register records without coordinates as unlocated instead of silently dropping them", () => {
+    const unlocatedRecord = rec({ establishmentId: "NO-COORDINATES", lat: undefined, lon: undefined });
+
+    const { merged, undecided, unlocated } = matchLanes([poi()], [unlocatedRecord]);
+
+    expect(merged.size).toBe(0);
+    expect(undecided).toEqual([]);
+    expect(unlocated).toEqual([unlocatedRecord]);
+  });
+
   it("pairs one-to-one, best first", () => {
     const pois = [poi({ id: "n1", name: "Naturalia" }), poi({ id: "n2", name: "Naturalia", lat: 48.8476 })];
     const records = [rec({ establishmentId: "A" })];

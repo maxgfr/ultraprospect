@@ -21,6 +21,20 @@ afterEach(() => {
 });
 
 describe("fixture identifier fusion", () => {
+  it("explains when coordinate-less register records make scored fusion impossible", async () => {
+    const source = loadFixture(fixture);
+    const dir = outDir();
+    writeFileSync(join(dir, "target.json"), JSON.stringify(source.target));
+    writeFileSync(join(dir, "osm.json"), JSON.stringify(source.osm));
+    writeFileSync(join(dir, "registry.json"), JSON.stringify(source.registry.map(({ lat: _lat, lon: _lon, ...record }) => record)));
+
+    const outcome = await runScan(source.target, { fixture: dir });
+    const registryLane = outcome.manifest.lanes.find((lane) => lane.lane === "registry");
+
+    expect(registryLane?.reason).toContain("could not run");
+    expect(outcome.manifest.counts.registryWithCoordinates).toBe(0);
+  });
+
   it("records identifier yield and provenance without fabricating register records", async () => {
     const target = loadFixture(fixture).target;
     const outcome = await runScan(target, { fixture });
@@ -56,6 +70,45 @@ describe("fixture identifier fusion", () => {
 
     expect(outcome.manifest.filters.legalForms).toEqual(["5710"]);
     expect(outcome.manifest.filters.excludeLegalForms).toEqual(["9110", "9220"]);
+  });
+
+  it("says when a legacy register filter leaves the OSM lane sweeping the whole catalogue", async () => {
+    const source = loadFixture(fixture);
+    const outcome = await runScan(source.target, { fixture, sections: ["I"] });
+
+    expect(outcome.manifest.notes).toContain(
+      `these filters narrow only the register lane; the OSM lane swept the whole catalogue (${source.osm.length} rows) — pass --category to narrow both`,
+    );
+    expect(outcome.manifest.filters.narrowedLanes).toEqual(["registry"]);
+  });
+
+  it("does not report a half-narrowed run when --category was supplied", async () => {
+    const source = loadFixture(fixture);
+    const outcome = await runScan(source.target, { fixture, sections: ["I"], categories: ["amenity=cafe", "naf=56.30Z"] });
+
+    expect(outcome.manifest.notes.some((note) => note.includes("filters narrow only the register lane"))).toBe(false);
+    expect(outcome.manifest.filters.narrowedLanes).toBeUndefined();
+  });
+
+  it("records minEmployees and asks the fixture connector to translate it into size bands", async () => {
+    const source = loadFixture(fixture);
+    const outcome = await runScan(source.target, { fixture, minEmployees: 10 });
+
+    expect(outcome.manifest.filters.minEmployees).toBe(10);
+    expect(outcome.manifest.filters.sizeBands).toEqual(["11", "12", "21", "22", "31", "32", "41", "42", "51", "52", "53"]);
+  });
+
+  it("refuses a size filter when the fixture connector cannot honour it", async () => {
+    const source = loadFixture(fixture);
+    const dir = outDir();
+    writeFileSync(join(dir, "target.json"), JSON.stringify({ ...source.target, countryCode: "gb" }));
+    writeFileSync(join(dir, "osm.json"), JSON.stringify(source.osm));
+    writeFileSync(join(dir, "registry.json"), JSON.stringify(source.registry.map((record) => ({ ...record, connectorId: "gb-companies-house" }))));
+
+    await expect(runScan({ ...source.target, countryCode: "gb" }, { fixture: dir, minEmployees: 10 })).rejects.toMatchObject({
+      exitCode: 2,
+      message: expect.stringMatching(/gb-companies-house.*size/i),
+    });
   });
 
   it("persists a note when identifier coordinates exceed the scoring gate", async () => {

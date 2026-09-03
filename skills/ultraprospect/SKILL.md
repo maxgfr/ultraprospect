@@ -139,6 +139,13 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    where the register IS swept: a French commune holds tens of thousands of
    registered units, most of them dormant micro-entrepreneurs.
    `--min-employees`, `--section` and `--activity` are how a run stays useful.
+   Those filters reach the register lane only. When OSM also ran without
+   `--category`, the manifest says so, records `filters.narrowedLanes:
+   ["registry"]`, and names how many rows the whole-catalogue OSM sweep returned.
+   `--min-employees` is translated through the sweep connector's own size-band
+   vocabulary; France declares that capability. A UK or Estonian sweep refuses
+   `--min-employees` and `--size-band` instead of accepting a filter it cannot
+   apply.
    `--legal-form` keeps only the filed INSEE legal-form codes named;
    `--exclude-legal-form` removes codes such as 9110 (condominium syndicates) or
    9220 (associations). Includes are sent to `/search`; exclusions have no API
@@ -149,12 +156,13 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 2a. **`--category` is the only filter that aims BOTH lanes. Reach for it first.**
 
    The older filters each reach one lane and only one: `--osm-groups` narrows
-   OpenStreetMap, `--section` / `--activity` / `--min-employees` narrow the
-   register. Neither knows the other exists, so "I want cafés" said with either
-   of them alone half-narrows the run. Measured on a Saint-Mandé sweep:
+   OpenStreetMap, while `--section` / `--activity` / `--min-employees` /
+   `--size-band` / `--legal-form` narrow the register. Neither knows the other
+   exists, so "I want cafés" said with either of them alone half-narrows the run.
+   The manifest now calls that asymmetry out; it does not make the lanes cover
+   the same catalogue. Measured on a Saint-Mandé sweep:
    `--section I` gave 154 register rows and left the OSM lane returning all 295
-   places in town, of which 5 were cafés — one intent, two territories, and
-   nothing in the output says so.
+   places in town, of which 5 were cafés — one intent, two territories.
 
    `--category` takes ONE vocabulary aimed at both, and it is the vocabulary
    `places.json` already prints back at you:
@@ -459,6 +467,8 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | Register lane `mode: "confirm"`, not `"sweep"` | Expected everywhere but France and the United Kingdom. OSM covered the ground; run `confirm` to attach register identities company by company. |
 | The UK register lane returned nothing | No snapshot in the cache. Run `ingest --country gb` once, then re-scan. The lane's reason says so verbatim. |
 | A UK sweep missed a company you can see on the street | Its registered office is in another post town — very often its accountant's. The sweep enumerates by post town, and the lane's reason says a post town is not a bounding box. |
+| `merged` is 0 on a GB run | Companies House snapshot records carry no coordinates. Read the register lane's `withCoordinates` and `reason`: scored fusion could not run, so zero does not mean the names failed to match. |
+| My `--section` filter did not shrink the OSM lane | Expected: `--section` narrows only the register lane. The manifest note and `filters.narrowedLanes` record the asymmetry; pass `--category` to narrow both lanes. |
 | A German record carries `asOf: 2018-…` | Working as designed. The German export stopped in 2019 and each record says when it was retrieved. Write it as a fact about that date, never as today's. |
 | `de-offeneregister` refused a register number | The bare number exists at more than one Amtsgericht. Supply the court from the Impressum, or leave it unattached — a number is not an identity without its court. |
 | `confirm` found identifiers but named no holders | Expected in Germany and Spain: VIES confirms a VAT number is live and does not disclose who holds it. The identifiers are on the record, sourced and re-readable. |

@@ -131,6 +131,11 @@ describe("eu-vies", () => {
 });
 
 describe("fr-sirene", () => {
+  it("declares size filtering and translates a minimum headcount into French bands", () => {
+    expect(frSirene.sweepFiltersSize).toBe(true);
+    expect(frSirene.sizeBandsAtLeast?.(10)).toEqual(["11", "12", "21", "22", "31", "32", "41", "42", "51", "52", "53"]);
+  });
+
   it("declares legal-form sweep filtering and the filed public-body rule", () => {
     expect(frSirene.sweepFiltersLegalForm).toBe(true);
     expect(frSirene.legalFormIsPublic?.("7210")).toBe(true);
@@ -299,6 +304,10 @@ describe("pl-krs", () => {
 });
 
 describe("gb-companies-house", () => {
+  it("does not claim to filter a sweep by company size", () => {
+    expect(gbCompaniesHouse.sweepFiltersSize).toBeUndefined();
+  });
+
   it("reports itself unavailable without a key instead of failing the run", () => {
     const availability = gbCompaniesHouse.availability({ keys: {} });
     expect(availability.available).toBe(false);

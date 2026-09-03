@@ -47,6 +47,7 @@ function manifest(over: Partial<RunManifest> = {}): RunManifest {
     counts: {
       osm: 10,
       registry: 5,
+      registryWithCoordinates: 5,
       byConnector: { "fr-sirene": 5 },
       places: 12,
       merged: 3,
