@@ -828,8 +828,13 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
       if (kind === "social") {
         // Real signal, wrong field. A profile is not a website, and enriching
         // from one would produce a dossier about a social network's chrome.
-        if (!place.contacts.socials.some((s) => s.value === url)) {
-          place.contacts.socials.push({ value: url, from: "web", lane: "web", note: "found while resolving the website" });
+        const social = { value: url, from: "web", lane: "web" as const, note: "found while resolving the website" };
+        const existing = place.contacts.socials.findIndex((item) => item.value === url);
+        if (existing === -1) {
+          place.contacts.socials.push(social);
+          outcome.socials++;
+        } else if (place.contacts.socials[existing]!.lane !== "web") {
+          place.contacts.socials[existing] = social;
           outcome.socials++;
         }
         continue;
@@ -902,7 +907,8 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
   // place in the run would collapse the two, and "has no website" is exactly
   // the kind of claim someone will act on.
   for (const place of targets) {
-    place.webPresence = place.website?.confidence === "corroborated" ? "own-site" : place.contacts.socials.length ? "social-only" : "none";
+    place.webPresence =
+      place.website?.confidence === "corroborated" ? "own-site" : place.contacts.socials.some((social) => social.lane === "web") ? "social-only" : "none";
     if (place.webPresence === "social-only") outcome.socialOnly++;
   }
 

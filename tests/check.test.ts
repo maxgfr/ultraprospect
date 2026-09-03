@@ -82,6 +82,24 @@ beforeEach(() => {
   runDir = mkdtempSync(join(tmpdir(), "ultraprospect-check-"));
   mkdirSync(join(runDir, "pages", "osm_n1"), { recursive: true });
   writeFileSync(join(runDir, "pages", "osm_n1", "P1.md"), PAGE_BODY);
+  writeFileSync(
+    join(runDir, "osm.json"),
+    JSON.stringify([
+      {
+        id: "n1",
+        osmType: "node",
+        osmId: 1,
+        lat: 48.84,
+        lon: 2.43,
+        tags: {
+          email: "OSM@Example.FR",
+          phone: "+33 1 43 28 30 07",
+          "contact:facebook": "https://facebook.com/osm-example",
+          "ref:FR:SIRET": "30247464801175",
+        },
+      },
+    ]),
+  );
 });
 
 afterEach(() => rmSync(runDir, { recursive: true, force: true }));
@@ -124,6 +142,53 @@ describe("contacts", () => {
       contacts: { emails: [], phones: [], socials: [], people: [{ value: "CYRIL KOLODZIEJSKI", from: "registry", lane: "registry", registry: true }] },
     });
     expect(runCheck({ runDir, places: [p], manifest: manifest() }).ok).toBe(true);
+  });
+
+  it("accepts an OSM contact that is still present in the feature's contact tags", () => {
+    const p = place({
+      contacts: {
+        emails: [{ value: "osm@example.fr", from: "osm:n1", lane: "osm" }],
+        phones: [{ value: "+33143283007", from: "osm:n1", lane: "osm" }],
+        socials: [{ value: "https://facebook.com/osm-example", from: "osm:n1", lane: "osm" }],
+        people: [],
+      },
+    });
+    expect(runCheck({ runDir, places: [p], manifest: manifest() }).ok).toBe(true);
+  });
+
+  it("REJECTS an OSM contact value that is not in the feature's contact tags", () => {
+    const p = place({
+      contacts: { emails: [{ value: "invented@example.fr", from: "osm:n1", lane: "osm" }], phones: [], socials: [], people: [] },
+    });
+    expect(runCheck({ runDir, places: [p], manifest: manifest() }).errors[0]!.rule).toBe("contact-not-on-page");
+  });
+
+  it("REJECTS an OSM contact attributed to a feature this run does not hold", () => {
+    const p = place({
+      contacts: { emails: [{ value: "osm@example.fr", from: "osm:n999", lane: "osm" }], phones: [], socials: [], people: [] },
+    });
+    expect(runCheck({ runDir, places: [p], manifest: manifest() }).errors[0]!.rule).toBe("contact-unsourced");
+  });
+
+  it('REJECTS the old bare from: "osm" provenance', () => {
+    const p = place({
+      contacts: { emails: [{ value: "osm@example.fr", from: "osm", lane: "osm" }], phones: [], socials: [], people: [] },
+    });
+    expect(runCheck({ runDir, places: [p], manifest: manifest() }).errors[0]!.rule).toBe("contact-unsourced");
+  });
+
+  it("does not find a phone number in a non-contact OSM tag", () => {
+    const p = place({
+      contacts: { emails: [], phones: [{ value: "30247464801175", from: "osm:n1", lane: "osm" }], socials: [], people: [] },
+    });
+    expect(runCheck({ runDir, places: [p], manifest: manifest() }).errors[0]!.rule).toBe("contact-not-on-page");
+  });
+
+  it("REJECTS an OSM social that is not in the feature's contact tags", () => {
+    const p = place({
+      contacts: { emails: [], phones: [], socials: [{ value: "https://instagram.com/invented", from: "osm:n1", lane: "osm" }], people: [] },
+    });
+    expect(runCheck({ runDir, places: [p], manifest: manifest() }).errors[0]!.rule).toBe("contact-not-on-page");
   });
 });
 

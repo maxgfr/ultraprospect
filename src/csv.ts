@@ -65,7 +65,9 @@ const HEADER = [
   "emails",
   "contact_source",
   "phones",
+  "phone_source",
   "socials",
+  "social_source",
   "officers",
   "is_hiring",
   "open_roles",
@@ -156,7 +158,9 @@ export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
         // beside it. A CRM row without this cannot be audited later.
         place.contacts.emails.map((e) => e.from).join(" | "),
         place.contacts.phones.map((p) => p.value).join(" | "),
+        place.contacts.phones.map((p) => p.from).join(" | "),
         place.contacts.socials.map((x) => x.value).join(" | "),
+        place.contacts.socials.map((x) => x.from).join(" | "),
         people,
         // Three states, not two: an empty cell means a board was found and
         // could not be read, which is not the same as "no".

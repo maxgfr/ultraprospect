@@ -23,7 +23,8 @@
 // rendered deliverable.
 import { awaitHostSlot, httpGet } from "./engine.js";
 import { politeUa } from "./net.js";
-import type { GeoTarget, OsmPoi } from "./types.js";
+import { normalizePhoneValue } from "./signals.js";
+import type { GeoTarget, OsmPoi, SourcedValue } from "./types.js";
 import { bboxAround, bboxQuadrants } from "./util.js";
 
 /**
@@ -75,6 +76,13 @@ export const OSM_TAG_GROUPS: Record<string, string> = {
   leisure:
     '["leisure"~"^(fitness_centre|sports_centre|sports_hall|dance|escape_game|bowling_alley|amusement_arcade|adult_gaming_centre|horse_riding|golf_course|marina|hackerspace|trampoline_park)$"]',
 };
+
+/** OSM tags whose values are declared contact details for the mapped feature. */
+export const OSM_CONTACT_KEYS = {
+  emails: ["email", "contact:email"],
+  phones: ["phone", "contact:phone", "contact:mobile", "mobile", "contact:whatsapp"],
+  socials: ["contact:facebook", "contact:instagram", "contact:linkedin", "contact:twitter", "contact:youtube", "contact:tiktok"],
+} as const;
 
 export interface OverpassOptions {
   /** Restrict to these catalogue groups. Empty means all of them. */
@@ -315,4 +323,31 @@ export function poiWebsite(poi: OsmPoi): string | undefined {
   const first = raw.split(/[;\s]+/)[0];
   if (!first) return undefined;
   return /^https?:\/\//i.test(first) ? first : `https://${first}`;
+}
+
+/** Contact details a mapper declared on this exact OSM feature. */
+export function poiContacts(poi: OsmPoi): { emails: SourcedValue[]; phones: SourcedValue[]; socials: SourcedValue[] } {
+  const contacts: { emails: SourcedValue[]; phones: SourcedValue[]; socials: SourcedValue[] } = { emails: [], phones: [], socials: [] };
+  const from = `osm:${poi.osmType[0]}${poi.osmId}`;
+
+  for (const key of OSM_CONTACT_KEYS.emails) {
+    for (const raw of (poi.tags[key] ?? "").split(";")) {
+      const value = raw.trim().toLowerCase();
+      if (value) contacts.emails.push({ value, from, lane: "osm", note: `declared in OSM tag ${key}` });
+    }
+  }
+  for (const key of OSM_CONTACT_KEYS.phones) {
+    for (const raw of (poi.tags[key] ?? "").split(";")) {
+      const value = normalizePhoneValue(raw.trim());
+      if (value) contacts.phones.push({ value, from, lane: "osm", note: `declared in OSM tag ${key}` });
+    }
+  }
+  for (const key of OSM_CONTACT_KEYS.socials) {
+    for (const raw of (poi.tags[key] ?? "").split(";")) {
+      const value = raw.trim();
+      if (value) contacts.socials.push({ value, from, lane: "osm", note: `declared in OSM tag ${key}` });
+    }
+  }
+
+  return contacts;
 }

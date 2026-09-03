@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CSV_COLUMNS, toCsv } from "../src/csv.js";
+import { collectEvidence } from "../src/excerpts.js";
 import { buildHtml, buildPrivacyNote, buildReport, HTML_ROW_CAP } from "../src/render.js";
 import { buildDelta, diffRuns, identityOf } from "../src/watch.js";
 import type { Place, RunManifest } from "../src/types.js";
@@ -77,9 +78,22 @@ describe("CSV", () => {
   });
 
   it("carries the provenance of every contact beside it", () => {
-    const csv = toCsv([place({ contacts: { emails: [{ value: "a@b.fr", from: "P7", lane: "web" }], phones: [], socials: [], people: [] } })]);
-    expect(csv).toContain("a@b.fr");
-    expect(csv).toContain("P7");
+    const csv = toCsv([
+      place({
+        contacts: {
+          emails: [{ value: "a@b.fr", from: "P7", lane: "web" }],
+          phones: [{ value: "+33143283007", from: "osm:n1", lane: "osm" }],
+          socials: [{ value: "https://instagram.com/acme", from: "P9", lane: "web" }],
+          people: [],
+        },
+      }),
+    ]);
+    const row = csv.split("\n")[1]!.split(",");
+    expect(CSV_COLUMNS).toContain("phone_source");
+    expect(CSV_COLUMNS).toContain("social_source");
+    expect(row[CSV_COLUMNS.indexOf("contact_source")]).toBe("P7");
+    expect(row[CSV_COLUMNS.indexOf("phone_source")]).toBe("osm:n1");
+    expect(row[CSV_COLUMNS.indexOf("social_source")]).toBe("P9");
   });
 
   it("distinguishes not-hiring from we-could-not-look", () => {
@@ -128,6 +142,29 @@ describe("CSV", () => {
   it("does not print the street type twice", () => {
     const p = place({ address: { numero: "3", typeVoie: "AVENUE", libelleVoie: "Avenue de Nogent" } });
     expect(toCsv([p])).toContain("3 Avenue de Nogent");
+  });
+});
+
+describe("HTML contact citations", () => {
+  it.each([
+    ["osm:n248494308", "node", "248494308"],
+    ["osm:w42", "way", "42"],
+    ["osm:r7", "relation", "7"],
+  ])("links %s to the mapped OpenStreetMap feature", (from, featureType, id) => {
+    const p = place({
+      contacts: { emails: [{ value: "a@b.fr", from, lane: "osm" }], phones: [], socials: [], people: [] },
+    });
+    const html = buildHtml([p], manifest(), collectEvidence(".", [p]));
+    expect(html).toContain(`href="https://www.openstreetmap.org/${featureType}/${id}"`);
+  });
+
+  it("renders a verbatim social handle as text, not as a relative link", () => {
+    const p = place({
+      contacts: { emails: [], phones: [], socials: [{ value: "@acme", from: "osm:n1", lane: "osm" }], people: [] },
+    });
+    const html = buildHtml([p], manifest(), collectEvidence(".", [p]));
+    expect(html).toContain("@acme");
+    expect(html).not.toContain('href="@acme"');
   });
 });
 

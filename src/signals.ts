@@ -136,14 +136,20 @@ function isPlausibleEmail(value: string): boolean {
 }
 
 /** Phone numbers, from `tel:` links only. */
+export function normalizePhoneValue(value: string): string | undefined {
+  if (!/^[+0-9().\s-]+$/.test(value)) return undefined;
+  const normalized = value.replace(/[\s.()-]/g, "");
+  return normalized.replace(/\D/g, "").length >= 8 ? normalized : undefined;
+}
+
 export function extractPhones(html: string, pageId: string): SourcedValue[] {
   const out = new Map<string, SourcedValue>();
   // Only `tel:` links, deliberately. Scraping digit runs out of page text picks
   // up SIRETs, prices, opening hours and dates, and a wrong phone number in a
   // prospect file is worse than a missing one — somebody dials it.
   for (const m of html.matchAll(/tel:([+0-9().\s-]{6,})/gi)) {
-    const raw = m[1]!.replace(/[\s.()-]/g, "");
-    if (raw.replace(/\D/g, "").length < 8) continue;
+    const raw = normalizePhoneValue(m[1]!);
+    if (!raw) continue;
     out.set(raw, { value: raw, from: pageId, lane: "web", note: "tel: link" });
   }
   return [...out.values()];

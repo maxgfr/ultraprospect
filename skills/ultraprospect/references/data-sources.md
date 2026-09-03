@@ -48,6 +48,15 @@ The only lane that works outside France, and the only source of the shopfront
 detail — the sign over the door, the opening hours, and for roughly a fifth of
 them the website that the whole enrichment stage grows from.
 
+Contact details are DECLARED in the same sense as `website`: a mapper entered
+them on the feature; the scan carries them without claiming they were fetched
+from the business. Emails come from `email` and `contact:email`. Phones come
+from `phone`, `contact:phone`, `contact:mobile`, `mobile` and
+`contact:whatsapp`. Social profiles come from `contact:facebook`,
+`contact:instagram`, `contact:linkedin`, `contact:twitter`, `contact:youtube`
+and `contact:tiktok`. Each value cites the exact feature as `osm:n…`, `osm:w…`
+or `osm:r…`, which lets `check` re-read these tags from the run's `osm.json`.
+
 Three measured behaviours shape how it is called:
 
 1. **The reference instance answers a browser User-Agent with HTTP 406.** Not a

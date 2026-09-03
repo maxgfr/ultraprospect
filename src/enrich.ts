@@ -242,9 +242,18 @@ async function enrichOne(
     // capitalised word pairs that a naive reading would file as people.
     place.contacts.people.push(...peopleFrom(page.text, page.record.id, { countryCode: opts.countryCode, companyName: place.name, town: opts.town }));
   }
-  place.contacts.emails = uniqueBy(place.contacts.emails, (e) => e.value);
-  place.contacts.phones = uniqueBy(place.contacts.phones, (p) => p.value);
-  place.contacts.socials = uniqueBy(place.contacts.socials, (s) => s.value);
+  place.contacts.emails = uniqueBy(
+    place.contacts.emails.sort((a, b) => Number(b.lane === "web") - Number(a.lane === "web")),
+    (e) => e.value,
+  );
+  place.contacts.phones = uniqueBy(
+    place.contacts.phones.sort((a, b) => Number(b.lane === "web") - Number(a.lane === "web")),
+    (p) => p.value,
+  );
+  place.contacts.socials = uniqueBy(
+    place.contacts.socials.sort((a, b) => Number(b.lane === "web") - Number(a.lane === "web")),
+    (s) => s.value,
+  );
   place.contacts.people = uniqueBy(place.contacts.people, (p) => p.value.toLowerCase());
   place.jobs = jobs;
   place.pages = [...new Set([...place.pages, ...fetched.map((f) => f.record.id)])];
