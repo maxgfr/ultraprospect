@@ -29,6 +29,12 @@ describe("areaIdFor", () => {
 });
 
 describe("buildQuery", () => {
+  it("builds the industrial group from works and all industrial tags", () => {
+    const q = buildQuery(undefined, [0, 1, 0, 1], { groups: ["industrial"] });
+    expect(q).toContain('nwr["man_made"="works"]');
+    expect(q).toContain('nwr["industrial"]');
+  });
+
   it("binds every filter to the administrative area when there is one", () => {
     const q = buildQuery(3_600_108_346, [0, 1, 0, 1], { groups: ["shop"] });
     expect(q).toContain("area(3600108346)->.searchArea;");
@@ -49,7 +55,13 @@ describe("buildQuery", () => {
 
   it("includes every catalogue group by default", () => {
     const q = buildQuery(undefined, [0, 1, 0, 1]);
-    for (const key of Object.keys(OSM_TAG_GROUPS)) expect(q).toContain(OSM_TAG_GROUPS[key]!.slice(0, 12));
+    for (const filters of Object.values(OSM_TAG_GROUPS)) {
+      for (const filter of filters) expect(q).toContain(filter);
+    }
+  });
+
+  it("excludes ATMs from the default business catalogue", () => {
+    expect(buildQuery(undefined, [0, 1, 0, 1])).not.toContain("atm");
   });
 
   it("ignores an unknown group name rather than emitting a broken query", () => {
@@ -110,6 +122,11 @@ describe("poi helpers", () => {
     expect(poiCategory({ ...base, tags: { shop: "bakery" } })).toBe("shop=bakery");
     expect(poiCategory({ ...base, tags: { office: "yes" } })).toBe("office");
     expect(poiCategory(base)).toBeUndefined();
+  });
+
+  it("labels industrial categories from either OSM industrial key", () => {
+    expect(poiCategory({ ...base, tags: { man_made: "works" } })).toBe("man_made=works");
+    expect(poiCategory({ ...base, tags: { industrial: "factory" } })).toBe("industrial=factory");
   });
 
   it("reads a website from either tag spelling", () => {

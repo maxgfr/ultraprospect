@@ -226,7 +226,7 @@ FILTERS (scan)
                          each reach only their own lane, which is the mismatch this closes.
   --category-lane <l>    osm | registry | both. Say that aiming only one lane is
                          deliberate, and accept the other sweeping the whole territory.
-  --osm-groups <list>    OSM catalogue groups: shop,office,craft,healthcare,amenity,tourism,leisure,club.
+  --osm-groups <list>    OSM catalogue groups: shop,office,craft,healthcare,industrial,amenity,tourism,leisure,club.
   --activity <list>      Activity codes in the register's own scheme, e.g. 62.01Z,70.22Z (NAF, France).
   --section <list>       Section letters in the country's own scheme, e.g. J,M (NACE across Europe).
   --size-band <list>     The register's own headcount band codes, e.g. 11,12,21 (INSEE, France).

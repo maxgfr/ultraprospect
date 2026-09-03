@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compileOsmFilter, laneGateRefusal, legalFormGateRefusal, parseCategories } from "../src/category.js";
-import { buildQuery } from "../src/overpass.js";
+import { OSM_TAG_GROUPS, buildQuery } from "../src/overpass.js";
 import { CONNECTORS } from "../src/registry/index.js";
 
 describe("parseCategories — the OSM half", () => {
@@ -107,7 +107,7 @@ describe("buildQuery with explicit filters", () => {
   const bbox: [number, number, number, number] = [48.84, 48.85, 2.41, 2.45];
 
   it("REPLACES the catalogue rather than adding to it", () => {
-    // Unioning the eight groups back in would hand `--category amenity=cafe`
+    // Unioning the nine groups back in would hand `--category amenity=cafe`
     // the whole town — the exact failure the flag exists to remove.
     const q = buildQuery(undefined, bbox, { extraFilters: ['["amenity"="cafe"]'] });
     expect(q).toContain('["amenity"="cafe"]');
@@ -115,10 +115,13 @@ describe("buildQuery with explicit filters", () => {
     expect(q).not.toContain("funeral_directors");
   });
 
-  it("still sweeps the whole catalogue when no filter is supplied", () => {
+  it("still sweeps all nine catalogue groups, including industrial, when no filter is supplied", () => {
     const q = buildQuery(undefined, bbox);
+    expect(Object.keys(OSM_TAG_GROUPS)).toHaveLength(9);
+    expect(OSM_TAG_GROUPS).toHaveProperty("industrial");
     expect(q).toContain('["shop"]');
     expect(q).toContain('["office"]');
+    expect(q).toContain('["industrial"]');
   });
 
   it("binds an explicit filter to the administrative area like any other", () => {

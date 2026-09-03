@@ -48,6 +48,12 @@ The only lane that works outside France, and the only source of the shopfront
 detail — the sign over the door, the opening hours, and for roughly a fifth of
 them the website that the whole enrichment stage grows from.
 
+What counts as a business is an explicit nine-group catalogue: `shop`,
+`office`, `craft`, `healthcare`, `industrial`, `amenity`, `tourism`, `leisure`
+and `club`. Industrial coverage includes `man_made=works` and every feature
+carrying an `industrial` tag. ATMs are excluded: they are machines, not
+businesses, even when a bank operates them.
+
 Contact details are DECLARED in the same sense as `website`: a mapper entered
 them on the feature; the scan carries them without claiming they were fetched
 from the business. Emails come from `email` and `contact:email`. Phones come
