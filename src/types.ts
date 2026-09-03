@@ -333,6 +333,10 @@ export interface LaneCoverage {
   reason?: string;
   /** How the lane was split to stay under a cap. */
   partitions?: number;
+  /** Register totals observed while probing each NACE section before a spread. */
+  sectionTotals?: Record<string, number>;
+  /** Records returned from each NACE section after its allocated quota. */
+  sectionReturned?: Record<string, number>;
 }
 
 export interface RunManifest {

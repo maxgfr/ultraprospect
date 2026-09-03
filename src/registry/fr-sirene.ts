@@ -383,22 +383,35 @@ function applyClientFilters(records: RegistryRecord[], query: SireneQuery, endpo
   return out;
 }
 
+function registryRecordKey(record: RegistryRecord): string {
+  return record.establishmentId ?? `siren:${record.id}`;
+}
+
 /** Walk one partition to exhaustion (or to the pagination cap). */
 async function drain(
   query: SireneQuery,
   budget: { left: number },
   label: string,
   opts: SireneOptions,
-): Promise<{ records: RegistryRecord[]; total: number; error?: string }> {
+  existing: ReadonlyMap<string, RegistryRecord>,
+): Promise<{ records: RegistryRecord[]; total: number; limited: boolean; error?: string }> {
   const first = await fetchPage(query, 1);
-  if (first.error) return { records: [], total: 0, error: first.error };
+  if (first.error) return { records: [], total: 0, limited: false, error: first.error };
 
   const endpoint = endpointFor(query);
   const collected: RegistryRecord[] = [];
+  const collectedKeys = new Set<string>();
+  let limited = false;
   const push = (entities: any[]) => {
     for (const e of entities) {
       for (const rec of applyClientFilters(expandRecord(e), query, endpoint)) {
-        if (budget.left <= 0) return;
+        const key = registryRecordKey(rec);
+        if (existing.has(key) || collectedKeys.has(key)) continue;
+        if (budget.left <= 0) {
+          limited = true;
+          return;
+        }
+        collectedKeys.add(key);
         collected.push(rec);
         budget.left--;
       }
@@ -415,7 +428,12 @@ async function drain(
 
   let stopped = false;
   await mapLimit(pages, PAGE_CONCURRENCY, async (page) => {
-    if (stopped || budget.left <= 0) return;
+    if (stopped) return;
+    if (budget.left <= 0) {
+      limited = true;
+      stopped = true;
+      return;
+    }
     const outcome = await fetchPage(query, page);
     if (outcome.error) {
       stopped = true;
@@ -423,10 +441,30 @@ async function drain(
     }
     push(outcome.results);
     opts.onProgress?.(collected.length, label);
-    if (budget.left <= 0) stopped = true;
+    if (budget.left <= 0) {
+      if (page < lastPage) limited = true;
+      stopped = true;
+    }
   });
 
-  return { records: collected, total: first.total };
+  return { records: collected, total: first.total, limited };
+}
+
+/** Spread an integer result budget across sections, carrying unused capacity forward. */
+export function allocateBudget(totals: Readonly<Record<string, number>>, budget: number): Record<string, number> {
+  const allocations = Object.fromEntries(Object.keys(totals).map((section) => [section, 0])) as Record<string, number>;
+  const ordered = Object.entries(totals).sort(([sectionA, totalA], [sectionB, totalB]) => totalA - totalB || sectionA.localeCompare(sectionB));
+  let remaining = Math.max(0, Math.floor(budget));
+
+  for (const [index, [section, total]] of ordered.entries()) {
+    const sectionsRemaining = ordered.length - index;
+    const fairShare = Math.floor(remaining / sectionsRemaining);
+    const quota = Math.min(Math.max(0, Math.floor(total)), fairShare);
+    allocations[section] = quota;
+    remaining -= quota;
+  }
+
+  return allocations;
 }
 
 /**
@@ -449,24 +487,32 @@ export async function fetchSirene(query: SireneQuery, opts: SireneOptions = {}):
   let partitions = 0;
   let truncated = false;
   let truncReason: string | undefined;
+  let sectionTotals: Record<string, number> | undefined;
+  let sectionReturned: Record<string, number> | undefined;
+  let sectionSpreadLimited = false;
+  let spreadSectionCount = 0;
+  let zeroQuotaPopulatedSectionCount = 0;
+  let spreadPopulatedSectionCount = 0;
 
   const absorb = (records: RegistryRecord[]) => {
     for (const r of records) {
       // Establishments are unique by SIRET; a legal unit with no SIRET (rare,
       // and only in the siege fallback) is keyed by SIREN so it is not dropped.
-      const key = r.establishmentId ?? `siren:${r.id}`;
+      const key = registryRecordKey(r);
       if (!bySiret.has(key)) bySiret.set(key, r);
     }
   };
 
-  // Which NACE sections the ordered split actually got to, and which the budget
-  // cut off before it ever asked. Only meaningful when the split ran.
-  const sectionsReached: string[] = [];
-  const sectionsUnreached: string[] = [];
-
-  async function walk(part: SireneQuery, label: string, depth: number): Promise<void> {
-    if (budget.left <= 0) return;
-    const probe = await fetchPage(part, 1, 1);
+  async function walk(
+    part: SireneQuery,
+    label: string,
+    depth: number,
+    partBudget: { left: number },
+    knownProbe?: PageOutcome,
+    section?: string,
+  ): Promise<void> {
+    if (!knownProbe && partBudget.left <= 0) return;
+    const probe = knownProbe ?? (await fetchPage(part, 1, 1));
     if (probe.error) {
       notes.push(`sirene: ${label} failed — ${probe.error}`);
       opts.onNote?.(`sirene: ${label} failed (${probe.error})`);
@@ -474,33 +520,50 @@ export async function fetchSirene(query: SireneQuery, opts: SireneOptions = {}):
       truncReason ??= probe.error;
       return;
     }
+    if (partBudget.left <= 0) return;
+
+    if (depth === 0 && depth < maxDepth && (probe.total >= HARD_CAP || probe.total > partBudget.left)) {
+      const sections = part.sections?.length ? part.sections : NACE_SECTIONS;
+      const cause =
+        probe.total >= HARD_CAP ? `reports >= ${HARD_CAP} (the API clamps the count)` : `reports ${probe.total} results for a budget of ${partBudget.left}`;
+      opts.onNote?.(`sirene: ${label} ${cause} — probing ${sections.length} NACE sections before draining`);
+      notes.push(`sirene: ${label} ${cause}; probed ${sections.length} NACE sections before draining any of them`);
+
+      const probes = await mapLimit(sections, PAGE_CONCURRENCY, async (sectionName) => ({
+        section: sectionName,
+        outcome: await fetchPage({ ...part, sections: [sectionName] }, 1, 1),
+      }));
+      sectionTotals = Object.fromEntries(probes.map(({ section: sectionName, outcome }) => [sectionName, outcome.total]));
+      sectionReturned = Object.fromEntries(sections.map((sectionName) => [sectionName, 0]));
+      spreadSectionCount = sections.length;
+      const allocations = allocateBudget(sectionTotals, partBudget.left);
+      spreadPopulatedSectionCount = Object.values(sectionTotals).filter((total) => total > 0).length;
+      zeroQuotaPopulatedSectionCount = Object.entries(allocations).filter(
+        ([sectionName, quota]) => (sectionTotals?.[sectionName] ?? 0) > 0 && quota === 0,
+      ).length;
+      if (probe.total < HARD_CAP && Object.values(sectionTotals).reduce((sum, total) => sum + total, 0) < probe.total) sectionSpreadLimited = true;
+
+      for (const { section: sectionName, outcome } of probes) {
+        const quota = allocations[sectionName] ?? 0;
+        const sectionBudget = { left: quota };
+        await walk({ ...part, sections: [sectionName] }, `${label} / section ${sectionName}`, depth + 1, sectionBudget, outcome, sectionName);
+        partBudget.left -= quota - sectionBudget.left;
+      }
+      return;
+    }
 
     if (probe.total >= HARD_CAP && depth < maxDepth) {
-      if (depth === 0) {
-        opts.onNote?.(`sirene: ${label} reports >= ${HARD_CAP} (the API clamps the count) — splitting by NACE section`);
-        notes.push(`sirene: ${label} is at or above the ${HARD_CAP} cap; split into ${NACE_SECTIONS.length} NACE sections`);
-        for (const section of part.sections?.length ? part.sections : NACE_SECTIONS) {
-          // The split walks the sections IN ORDER, and `walk` returns at once
-          // when the budget is gone. So exhausting `--max-results` does not
-          // thin the territory evenly — it stops at a letter, and everything
-          // after it is absent. Which letters those were is the difference
-          // between "we saw less of the town" and "we saw no retail and no
-          // hospitality at all", so both halves are recorded.
-          if (budget.left <= 0) sectionsUnreached.push(section);
-          else {
-            sectionsReached.push(section);
-            await walk({ ...part, sections: [section] }, `${label} / section ${section}`, depth + 1);
-          }
-        }
-        return;
-      }
-      const section = part.sections?.[0];
-      if (section) {
-        const divisions = divisionsOfSection(section);
+      const sectionName = part.sections?.[0];
+      if (sectionName) {
+        const divisions = divisionsOfSection(sectionName);
         opts.onNote?.(`sirene: ${label} still at the cap — splitting into ${divisions.length} NAF divisions`);
         notes.push(`sirene: ${label} is at or above the ${HARD_CAP} cap; split into ${divisions.length} NAF divisions`);
         for (const codes of divisions) {
-          await walk({ ...part, activitePrincipale: codes }, `${label} / division ${codes[0]?.slice(0, 2)}`, depth + 1);
+          if (partBudget.left <= 0) {
+            if (section) sectionSpreadLimited = true;
+            break;
+          }
+          await walk({ ...part, activitePrincipale: codes }, `${label} / division ${codes[0]?.slice(0, 2)}`, depth + 1, partBudget, undefined, section);
         }
         return;
       }
@@ -514,35 +577,33 @@ export async function fetchSirene(query: SireneQuery, opts: SireneOptions = {}):
     }
 
     partitions++;
-    const { records, error } = await drain(part, budget, label, opts);
+    const { records, limited, error } = await drain(part, partBudget, label, opts, bySiret);
     if (error) {
       notes.push(`sirene: ${label} stopped early — ${error}`);
       truncated = true;
       truncReason ??= error;
     }
+    if (section && limited) sectionSpreadLimited = true;
+    if (section && sectionReturned) sectionReturned[section] = (sectionReturned[section] ?? 0) + records.length;
     absorb(records);
   }
 
-  await walk(query, "query", 0);
+  await walk(query, "query", 0, budget);
 
-  if (budget.left <= 0) {
+  if (sectionSpreadLimited || budget.left <= 0) {
     truncated = true;
-    // A budget reached mid-split is NOT a thinner sample of the same territory.
-    // The split is alphabetical, so the loss has a direction: the sections after
-    // the cut-off are absent entirely, and on a real run those were G (retail)
-    // and I (hospitality) while the budget went on A-F. Reporting only "the
-    // budget was reached" invites the reader to treat what came back as
-    // representative, which is the one thing it is not.
-    const cutoff = !sectionsUnreached.length
-      ? ""
-      : sectionsReached.length
-        ? ` after NACE section${sectionsReached.length === 1 ? "" : "s"} ${describeRange(sectionsReached)}; ${describeRange(sectionsUnreached)} ${sectionsUnreached.length === 1 ? "was" : "were"} never asked for. This is a PREFIX of an alphabetical split, not a sample of the territory`
-        : ` before a single NACE section could be queried; ${describeRange(sectionsUnreached)} were all never asked for. Nothing here describes the territory`;
-    truncReason ??= `the --max-results budget of ${maxResults} was reached${cutoff}`;
-    notes.push(`sirene: stopped at the --max-results budget of ${maxResults}; raise it or narrow the filters`);
-    if (sectionsUnreached.length) {
-      notes.push(`sirene: sections ${sectionsUnreached.join(", ")} were never queried — the split is alphabetical and the budget ran out first`);
-      opts.onNote?.(`sirene: sections ${sectionsUnreached.join(", ")} were NEVER QUERIED — narrow with --category rather than paying for the earlier letters`);
+    if (sectionSpreadLimited) {
+      const zeroQuotaNote =
+        zeroQuotaPopulatedSectionCount > 0
+          ? `; ${zeroQuotaPopulatedSectionCount} of ${spreadPopulatedSectionCount} populated section quotas were zero because the budget was smaller than their count`
+          : "";
+      truncReason ??= `the --max-results budget of ${maxResults} was spread across ${spreadSectionCount} NACE sections after ${spreadSectionCount} extra probes${zeroQuotaNote}; the lane is a per-section SAMPLE, not a prefix and not the whole`;
+      notes.push(
+        `sirene: the --max-results budget of ${maxResults} was spread across ${spreadSectionCount} NACE sections after ${spreadSectionCount} extra probes; this is a per-section sample`,
+      );
+    } else {
+      truncReason ??= `the --max-results budget of ${maxResults} was reached`;
+      notes.push(`sirene: stopped at the --max-results budget of ${maxResults}; raise it or narrow the filters`);
     }
     opts.onNote?.(`sirene: hit the --max-results budget of ${maxResults} — the lane is INCOMPLETE`);
   }
@@ -560,20 +621,13 @@ export async function fetchSirene(query: SireneQuery, opts: SireneOptions = {}):
       truncated,
       reason: truncReason,
       partitions: Math.max(1, partitions),
+      sectionTotals,
+      sectionReturned,
     },
   };
 }
 
 /** `--min-employees 10` expressed as every INSEE band that satisfies it. */
-/** "A-F" for a contiguous run, "A, C, F" otherwise. Compact without being lossy. */
-function describeRange(sections: readonly string[]): string {
-  if (sections.length <= 2) return sections.join(", ");
-  const order = NACE_SECTIONS;
-  const idx = sections.map((s) => order.indexOf(s));
-  const contiguous = idx.every((n, i) => i === 0 || n === (idx[i - 1] ?? -99) + 1);
-  return contiguous ? `${sections[0]}-${sections[sections.length - 1]}` : sections.join(", ");
-}
-
 export function bandsAtLeast(minHeadcount: number): string[] {
   // "NN" (undetermined) is excluded: a company whose headcount the register does
   // not know is not evidence of a company with at least ten people. Including it

@@ -16,6 +16,8 @@ const calls: string[] = [];
 let totals: (url: URL) => number;
 /** How many records each page yields, to exercise the budget. */
 let perPageRecords = 25;
+/** How many establishment records each fake legal unit expands into. */
+let establishmentsPerEntity = 1;
 /** When set, the fake register answers every call with this error. */
 let apiError: string | undefined;
 
@@ -38,21 +40,19 @@ vi.mock("../src/engine.js", () => ({
     const results = Array.from({ length: count }, (_, i) => ({
       siren: `S${page}-${i}-${url.searchParams.get("section_activite_principale") ?? url.searchParams.get("activite_principale") ?? "x"}`,
       nom_complet: "FAKE",
-      matching_etablissements: [
-        {
-          siret: `${page}-${i}-${url.searchParams.get("section_activite_principale") ?? url.searchParams.get("activite_principale") ?? "x"}`,
-          adresse: "1 RUE DE LA PAIX 75002 PARIS",
-          latitude: "48.869",
-          longitude: "2.331",
-          etat_administratif: "A",
-        },
-      ],
+      matching_etablissements: Array.from({ length: establishmentsPerEntity }, (_, establishment) => ({
+        siret: `${page}-${i}-${establishment}-${url.searchParams.get("section_activite_principale") ?? url.searchParams.get("activite_principale") ?? "x"}`,
+        adresse: "1 RUE DE LA PAIX 75002 PARIS",
+        latitude: "48.869",
+        longitude: "2.331",
+        etat_administratif: "A",
+      })),
     }));
     return { ok: true, status: 200, data: { results, total_results: total } };
   },
 }));
 
-const { HARD_CAP, fetchSirene } = await import("../src/registry/fr-sirene.js");
+const { HARD_CAP, allocateBudget, fetchSirene } = await import("../src/registry/fr-sirene.js");
 
 function sectionsQueried(): string[] {
   return [...new Set(calls.map((c) => new URL(c).searchParams.get("section_activite_principale")).filter((s): s is string => Boolean(s)))];
@@ -61,11 +61,20 @@ function sectionsQueried(): string[] {
 beforeEach(() => {
   calls.length = 0;
   perPageRecords = 25;
+  establishmentsPerEntity = 1;
   apiError = undefined;
   totals = () => 10;
 });
 
 describe("the split ladder", () => {
+  it("allocates a budget by filling small sections before sharing the remainder", () => {
+    expect(allocateBudget({ A: 2, G: 5000, C: 0 }, 50)).toEqual({ A: 2, G: 48, C: 0 });
+  });
+
+  it("shares a budget evenly when sections have the same demand", () => {
+    expect(allocateBudget({ A: 100, B: 100, C: 100 }, 60)).toEqual({ A: 20, B: 20, C: 20 });
+  });
+
   it("does not split when the query fits under the cap", async () => {
     totals = () => 40;
     const result = await fetchSirene({ codeCommune: ["94080"] });
@@ -99,6 +108,17 @@ describe("the split ladder", () => {
     expect(result.coverage.truncated).toBe(false);
   });
 
+  it("declares a section sample when its quota ends at a division boundary", async () => {
+    totals = (url) => {
+      if (url.searchParams.get("activite_principale")) return 1;
+      if (url.searchParams.get("section_activite_principale") === "C") return HARD_CAP;
+      if (url.searchParams.get("section_activite_principale")) return 0;
+      return HARD_CAP;
+    };
+    const result = await fetchSirene({ codeCommune: ["94080"] }, { maxResults: 1 });
+    expect(result.coverage.reason).toMatch(/budget of 1.*per-section SAMPLE/);
+  });
+
   it("DECLARES truncation when a leaf is still capped after the ladder runs out", async () => {
     // The whole point. A partial sweep that presents itself as complete is the
     // one failure nobody downstream can detect, so the run says so instead.
@@ -115,6 +135,49 @@ describe("the split ladder", () => {
     expect(result.records.length).toBeLessThanOrEqual(50);
     expect(result.coverage.truncated).toBe(true);
     expect(result.coverage.reason).toMatch(/budget of 50/);
+    expect(result.coverage.reason).toMatch(/spread across 21 NACE sections/);
+    expect(result.coverage.reason).toMatch(/21 extra probes/);
+    expect(result.coverage.reason).toMatch(/per-section SAMPLE, not a prefix and not the whole/);
+    expect(Object.values(result.coverage.sectionTotals ?? {})).toEqual(Array.from({ length: 21 }, () => 5000));
+    expect(Object.values(result.coverage.sectionReturned ?? {}).every((returned) => returned > 0)).toBe(true);
+    expect(Object.values(result.coverage.sectionReturned ?? {}).reduce((sum, returned) => sum + returned, 0)).toBe(50);
+  });
+
+  it("queries all 21 sections when the probe total exceeds the budget", async () => {
+    totals = () => 5000;
+    await fetchSirene({ codeCommune: ["94080"] }, { maxResults: 50 });
+    expect(sectionsQueried()).toEqual(["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U"]);
+  });
+
+  it("probes every section before draining any section", async () => {
+    totals = () => 5000;
+    await fetchSirene({ codeCommune: ["94080"] }, { maxResults: 50 });
+    const sectionCalls = calls.map((raw) => new URL(raw)).filter((url) => url.searchParams.has("section_activite_principale"));
+    const lastProbe = sectionCalls.map((url) => url.searchParams.get("per_page") === "1").lastIndexOf(true);
+    const firstDrain = sectionCalls.findIndex((url) => url.searchParams.get("per_page") === "25");
+    expect(sectionCalls.slice(0, 21).every((url) => url.searchParams.get("per_page") === "1")).toBe(true);
+    expect(lastProbe).toBeLessThan(firstDrain);
+  });
+
+  it("DECLARES truncation when section probes do not account for the exact root total", async () => {
+    totals = (url) => (url.searchParams.has("section_activite_principale") ? 1 : 60);
+    const result = await fetchSirene({ codeCommune: ["94080"] }, { maxResults: 50 });
+    expect(result.coverage.truncated).toBe(true);
+    expect(result.coverage.reason).toMatch(/budget of 50.*per-section SAMPLE/);
+  });
+
+  it("detects when expanded establishments exhaust a section quota", async () => {
+    establishmentsPerEntity = 2;
+    totals = (url) => (url.searchParams.has("section_activite_principale") ? 1 : HARD_CAP);
+    const result = await fetchSirene({ codeCommune: ["94080"] }, { maxResults: 21 });
+    expect(result.records).toHaveLength(21);
+    expect(result.coverage.reason).toMatch(/budget of 21.*per-section SAMPLE/);
+  });
+
+  it("says when a small budget leaves populated sections with zero quota", async () => {
+    totals = () => 5000;
+    const result = await fetchSirene({ codeCommune: ["94080"] }, { maxResults: 10 });
+    expect(result.coverage.reason).toMatch(/11 of 21 populated section quotas were zero/);
   });
 
   it("never asks for a page beyond the pagination ceiling", async () => {
