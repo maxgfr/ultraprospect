@@ -49,6 +49,15 @@ the filed legal-form codes passed to `--legal-form` and
 `--exclude-legal-form`. `null` means no such filter was requested. Exclusions
 are client-side because the French API offers no negation.
 
+When the French register spreads `--max-results` across NACE sections,
+`sectionTotals` records the total reported by each section's probe and
+`sectionReturned` records how many rows its quota returned. Both maps use NACE
+section letters (`A` through `U`) as keys; the example below shortens both maps.
+Read them with `reason`: the 21 probes measure how the budget was spread; they
+do not make the sampled lane complete. If the budget is smaller than the
+number of populated sections, the reason states how many populated sections
+necessarily received a zero quota.
+
 `lanes[]` is the honest part. Each entry has `returned`, `truncated`, a
 `reason`, and how many partitions the lane needed:
 
@@ -57,7 +66,10 @@ are client-side because the French API offers no negation.
   "returned": 672, "truncated": false, "partitions": 1 }
 { "lane": "registry", "mode": "sweep", "connectorId": "fr-sirene",
   "returned": 3000, "truncated": true,
-  "reason": "the --max-results budget of 3000 was reached", "partitions": 21 }
+  "reason": "the --max-results budget of 3000 was spread across 21 NACE sections after 21 extra probes; the lane is a per-section SAMPLE, not a prefix and not the whole",
+  "partitions": 21,
+  "sectionTotals": { "A": 42, "B": 18, "C": 6800 },
+  "sectionReturned": { "A": 42, "B": 18, "C": 2940 } }
 { "lane": "registry", "connectorId": "eu-vies", "returned": 0, "truncated": false,
   "reason": "no register can be swept for country=de; OSM covered the territory and eu-vies, gleif can confirm each company (run `confirm`)" }
 { "lane": "registry", "mode": "confirm", "connectorId": "eu-vies,gleif",

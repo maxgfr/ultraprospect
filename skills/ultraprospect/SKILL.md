@@ -451,7 +451,7 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | `where` exits 2 with a list | Working as designed. Several distinct places match; choose one. |
 | Very few OSM places | Overpass mirrors were busy. `doctor` shows which answered; re-run. |
 | Contacts are empty after `scan` although OSM has phone tags | They are now carried as declared contacts with an `osm:<id>` source. Re-run the scan with the current build. |
-| `truncated: true` on the register lane | A French territory exceeding the API's 10 000-result ceiling even after the NACE split, or `--max-results` was reached. Narrow the filters. |
+| `truncated: true` on the register lane | A French territory exceeded the API's 10 000-result ceiling even after the NACE split, or `--max-results` produced a per-section sample after 21 section probes. It is not a prefix and not the whole; narrow the filters. |
 | Register lane `mode: "confirm"`, not `"sweep"` | Expected everywhere but France and the United Kingdom. OSM covered the ground; run `confirm` to attach register identities company by company. |
 | The UK register lane returned nothing | No snapshot in the cache. Run `ingest --country gb` once, then re-scan. The lane's reason says so verbatim. |
 | A UK sweep missed a company you can see on the street | Its registered office is in another post town — very often its accountant's. The sweep enumerates by post town, and the lane's reason says a post town is not a bounding box. |
@@ -465,7 +465,7 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | The run is full of schools, bank branches and EV chargers | `--osm-groups amenity` is a whole catalogue group, not a trade. Aim it with `--category amenity=cafe,…`, and drop what cannot buy with `resolve --skip chain,public`. |
 | `scan` refused: "left the … lane sweeping unfiltered" | Working as designed. A `--category` list that narrows one lane and not the other produces a run whose halves cover different territories. Name a term for the other lane, or `--category-lane <the one you meant>`. |
 | `scan` refused: activity codes "fall outside the sections asked for" | The register ANDs section and activity code, so `nace=I,naf=10.71C` would return zero rows and read as an empty trade. Ask for one or the other. |
-| `--max-results` truncated before the sector I wanted | The register splits by NACE section IN ORDER, so a budget spent early never reaches the later letters — and the lane now names them: "reached after NACE sections A-F; G-U were never asked for". That is a prefix, not a sample. Name the trade with `--category naf=…` instead of paying for sections you did not want. |
+| `--max-results` cut the register lane | For an unfiltered run, the register probes all 21 NACE sections first, then spreads the budget across them. The lane is a per-section sample, not an alphabetical prefix and not the whole territory; `sectionTotals` and `sectionReturned` show the loss by section. Name the trade with `--category naf=…` when you need complete coverage of one activity. |
 | A company shows `web_presence: social-only` | Not a gap. We searched, found no site of its own, and found a social profile that is theirs. For a local trader that is usually the whole web presence. |
 | `web_presence` is empty | `resolve` has not run for that row. Different from `none`, which is a measured absence — do not report the two the same way. |
 | `resolve` exits 2 saying no results were supplied | Working as designed. Run `--queries`, do the searching, pass `--web-results`. |
