@@ -1313,6 +1313,7 @@ function acceptLanguageHeader(lang, region) {
   return `${l}-${R},${l};q=0.9,en;q=0.5`;
 }
 var STDOUT_CAP = 24 * 1024 * 1024;
+var NPM_TIME_TAIL_BYTES = 2 * 1024 * 1024;
 var EMPTY = { rules: [], sitemaps: [], absent: true };
 function parseRobots(body, userAgent) {
   const ua = userAgent.toLowerCase();
