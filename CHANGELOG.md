@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [3.12.0](https://github.com/maxgfr/ultraprospect/compare/v3.11.0...v3.12.0) (2026-09-04)
+
+
+### Features
+
+* **engine:** re-pin vendored engines ([25a00ce](https://github.com/maxgfr/ultraprospect/commit/25a00ce5ca87f464c63245afbe9a08c36f24c38b))
+
 # [3.11.0](https://github.com/maxgfr/ultraprospect/compare/v3.10.0...v3.11.0) (2026-09-03)
 
 
