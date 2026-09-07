@@ -122,10 +122,21 @@ describe("the split ladder", () => {
   it("DECLARES truncation when a leaf is still capped after the ladder runs out", async () => {
     // The whole point. A partial sweep that presents itself as complete is the
     // one failure nobody downstream can detect, so the run says so instead.
-    totals = () => HARD_CAP;
-    const result = await fetchSirene({ codeCommune: ["94080"] }, { maxResults: 100_000 });
+    // One saturated leaf is enough: U has only division 99. Saturating every
+    // section needlessly materialized 100,000 records and timed out in CI.
+    totals = (url) => {
+      if (url.searchParams.get("activite_principale")) return HARD_CAP;
+      const section = url.searchParams.get("section_activite_principale");
+      return section && section !== "U" ? 0 : HARD_CAP;
+    };
+    const result = await fetchSirene({ codeCommune: ["94080"] }, { maxResults: HARD_CAP + 1 });
+    expect(calls.length).toBeLessThanOrEqual(500);
+    expect(sectionsQueried()).toHaveLength(21);
+    expect(result.coverage.partitions).toBe(1);
+    expect(result.records).toHaveLength(HARD_CAP);
     expect(result.coverage.truncated).toBe(true);
-    expect(result.coverage.reason).toMatch(/at least 10000/i);
+    expect(result.coverage.reason).toMatch(/section U \/ division 99.*at least 10000.*split ladder ran out/i);
+    expect(result.notes.join("\n")).not.toMatch(/budget|SAMPLE/);
     expect(result.notes.some((n) => n.includes("TRUNCATED"))).toBe(true);
   });
 
