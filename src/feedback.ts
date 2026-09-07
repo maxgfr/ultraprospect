@@ -67,11 +67,19 @@ function parseLedger(input: unknown): FeedbackLedger {
     if (ids.has(row.id)) throw new Error(`duplicate feedback event id: ${row.id}`);
     ids.add(row.id);
     const subject = row.subject;
-    if (
-      subject !== undefined &&
-      (!record(subject) || !text(subject.field) || !text(subject.value) || !text(subject.from) || (subject.lane !== undefined && !text(subject.lane)))
-    )
-      throw new Error(`${row.id}: malformed feedback subject`);
+    let parsedSubject: FeedbackEntry["subject"];
+    if (subject !== undefined) {
+      if (!record(subject) || !text(subject.field) || !text(subject.value) || !text(subject.from) || (subject.lane !== undefined && !text(subject.lane)))
+        throw new Error(`${row.id}: malformed feedback subject`);
+      // JSON object order is not event identity. Canonicalize both imported and
+      // stored subjects, retaining only the fields defined by this schema.
+      parsedSubject = {
+        field: subject.field,
+        value: subject.value,
+        from: subject.from,
+        ...(subject.lane === undefined ? {} : { lane: subject.lane }),
+      };
+    }
     if ((row.kind === "wrong-site" || row.kind === "wrong-contact") && subject === undefined)
       throw new Error(`${row.id}: this feedback kind requires a sourced subject`);
     if (row.kind !== "wrong-site" && row.kind !== "wrong-contact" && subject !== undefined) throw new Error(`${row.id}: this feedback kind has no subject`);
@@ -82,7 +90,7 @@ function parseLedger(input: unknown): FeedbackLedger {
       reason: row.reason,
       by: row.by,
       at: row.at,
-      ...(subject === undefined ? {} : { subject: subject as unknown as FeedbackEntry["subject"] }),
+      ...(parsedSubject === undefined ? {} : { subject: parsedSubject }),
     };
   });
   return { schemaVersion: 1, entries };

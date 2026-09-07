@@ -121,6 +121,16 @@ function writeDossier(placeId: string, lines: string[]): void {
 const check = (places: readonly Place[]): CheckReport => runCheck({ runDir, places, manifest: manifest() });
 const rules = (report: CheckReport): string[] => report.errors.map((e) => e.rule);
 
+it.each(["What they do", "Size and shape", "Signals", "Angle", "Contacts", "Gaps"])("accepts the official unbulleted %s section label", (label) => {
+  writeDossier("osm:n1", [`**${label}.**`, "- first@example.com [P1]"]);
+  expect(check([place()]).errors).toEqual([]);
+});
+
+it.each(["**Contacts.** first@example.com", "**Contacts: first@example.com**", "**Acme is hiring.**"])("still rejects uncited assertions: %s", (line) => {
+  writeDossier("osm:n1", [line]);
+  expect(rules(check([place()]))).toEqual(["claim-uncited"]);
+});
+
 beforeEach(() => {
   runDir = mkdtempSync(join(tmpdir(), "ultraprospect-owned-"));
   mkdirSync(join(runDir, "pages", "osm_n1"), { recursive: true });
@@ -267,8 +277,8 @@ describe("a short line can still be a claim", () => {
   });
 
   it("REJECTS a sentence under a bold blanket", () => {
-    // A bulleted "- **Contacts.**" labels a section. A bold line on its own is
-    // indistinguishable from a bolded sentence, so emphasis buys nothing here.
+    // A known "**Contacts.**" labels a section. An arbitrary bold sentence
+    // still asserts a fact, so emphasis alone buys nothing here.
     writeDossier("osm:n1", ["# Company", "", "**Acme is hiring.**"]);
     expect(rules(check([p()]))).toEqual(["claim-uncited"]);
   });

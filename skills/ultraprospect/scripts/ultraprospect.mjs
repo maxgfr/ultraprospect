@@ -7048,8 +7048,17 @@ function parseLedger(input) {
     if (ids.has(row2.id)) throw new Error(`duplicate feedback event id: ${row2.id}`);
     ids.add(row2.id);
     const subject = row2.subject;
-    if (subject !== void 0 && (!record(subject) || !text(subject.field) || !text(subject.value) || !text(subject.from) || subject.lane !== void 0 && !text(subject.lane)))
-      throw new Error(`${row2.id}: malformed feedback subject`);
+    let parsedSubject;
+    if (subject !== void 0) {
+      if (!record(subject) || !text(subject.field) || !text(subject.value) || !text(subject.from) || subject.lane !== void 0 && !text(subject.lane))
+        throw new Error(`${row2.id}: malformed feedback subject`);
+      parsedSubject = {
+        field: subject.field,
+        value: subject.value,
+        from: subject.from,
+        ...subject.lane === void 0 ? {} : { lane: subject.lane }
+      };
+    }
     if ((row2.kind === "wrong-site" || row2.kind === "wrong-contact") && subject === void 0)
       throw new Error(`${row2.id}: this feedback kind requires a sourced subject`);
     if (row2.kind !== "wrong-site" && row2.kind !== "wrong-contact" && subject !== void 0) throw new Error(`${row2.id}: this feedback kind has no subject`);
@@ -7060,7 +7069,7 @@ function parseLedger(input) {
       reason: row2.reason,
       by: row2.by,
       at: row2.at,
-      ...subject === void 0 ? {} : { subject }
+      ...parsedSubject === void 0 ? {} : { subject: parsedSubject }
     };
   });
   return { schemaVersion: 1, entries };
@@ -10522,7 +10531,7 @@ function isStructural(line, next = "") {
   if (/^[-*_]{3,}$/.test(t)) return true;
   if (isTableSeparator(t)) return true;
   if (isTableRow(t) && isTableSeparator(next)) return true;
-  if (/^[-*+]\s*\*\*(?:What they do|Size and shape|Signals|Angle|Contacts|Gaps)\.?\*\*[.:]?$/i.test(t)) return true;
+  if (/^(?:[-*+]\s*)?\*\*(?:What they do|Size and shape|Signals|Angle|Contacts|Gaps)\.?\*\*[.:]?$/i.test(t)) return true;
   return false;
 }
 function assertedText(unit) {

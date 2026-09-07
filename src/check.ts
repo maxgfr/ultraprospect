@@ -111,7 +111,7 @@ function isStructural(line: string, next = ""): boolean {
   if (isTableRow(t) && isTableSeparator(next)) return true;
   // Only the dossier template's explicit section labels are exempt. An
   // arbitrary bold bullet can assert a fact just as ordinary prose can.
-  if (/^[-*+]\s*\*\*(?:What they do|Size and shape|Signals|Angle|Contacts|Gaps)\.?\*\*[.:]?$/i.test(t)) return true;
+  if (/^(?:[-*+]\s*)?\*\*(?:What they do|Size and shape|Signals|Angle|Contacts|Gaps)\.?\*\*[.:]?$/i.test(t)) return true;
   return false;
 }
 

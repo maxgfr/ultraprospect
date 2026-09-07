@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAll } from "../src/render.js";
+import { runCheck } from "../src/check.js";
+import { buildDossierPacket } from "../src/dossier.js";
 import { emptyManifest } from "../src/run.js";
 import type { Place } from "../src/types.js";
 import { rec } from "./factories.js";
@@ -89,6 +91,40 @@ describe("user feedback is a separate, persistent export decision", () => {
     expect(importFeedback(dir, [company], { schemaVersion: 1, entries: [event] }).entries).toHaveLength(1);
     expect(() => importFeedback(dir, [company], { schemaVersion: 1, entries: [{ ...event, kind: "useful" }] })).toThrow(/conflict/);
     expect(readFileSync(join(dir, "FEEDBACK.json"), "utf8")).toBe(before);
+  });
+
+  it("replays a sourced contact event independently of subject key order", async () => {
+    const { importFeedback, dir, company, event } = await setup();
+    const subject = { field: "emails", value: "hello@acme.example", from: "osm", lane: "osm" };
+    const contactEvent = { ...event, kind: "wrong-contact", subject };
+    importFeedback(dir, [company], { schemaVersion: 1, entries: [contactEvent] });
+    const before = readFileSync(join(dir, "FEEDBACK.json"), "utf8");
+    const reordered = { value: subject.value, lane: subject.lane, from: subject.from, field: subject.field };
+    expect(importFeedback(dir, [company], { schemaVersion: 1, entries: [{ ...contactEvent, subject: reordered }] }).entries).toHaveLength(1);
+    expect(readFileSync(join(dir, "FEEDBACK.json"), "utf8")).toBe(before);
+  });
+
+  it("canonicalizes subjects from legacy stored ledgers as well as incoming events", async () => {
+    const { importFeedback, readFeedback, dir, company, event } = await setup();
+    const subject = { value: company.website!.url, from: "osm", field: "website", ignoredExtension: "legacy metadata" };
+    writeFileSync(join(dir, "FEEDBACK.json"), JSON.stringify({ schemaVersion: 1, entries: [{ ...event, kind: "wrong-site", subject }] }));
+    const canonical = { field: "website", value: subject.value, from: subject.from };
+    expect(readFeedback(dir).entries[0]!.subject).toEqual(canonical);
+    expect(importFeedback(dir, [company], { schemaVersion: 1, entries: [{ ...event, kind: "wrong-site", subject: canonical }] }).entries).toHaveLength(1);
+  });
+
+  it("keeps excluded dossiers auditable: exclusion filters exports, not raw evidence errors", async () => {
+    const { importFeedback, feedbackSource, dir, company, event } = await setup();
+    company.contacts.emails = [];
+    mkdirSync(join(dir, "dossiers"));
+    writeFileSync(join(dir, "dossiers", "osm_n1.md"), "# Acme\n\nAcme is hiring. [P999]\n");
+    const manifest = emptyManifest("test");
+    importFeedback(dir, [company], { schemaVersion: 1, entries: [{ ...event, source: feedbackSource(company) }] });
+    const report = runCheck({ runDir: dir, places: [company], manifest });
+    expect(report.ok).toBe(false);
+    expect(report.errors.some((error) => error.rule === "citation-unresolved")).toBe(true);
+    expect(buildDossierPacket(dir, company, manifest).place.id).toBe(company.id);
+    expect(JSON.parse(buildAll([company], manifest, { runDir: dir }).files.find((file) => file.path === "prospects.json")!.content)).toEqual([]);
   });
 
   it("refuses malformed, stale, unknown, foreign and contradictory provenance without writing", async () => {

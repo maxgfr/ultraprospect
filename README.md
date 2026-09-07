@@ -307,6 +307,12 @@ node scripts/ultraprospect.mjs --help
 
 ### A run, end to end
 
+`check` audits the complete run, including excluded companies; `dossier --id` still returns
+their raw grounding packets for investigation. Exclusion changes rendered prospect selection,
+not evidence validity: it does not suppress a broken citation or repair a false contact. Fix
+raw audit errors before treating the complete run as verified. Distribute the regenerated
+exports, not the raw run directory, when only selected prospects should be shared.
+
 User feedback is a separate decision ledger, not another score. `feedback --run <dir>` emits
 current subjects with their identity and snapshot digest. Copy the user's decisions into `entries`,
 then `feedback --run <dir> --apply feedback.json` and `render --run <dir>`.
