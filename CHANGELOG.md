@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [3.13.0](https://github.com/maxgfr/ultraprospect/compare/v3.12.0...v3.13.0) (2026-09-07)
+
+
+### Features
+
+* harden verification, add workflows and require explicit skill invocation ([0469ea4](https://github.com/maxgfr/ultraprospect/commit/0469ea4dc70512a67c3cd891a5c24e1a4e8f3826))
+
 # [3.12.0](https://github.com/maxgfr/ultraprospect/compare/v3.11.0...v3.12.0) (2026-09-04)
 
 

@@ -4,7 +4,7 @@ description: "Build a sourced, territory-wide company prospect list with registr
 disable-model-invocation: true
 license: MIT
 metadata:
-  version: 3.12.0
+  version: 3.13.0
 ---
 
 # ultraprospect — a territory, turned into prospects you can cite
