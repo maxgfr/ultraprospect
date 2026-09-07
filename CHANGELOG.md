@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [3.13.1](https://github.com/maxgfr/ultraprospect/compare/v3.13.0...v3.13.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* accept dossier labels and canonicalize feedback replay ([62a87a9](https://github.com/maxgfr/ultraprospect/commit/62a87a92128e071fc6de7edece0623dfc57874ac))
+
 # [3.13.0](https://github.com/maxgfr/ultraprospect/compare/v3.12.0...v3.13.0) (2026-09-07)
 
 
