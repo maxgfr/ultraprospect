@@ -1,5 +1,12 @@
 # ultraprospect
 
+## Manual skill invocation
+
+Invoke `$ultraprospect` explicitly in Codex or `/ultraprospect` in Claude Code.
+The shipped skill disables automatic activation in both hosts; CLI commands
+remain unchanged. Other hosts may not honor these settings. Existing installed
+copies need to be updated to receive this invocation policy.
+
 **Turn a place into a prospect list you can defend.** Give it a town, a street
 or a radius; it sweeps OpenStreetMap worldwide, attaches whatever company
 register the country actually has — France, the UK and Estonia can be enumerated
@@ -73,7 +80,8 @@ understand about a run:
 enumerated the same way.** France's answers a bounding box over an API. The United
 Kingdom's publishes a monthly open-data snapshot of every live company — 470 MB of
 zipped CSV, no key, no registration — which `ingest` fetches once and which files
-each company under its registered office's POST TOWN. Everywhere else a register
+each company under its registered office's POST TOWN. Estonia's daily export is
+indexed by administrative unit after `ingest --country ee`. Everywhere else a register
 can confirm a company you already found, and nothing more.
 
 So there are three shapes of register lane, and the manifest always says which one
@@ -291,12 +299,22 @@ node scripts/ultraprospect.mjs --help
 | `dossier --id` | The grounding packet for one company: fact sheet plus every page, in full. |
 | `check` | The gate. Exit 1 means do not present the output. |
 | `render` | `PROSPECTS.csv`, `prospects.json`, `REPORT.md`, a self-contained `index.html`. |
+| `feedback --run <dir> [--apply <file>]` | Import the user's wrong-company/site/contact, exclusion or useful decisions, with checked identity and provenance. |
 | `watch --since` | What moved: who opened, closed, started hiring, gained a site. |
 | `orchestrate` | Fan the search and judgement phases out across subagents, each phase on the model its failure mode deserves — see below. |
-| `mcp` | Serve it over MCP: where, ingest, scan, places, confirm, enrich, score, dossier, check, render, watch, doctor. The two `--apply` folds and `resolve` stay CLI-only, on purpose. |
+| `mcp` | Serve it over MCP: where, ingest, scan, places, confirm, enrich, score, dossier, check, render, watch, doctor. The adjudication folds, `feedback` and `resolve` stay CLI-only, on purpose. |
 | `doctor` | Check every upstream. `--country` narrows the register probes. |
 
 ### A run, end to end
+
+User feedback is a separate decision ledger, not another score. `feedback --run <dir>` emits
+current subjects with their identity and snapshot digest. Copy the user's decisions into `entries`,
+then `feedback --run <dir> --apply feedback.json` and `render --run <dir>`.
+`wrong-company`, `wrong-site`, `wrong-contact` and `exclude` quarantine the entire company row in
+every subsequent render; `useful` records a positive decision without changing scores or cancelling
+an exclusion. Raw `places.json` and evidence remain unchanged. `FEEDBACK.json` persists beside the
+exports; there is no outreach, external CRM or automatic undo. For the import shape, sourced
+subjects and stale/conflicting import failures, see [user feedback](skills/ultraprospect/references/feedback.md).
 
 ```bash
 ultraprospect where   "Vincennes" --country fr             # or refuse, and list the candidates

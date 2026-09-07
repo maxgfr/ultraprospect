@@ -59,30 +59,91 @@ const citationRe = () => /\[P(\d+)\]/g;
 const MODEL_MARK = /\[M\]/;
 
 /**
+ * A source that names an OSM feature rather than a stored page.
+ *
+ * Not a global regex, deliberately: `exec` on a `/g` instance carries
+ * `lastIndex` between calls, which is the bug the citation factory above exists
+ * to avoid.
+ */
+const OSM_SOURCE = /^osm:([nwr]\d+)$/;
+
+/** A row of a Markdown table. Its scaffolding is structure; its data rows are claims. */
+function isTableRow(t: string): boolean {
+  return t.startsWith("|");
+}
+
+/** `| --- | :--: |` — the rule under a table's header, and never a claim. */
+function isTableSeparator(t: string): boolean {
+  return t.includes("|") && t.includes("-") && /^[|\s:-]+$/.test(t);
+}
+
+/** `- Revenue: …`, `1. Revenue: …`. Each item is its own claim, not the previous one's tail. */
+const LIST_ITEM = /^(?:[-*+]|\d+[.)])\s+/;
+
+/**
  * Lines that are structure rather than assertion.
  *
- * A heading, a bullet's label, a table separator, a fenced block: none of these
- * make a factual claim, and demanding a citation on them would train whoever
- * writes the dossier to sprinkle ids to silence the gate — which is worse than
- * no gate, because the ids would stop meaning anything.
+ * A heading, a table's header, a separator, a fenced block: none of these make
+ * a factual claim, and demanding a citation on them would train whoever writes
+ * the dossier to sprinkle ids to silence the gate — which is worse than no
+ * gate, because the ids would stop meaning anything.
+ *
+ * What is NOT here any more is SIZE, in any of its spellings. "Structure is
+ * anything under 40 characters" exempted `Revenue: 500 million euros.` —
+ * twenty-seven characters and a filed figure. Counting words instead only moved
+ * the hole: `Acme is hiring.` is three words, `Acme recrute.` is two, and
+ * neither is less of a claim for it. Table rows and block quotes were exempt
+ * wholesale and smuggled the same claims through. Structure is now recognised by
+ * its Markdown alone, and everything else — prose, a data row, quoted text — is
+ * held to a `[P#]` or an `[M]`.
+ *
+ * `next` is the line directly below, which is what tells a table's HEADER (a
+ * separator sits under it) from one of its data rows (nothing does). Markdown
+ * requires the separator on that exact line, so one line of lookahead is both
+ * sufficient and what keeps this pass linear.
  */
-function isStructural(line: string): boolean {
+function isStructural(line: string, next = ""): boolean {
   const t = line.trim();
   if (t.length === 0) return true;
-  if (t.startsWith("#") || t.startsWith(">") || t.startsWith("|") || t.startsWith("```")) return true;
+  if (t.startsWith("#") || t.startsWith("```")) return true;
   if (/^[-*_]{3,}$/.test(t)) return true;
-  // A short bullet is a label ("**Contacts.**"), not a claim.
-  if (/^[-*]\s*\*\*[^*]+\*\*:?\s*$/.test(t)) return true;
-  if (t.length < 40) return true;
+  if (isTableSeparator(t)) return true;
+  if (isTableRow(t) && isTableSeparator(next)) return true;
+  // Only the dossier template's explicit section labels are exempt. An
+  // arbitrary bold bullet can assert a fact just as ordinary prose can.
+  if (/^[-*+]\s*\*\*(?:What they do|Size and shape|Signals|Angle|Contacts|Gaps)\.?\*\*[.:]?$/i.test(t)) return true;
   return false;
 }
 
-/** Does this line assert something about the world? */
-function isFactual(line: string): boolean {
-  if (isStructural(line)) return false;
-  // A line that is only a URL or a path is a reference, not a claim.
-  if (/^\s*[-*]?\s*https?:\/\/\S+\s*$/.test(line)) return false;
-  return true;
+/**
+ * Everything a unit actually asserts, stripped to its letters and digits.
+ *
+ * Citations and bare URLs are addresses rather than statements: a line that is
+ * only a link claims nothing, and counting `[P1]` as content would make a bare
+ * id look like a sentence. Everything else keeps its characters — code spans
+ * INCLUDED, because ``Employees: `500` `` is a headcount and backticks are
+ * typography, not a licence — and the Markdown around them (pipes, bullets,
+ * quote markers, emphasis) falls out with the rest of the punctuation.
+ */
+function assertedText(unit: string): string {
+  return unit
+    .replace(/\[P\d+\]|\[M\]/g, " ")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+/**
+ * Does this unit assert something about the world?
+ *
+ * Anything with words left in it, once structure and references are set aside.
+ * The gate makes no judgement about how much a unit says or in what language it
+ * says it: a short sentence is a sentence, and the previous heuristics — a
+ * character count, then a word count — each drew a line that a real claim
+ * sat under. What is left out is a unit that says nothing on its own: a bare
+ * link, an empty bullet, a line holding only its own citation.
+ */
+function isFactual(unit: string): boolean {
+  return assertedText(unit).length > 0;
 }
 
 /**
@@ -132,16 +193,58 @@ export function runCheck(input: CheckInput): CheckReport {
   };
 
   // Every page id the run actually holds, with its text, read once.
+  //
+  // Ownership is a SET, not a single place: a run that merged two entries can
+  // legitimately list one page on the survivor and on nothing else, and a page
+  // claimed by two places must not silently lose one of them here.
   const pageText = new Map<string, string>();
-  const pageOwner = new Map<string, string>();
+  const pageOwners = new Map<string, Set<string>>();
   for (const place of places) {
     const dir = join(runDir, "pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"));
     for (const id of place.pages) {
       const file = join(dir, `${id}.md`);
-      pageOwner.set(id, place.id);
+      const owners = pageOwners.get(id) ?? new Set<string>();
+      owners.add(place.id);
+      pageOwners.set(id, owners);
       if (existsSync(file)) pageText.set(id, readFileSync(file, "utf8"));
     }
   }
+
+  // ---- Whose evidence is this? -----------------------------------------------
+  //
+  // A stored page and an OSM feature are evidence about ONE company. Re-reading
+  // the cited source without asking whose it was let a place carry the
+  // neighbour's email address, the neighbour's quote and the neighbour's
+  // registration number — each one genuinely re-readable, each one about
+  // somebody else, and the email is the one that gets sent. `citation-foreign`
+  // has always said a dossier may not borrow another company's page; a contact
+  // and a registration may not borrow one either.
+
+  /**
+   * The OSM feature a place IS.
+   *
+   * Read off the feature the place CARRIES, because `place.id` is not it: a
+   * place merged with a register record can be filed under the register's id
+   * while its physical identity — and every contact a mapper declared on it —
+   * is still the OSM feature in `place.osm`. The id is only a fallback, for a
+   * place that has an `osm:` id and no attached feature.
+   */
+  const osmKeyOf = (place: Place): string | undefined => {
+    if (place.osm) return `${place.osm.osmType[0]}${place.osm.osmId}`;
+    return OSM_SOURCE.exec(place.id)?.[1];
+  };
+  /** Is this source — a stored page id or an OSM feature — this place's own? */
+  const owns = (place: Place, from: string): boolean => {
+    const feature = OSM_SOURCE.exec(from);
+    if (feature) return osmKeyOf(place) === feature[1];
+    return place.pages.includes(from);
+  };
+  /** Whose it is instead, so the error names the company the evidence describes. */
+  const ownerOf = (from: string): string => {
+    const feature = OSM_SOURCE.exec(from);
+    const owners = feature ? places.filter((p) => osmKeyOf(p) === feature[1]).map((p) => p.id) : [...(pageOwners.get(from) ?? [])];
+    return owners.length > 0 ? owners.join(", ") : "no place in this run";
+  };
 
   // ---- Rule 3: no contact that was not observed ------------------------------
   //
@@ -179,6 +282,14 @@ export function runCheck(input: CheckInput): CheckReport {
           );
           continue;
         }
+        if (!owns(place, item.from)) {
+          err(
+            "contact-foreign",
+            `${place.id} · ${item.kind} ${item.value}`,
+            `is declared on ${item.from}, which is ${ownerOf(item.from)}, not ${place.id}. The value is real and re-readable — about another company. It must not ship on this row.`,
+          );
+          continue;
+        }
         const declared = poiContacts(poi);
         const values = item.kind === "email" ? declared.emails : item.kind === "phone" ? declared.phones : item.kind === "social" ? declared.socials : [];
         if (!values.some((value) => value.value === item.value)) {
@@ -197,6 +308,14 @@ export function runCheck(input: CheckInput): CheckReport {
           "contact-unsourced",
           `${place.id} · ${item.kind} ${item.value}`,
           `claims to come from ${item.from}, which is not a stored page in this run. A contact that cannot be re-read was not observed.`,
+        );
+        continue;
+      }
+      if (!owns(place, item.from)) {
+        err(
+          "contact-foreign",
+          `${place.id} · ${item.kind} ${item.value}`,
+          `was read from ${item.from}, a page fetched for ${ownerOf(item.from)}, not for ${place.id}. The value is real and re-readable — about another company. It must not ship on this row.`,
         );
         continue;
       }
@@ -239,6 +358,12 @@ export function runCheck(input: CheckInput): CheckReport {
             `${place.id} · ${id.kind} ${id.value}`,
             `claims to come from ${id.from}, which is not an OSM feature stored in this run's osm.json.`,
           );
+        } else if (!owns(place, id.from)) {
+          err(
+            "legal-id-foreign",
+            `${place.id} · ${id.kind} ${id.value}`,
+            `is declared on ${id.from}, which is ${ownerOf(id.from)}, not ${place.id}. A registration read off another company's feature is that company's identity, and the record attached to it here would be the wrong one.`,
+          );
         } else if (!osmCarriesIdentifier(id.from, id.value)) {
           err(
             "legal-id-not-on-page",
@@ -251,6 +376,14 @@ export function runCheck(input: CheckInput): CheckReport {
       const text = pageText.get(id.from);
       if (!text) {
         err("legal-id-unsourced", `${place.id} · ${id.kind} ${id.value}`, `claims to come from ${id.from}, which is not a stored page in this run.`);
+        continue;
+      }
+      if (!owns(place, id.from)) {
+        err(
+          "legal-id-foreign",
+          `${place.id} · ${id.kind} ${id.value}`,
+          `was read from ${id.from}, a page fetched for ${ownerOf(id.from)}, not for ${place.id}. An identifier copied from another company's Impressum builds this row on that company's identity.`,
+        );
         continue;
       }
       // Compared with separators stripped from both sides: a page writes
@@ -363,11 +496,7 @@ export function runCheck(input: CheckInput): CheckReport {
           `no stored page has this id. check re-opens every citation, so this one was invented or the page was deleted.`,
         );
       } else if (!owned.has(id)) {
-        err(
-          "citation-foreign",
-          `${rel} · ${id}`,
-          `belongs to ${pageOwner.get(id)}, not to ${place.id}. A dossier may only cite pages fetched for its own company.`,
-        );
+        err("citation-foreign", `${rel} · ${id}`, `belongs to ${ownerOf(id)}, not to ${place.id}. A dossier may only cite pages fetched for its own company.`);
       }
     }
 
@@ -384,6 +513,7 @@ export function runCheck(input: CheckInput): CheckReport {
     let inFence = false;
     let start = 0;
     let buffer: string[] = [];
+    let quoted = false;
     const flush = () => {
       if (buffer.length === 0) return;
       const paragraph = buffer.join(" ");
@@ -404,11 +534,23 @@ export function runCheck(input: CheckInput): CheckReport {
         flush();
         continue;
       }
-      // A heading, a table row or a rule closes the paragraph before it and is
-      // structure in its own right.
-      if (isStructural(line) && buffer.length === 0) continue;
+      const isQuote = line.trim().startsWith(">");
+      const t = line.trim().replace(/^(?:>\s*)+/, "");
+      if (buffer.length && quoted !== isQuote) flush();
+      quoted = isQuote;
+      const next = (lines[i + 1] ?? "").trim().replace(/^(?:>\s*)+/, "");
+      // A heading, a rule, a table's scaffolding: structure closes the paragraph
+      // before it and is not a claim in its own right.
+      if (isStructural(t, next)) {
+        flush();
+        continue;
+      }
+      // Bullets and table data rows are separate claims; consecutive quote
+      // lines form one wrapped paragraph with its citation at the end.
+      if (LIST_ITEM.test(t) || isTableRow(t)) flush();
       if (buffer.length === 0) start = i;
-      buffer.push(line.trim());
+      buffer.push(t);
+      if (isTableRow(t)) flush();
     }
     flush();
   }

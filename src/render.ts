@@ -14,6 +14,7 @@ import { collectEvidence } from "./excerpts.js";
 import { buildHtml, HTML_ROW_CAP } from "./html.js";
 import { buildReport } from "./report.js";
 import { ranked } from "./score.js";
+import { feedbackSelection, readFeedback } from "./feedback.js";
 import type { Place, RunManifest } from "./types.js";
 
 export { buildReport } from "./report.js";
@@ -103,6 +104,8 @@ function readDossiers(runDir: string, places: readonly Place[]): Map<string, str
 
 /** Everything a run hands over, built from the same places and manifest. */
 export function buildAll(places: readonly Place[], manifest: RunManifest, opts: RenderOptions = {}): RenderOutcome {
+  const feedback = opts.runDir ? readFeedback(opts.runDir) : undefined;
+  if (feedback) places = feedbackSelection(places, feedback);
   // Only the rows the page will show are worth reading evidence for: a quote
   // attached to a company nobody can scroll to is bytes with no reader.
   const visible = ranked(places).slice(0, HTML_ROW_CAP);
@@ -114,6 +117,7 @@ export function buildAll(places: readonly Place[], manifest: RunManifest, opts: 
     { path: "REPORT.md", content: buildReport(places, manifest) },
     { path: "index.html", content: buildHtml(places, manifest, ctx) },
   ];
+  if (feedback?.entries.length) files.push({ path: "FEEDBACK.json", content: JSON.stringify(feedback, null, 2) + "\n" });
   const privacy = opts.noPeople ? undefined : buildPrivacyNote(places, manifest);
   if (privacy) files.push({ path: "PRIVACY.md", content: privacy });
   return { files };

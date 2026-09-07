@@ -17,6 +17,7 @@
 // Exit codes: 0 ok · 1 a gate failed or nothing was produced · 2 usage, or a
 // refusal to guess. Anything non-zero means stop and fix, never present anyway.
 import { readFileSync } from "node:fs";
+import { feedbackSource, importFeedback } from "./feedback.js";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -109,6 +110,7 @@ export const COMMANDS = [
   "resolve",
   "enrich",
   "score",
+  "feedback",
   "dossier",
   "check",
   "render",
@@ -200,6 +202,7 @@ COMMANDS
   resolve                Find each company's own website and prove it is theirs.
   enrich --tier 1|2      Read those websites: tier 1 on all of them, tier 2 on the ones you pick.
   score                  Rank by measured signals; fold your ICP verdicts in with --apply.
+  feedback               Export feedback subjects or import user decisions with --apply.
   dossier --id <id>      Print the grounding packet for one company, pages and all.
   check                  The gate: citations resolve, claims are cited, contacts were observed.
   render                 CSV, JSON, report and a self-contained HTML page.
@@ -285,12 +288,19 @@ RANKING (score)
 DOSSIER
   --id <place id>        Which company's packet to print. Use --json for the list of ids.
 
+USER FEEDBACK (feedback)
+  --run <dir>           Print source-bound subjects for user feedback as JSON.
+  --apply <file>        Import {schemaVersion:1,entries:[{id,source,kind,reason,by,at,subject?}]}.
+                        Kinds: wrong-company, wrong-site, wrong-contact, exclude, useful.
+                        Flagged rows are quarantined on every render; useful does not cancel exclusions.
+
 ADJUDICATION (match)
   --apply <file>         A JSON array of {osmId, registryId, connectorId?, merge, why}. "-" reads stdin.
 
 BULK OPEN DATA (ingest)
   --country <cc>         Which country's export to ingest: gb (Companies House, 470 MB),
-                         de (Handelsregister via OffeneRegister, 260 MB). Both keyless.
+                         de (Handelsregister via OffeneRegister, 260 MB),
+                         ee (Äriregister, 18 MB, daily). All keyless.
   --list                 What is already in the cache: rows, vintage, size on disk.
   --check                Ask each register whether it has published something newer.
                          Exits 1 when a cache is behind, so a cron can act on it.
@@ -1090,6 +1100,27 @@ async function cmdRender(values: Record<string, string>, bools: ReadonlySet<stri
   return EXIT_OK;
 }
 
+async function cmdFeedback(values: Record<string, string>): Promise<number> {
+  if (!values.run) throw new UsageError("feedback needs --run <dir>");
+  const runDir = resolveRun(values.run),
+    places = readPlaces(runDir);
+  if (values.apply) {
+    const ledger = importFeedback(runDir, places, readJsonArg(values.apply, "--apply"));
+    out(jsonLine(ledger));
+    say(`feedback: ${ledger.entries.length} recorded event(s); next: ultraprospect render --run ${runDir}`);
+  } else {
+    out(
+      jsonLine({
+        schemaVersion: 1,
+        entries: [],
+        subjects: places.map((place) => ({ source: feedbackSource(place), name: place.name, website: place.website, contacts: place.contacts })),
+      }),
+    );
+    say(`feedback: fill entries from the user's decisions, then import with feedback --run ${runDir} --apply <file>`);
+  }
+  return EXIT_OK;
+}
+
 async function cmdWatch(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
   if (!values.run) throw new UsageError("watch needs --run <dir> (the newer run)");
   if (!values.since) throw new UsageError("watch needs --since <dir> (the earlier run to compare against)");
@@ -1206,6 +1237,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return cmdEnrich(values, bools);
     case "score":
       return cmdScore(values, bools);
+    case "feedback":
+      return cmdFeedback(values);
     case "dossier":
       return cmdDossier(values, bools);
     case "check":

@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
 // src/cli.ts
-import { readFileSync as readFileSync11 } from "fs";
-import { join as join17 } from "path";
-import { fileURLToPath as fileURLToPath2 } from "url";
+import { readFileSync as readFileSync12 } from "fs";
+
+// src/feedback.ts
+import { createHash } from "crypto";
+import { existsSync as existsSync7, readFileSync as readFileSync7 } from "fs";
+import { join as join9 } from "path";
 
 // src/vendor/webindex-engine.mjs
 import { inflateSync, inflateRawSync } from "zlib";
@@ -187,11 +190,11 @@ function scanRatios(t) {
   }
   return { control: control / t.length, replacement: replacement / t.length };
 }
-function assessPdfText(text2) {
-  return assessExtractedText(text2, "no text layer (scanned or image-only PDF?)");
+function assessPdfText(text3) {
+  return assessExtractedText(text3, "no text layer (scanned or image-only PDF?)");
 }
-function assessExtractedText(text2, emptyReason) {
-  const t = text2.trim();
+function assessExtractedText(text3, emptyReason) {
+  const t = text3.trim();
   if (!t) return { ok: false, reason: emptyReason };
   const { control, replacement } = scanRatios(t);
   if (control > CONTROL_RATIO_MAX) {
@@ -327,23 +330,23 @@ async function extractPdf(bytes, opts = {}) {
       lastReason = `scanned PDF, and this run's OCR budget is spent (raise ${envName("OCR_MAX")})`;
       continue;
     }
-    let text2;
+    let text3;
     try {
-      if (id === "pdf-inspector") text2 = await viaPdfInspector(bytes);
-      else if (id === "anydoc") text2 = await viaAnydoc(bytes);
-      else if (id === "pdftotext") text2 = await viaPdftotext(bytes);
-      else if (id === "firecrawl") text2 = opts.firecrawl ? await opts.firecrawl() : void 0;
-      else if (id === "ocr") text2 = await ocrPdf(bytes);
-      else text2 = pdfToText(bytes);
+      if (id === "pdf-inspector") text3 = await viaPdfInspector(bytes);
+      else if (id === "anydoc") text3 = await viaAnydoc(bytes);
+      else if (id === "pdftotext") text3 = await viaPdftotext(bytes);
+      else if (id === "firecrawl") text3 = opts.firecrawl ? await opts.firecrawl() : void 0;
+      else if (id === "ocr") text3 = await ocrPdf(bytes);
+      else text3 = pdfToText(bytes);
     } catch {
-      text2 = void 0;
+      text3 = void 0;
     }
-    if (text2 === void 0) {
+    if (text3 === void 0) {
       if (id !== "firecrawl") dead.add(id);
       continue;
     }
-    const verdict = assessPdfText(text2);
-    if (verdict.ok) return { text: text2.trim(), via: id };
+    const verdict = assessPdfText(text3);
+    if (verdict.ok) return { text: text3.trim(), via: id };
     lastReason = verdict.reason;
   }
   return { text: "", reason: lastReason ?? "no PDF extractor available" };
@@ -423,19 +426,19 @@ async function extractDocument(bytes, fmt, opts = {}) {
   let lastReason;
   for (const id of enabledDocExtractors(opts.engines)) {
     if (dead2.has(id)) continue;
-    let text2;
+    let text3;
     try {
-      if (id === "anydoc") text2 = await viaAnydoc2(bytes, fmt.format);
-      else text2 = opts.firecrawl ? await opts.firecrawl() : void 0;
+      if (id === "anydoc") text3 = await viaAnydoc2(bytes, fmt.format);
+      else text3 = opts.firecrawl ? await opts.firecrawl() : void 0;
     } catch {
-      text2 = void 0;
+      text3 = void 0;
     }
-    if (text2 === void 0) {
+    if (text3 === void 0) {
       if (id !== "firecrawl") dead2.add(id);
       continue;
     }
-    const verdict = assessExtractedText(text2, "the converter produced no text");
-    if (verdict.ok) return { text: text2.trim(), via: id };
+    const verdict = assessExtractedText(text3, "the converter produced no text");
+    if (verdict.ok) return { text: text3.trim(), via: id };
     lastReason = verdict.reason;
   }
   return { text: "", reason: lastReason ?? "no document converter available" };
@@ -832,12 +835,12 @@ async function httpJson(method, url, body, opts = {}) {
         ctrl.abort();
         return { ok: false, status: res.status, data: void 0, error: `response too large: over the ${max}-byte cap` };
       }
-      const text2 = bytes.toString("utf8");
+      const text3 = bytes.toString("utf8");
       let data;
       try {
-        data = text2 ? JSON.parse(text2) : void 0;
+        data = text3 ? JSON.parse(text3) : void 0;
       } catch {
-        data = text2;
+        data = text3;
       }
       const result = { ok: res.ok, status: res.status, data };
       if (RETRY_STATUS.has(res.status) && attempt < attempts - 1) {
@@ -1132,12 +1135,12 @@ async function fetchAndExtract(url, opts = {}) {
   }
   const isHtml = /html/i.test(res.contentType) || /^\s*</.test(res.body);
   const stripped = isHtml ? htmlToText(extractMainHtml(res.body)) : res.body;
-  const text2 = isHtml && opts.stripConsent ? stripConsentBoilerplate(stripped).text : stripped;
+  const text3 = isHtml && opts.stripConsent ? stripConsentBoilerplate(stripped).text : stripped;
   const title = isHtml ? htmlTitle(res.body) : void 0;
   const canonical = isHtml ? htmlCanonicalUrl(res.body) : void 0;
   const metaDescription = isHtml ? metaDescriptionOf(res.body) : void 0;
   return {
-    text: text2,
+    text: text3,
     title,
     canonical,
     metaDescription,
@@ -1161,9 +1164,9 @@ var CONSENT_PATTERNS = [
   /advertising partners/i,
   /legitimate interest/i
 ];
-function stripConsentBoilerplate(text2) {
+function stripConsentBoilerplate(text3) {
   let dropped = 0;
-  const kept = text2.split("\n").filter((line) => {
+  const kept = text3.split("\n").filter((line) => {
     const hits = CONSENT_PATTERNS.reduce((n, re) => n + (re.test(line) ? 1 : 0), 0);
     const isBanner = hits >= 2 || hits === 1 && line.trim().length < 120;
     if (isBanner) dropped++;
@@ -1430,8 +1433,8 @@ function tagText(block2, ...names) {
     if (!m) continue;
     const raw = m[1];
     const inner = /<!\[CDATA\[([\s\S]*?)\]\]>/.exec(raw)?.[1] ?? raw;
-    const text2 = decodeEntities(inner.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
-    if (text2) return text2;
+    const text3 = decodeEntities(inner.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+    if (text3) return text3;
   }
   return void 0;
 }
@@ -1884,9 +1887,9 @@ function readCache(url, acceptLanguage = "", extractor = "native") {
   try {
     const entry = JSON.parse(readFileSync3(meta, "utf8"));
     if (typeof entry.cachedAt !== "number") return void 0;
-    const text2 = existsSync4(body) ? readFileSync3(body, "utf8") : entry.text;
-    if (!text2?.trim()) return void 0;
-    return { ...entry, text: text2 };
+    const text3 = existsSync4(body) ? readFileSync3(body, "utf8") : entry.text;
+    if (!text3?.trim()) return void 0;
+    return { ...entry, text: text3 };
   } catch {
     return void 0;
   }
@@ -1895,10 +1898,10 @@ function writeCache(url, res, now, acceptLanguage = "", extractor = "native") {
   if (isNoWrite()) return;
   const dir2 = cacheDir();
   const { meta, body } = entryPaths(url, acceptLanguage, extractor);
-  const { text: text2, ...rest } = res;
+  const { text: text3, ...rest } = res;
   const write = () => {
     ensureDir2(dir2);
-    writeFileAtomic(body, text2 ?? "");
+    writeFileAtomic(body, text3 ?? "");
     writeFileAtomic(meta, JSON.stringify({ ...rest, cachedAt: now }));
   };
   try {
@@ -2314,9 +2317,9 @@ function validateArgs(schema, args) {
   }
   return void 0;
 }
-function capResponse(text2, tool, maxBytes, artifact, advice = {}) {
-  const bytes = Buffer.byteLength(text2, "utf8");
-  if (bytes <= maxBytes) return text2;
+function capResponse(text3, tool, maxBytes, artifact, advice = {}) {
+  const bytes = Buffer.byteLength(text3, "utf8");
+  if (bytes <= maxBytes) return text3;
   return JSON.stringify(
     {
       truncated: true,
@@ -2331,11 +2334,11 @@ function capResponse(text2, tool, maxBytes, artifact, advice = {}) {
     2
   ) + "\n";
 }
-function structuredContentFor(text2, capped, hasSchema) {
+function structuredContentFor(text3, capped, hasSchema) {
   if (capped || !hasSchema) return void 0;
   let parsed;
   try {
-    parsed = JSON.parse(text2);
+    parsed = JSON.parse(text3);
   } catch {
     return void 0;
   }
@@ -2406,13 +2409,13 @@ function describe(root2, rel, fallbackTitle) {
   return decl;
 }
 function firstProse(file) {
-  let text2;
+  let text3;
   try {
-    text2 = readFileSync5(file, "utf8");
+    text3 = readFileSync5(file, "utf8");
   } catch {
     return void 0;
   }
-  const body = text2.startsWith("---\n") ? text2.slice(text2.indexOf("\n---", 3) + 4) : text2;
+  const body = text3.startsWith("---\n") ? text3.slice(text3.indexOf("\n---", 3) + 4) : text3;
   for (const block2 of body.split(/\n\s*\n/)) {
     const line = block2.trim();
     if (!line || line.startsWith("#") || line.startsWith(">") || line.startsWith("|") || line.startsWith("```")) continue;
@@ -2543,10 +2546,10 @@ function createServer(adapter, opts = {}) {
     }
     try {
       const { text: raw, artifact } = await adapter.callTool(name, args);
-      const text2 = capResponse(raw, name, maxBytes, artifact, adapter.capAdvice);
-      const capped = text2 !== raw;
-      const structured = protocol >= RICH_TOOLS_SINCE ? structuredContentFor(text2, capped, decl.outputSchema !== void 0) : void 0;
-      reply({ result: { content: [{ type: "text", text: text2 }], ...structured ? { structuredContent: structured } : {} } });
+      const text3 = capResponse(raw, name, maxBytes, artifact, adapter.capAdvice);
+      const capped = text3 !== raw;
+      const structured = protocol >= RICH_TOOLS_SINCE ? structuredContentFor(text3, capped, decl.outputSchema !== void 0) : void 0;
+      reply({ result: { content: [{ type: "text", text: text3 }], ...structured ? { structuredContent: structured } : {} } });
     } catch (e) {
       if (e instanceof ToolError) {
         reply({ result: { content: [{ type: "text", text: e.message }], isError: true } });
@@ -2775,14 +2778,14 @@ function corsHeaders(origin) {
   return origin ? { "access-control-allow-origin": origin, vary: "origin" } : {};
 }
 function sendJson(res, status, body, origin, extra = {}) {
-  const text2 = JSON.stringify(body);
+  const text3 = JSON.stringify(body);
   res.writeHead(status, {
     "content-type": "application/json",
-    "content-length": String(Buffer.byteLength(text2, "utf8")),
+    "content-length": String(Buffer.byteLength(text3, "utf8")),
     ...corsHeaders(origin),
     ...extra
   });
-  res.end(text2);
+  res.end(text3);
 }
 var DRAIN_LIMIT = MAX_BODY_BYTES * 8;
 function readBody(req) {
@@ -2829,6 +2832,10 @@ function brandEngine() {
     version: VERSION
   });
 }
+
+// src/run.ts
+import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync6, readdirSync as readdirSync4 } from "fs";
+import { join as join3, resolve } from "path";
 
 // src/classification/nace.ts
 var NACE_SECTION_DIVISIONS = [
@@ -4439,8 +4446,8 @@ function applyClientFilters(records, query, endpoint) {
   }
   return out2;
 }
-function registryRecordKey(record) {
-  return record.establishmentId ?? `siren:${record.id}`;
+function registryRecordKey(record2) {
+  return record2.establishmentId ?? `siren:${record2.id}`;
 }
 async function drain(query, budget, label, opts, existing) {
   const first = await fetchPage(query, 1);
@@ -5184,19 +5191,19 @@ async function* csvRecords(stream, delimiter = ",") {
   let pending = false;
   let atStart = true;
   for await (const chunk of stream) {
-    let text2 = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    let text3 = typeof chunk === "string" ? chunk : chunk.toString("utf8");
     if (atStart) {
-      text2 = text2.replace(/^\uFEFF/, "");
+      text3 = text3.replace(/^\uFEFF/, "");
       atStart = false;
     }
-    for (let i = 0; i < text2.length; i++) {
-      const c = text2[i];
+    for (let i = 0; i < text3.length; i++) {
+      const c = text3[i];
       if (quoted) {
         if (c !== '"') {
           field += c;
           continue;
         }
-        if (text2[i + 1] === '"') {
+        if (text3[i + 1] === '"') {
           field += '"';
           i++;
         } else quoted = false;
@@ -5237,8 +5244,8 @@ async function* rowsOf(source, path) {
     const compressed = readFileSync2(path);
     let tail = "";
     for (const block2 of bunzip2Blocks(compressed)) {
-      const text2 = tail + Buffer.from(block2).toString("utf8");
-      const parts = text2.split("\n");
+      const text3 = tail + Buffer.from(block2).toString("utf8");
+      const parts = text3.split("\n");
       tail = parts.pop() ?? "";
       for (const line of parts) {
         if (!line) continue;
@@ -5490,11 +5497,11 @@ function splitNativeNumber(native) {
   return { court: m[1], kind: m[2], number: m[3].trim() };
 }
 function parseGermanAddress(raw, fallbackTown) {
-  const text2 = raw?.trim().replace(/\.$/, "");
-  if (!text2) return fallbackTown ? { commune: fallbackTown, pays: "Germany" } : { pays: "Germany" };
-  const m = text2.match(/^(.*?),\s*(\d{5})\s+(.+)$/);
-  if (!m) return { raw: text2, commune: fallbackTown, pays: "Germany" };
-  return { raw: text2, libelleVoie: m[1]?.trim() || void 0, codePostal: m[2], commune: m[3]?.trim() || fallbackTown, pays: "Germany" };
+  const text3 = raw?.trim().replace(/\.$/, "");
+  if (!text3) return fallbackTown ? { commune: fallbackTown, pays: "Germany" } : { pays: "Germany" };
+  const m = text3.match(/^(.*?),\s*(\d{5})\s+(.+)$/);
+  if (!m) return { raw: text3, commune: fallbackTown, pays: "Germany" };
+  return { raw: text3, libelleVoie: m[1]?.trim() || void 0, codePostal: m[2], commune: m[3]?.trim() || fallbackTown, pays: "Germany" };
 }
 function statusOf2(raw) {
   if (raw === "currently registered") return "active";
@@ -5527,7 +5534,7 @@ var offeneRegisterSnapshot = {
     const { court, kind, number } = splitNativeNumber(native);
     const town = attrs.registered_office?.trim();
     const asOf = typeof row2.retrieved_at === "string" ? row2.retrieved_at.slice(0, 10) : void 0;
-    const record = {
+    const record2 = {
       connectorId: CONNECTOR_ID5,
       // The court-qualified number IS the identity. `company_number` in this
       // export is an OpenCorporates internal key ("K1101R_HRB150148") that no
@@ -5560,7 +5567,7 @@ var offeneRegisterSnapshot = {
       }
     };
     const ids = [native.trim(), kind && number ? `${kind} ${number}` : void 0].filter((x) => Boolean(x));
-    return { record, localities: town ? [town] : [], ids };
+    return { record: record2, localities: town ? [town] : [], ids };
   }
 };
 var deOffeneRegister = {
@@ -5721,7 +5728,7 @@ var ariregisterSnapshot = {
       pays: "Estonia"
     };
     const vat = row2.kmkr_nr?.trim();
-    const record = {
+    const record2 = {
       connectorId: CONNECTOR_ID6,
       id: code,
       names: [name],
@@ -5745,7 +5752,7 @@ var ariregisterSnapshot = {
         ehakCode: row2.asukoha_ehak_kood?.trim() || void 0
       }
     };
-    return { record, localities, ids: [code, vat].filter((x) => Boolean(x)) };
+    return { record: record2, localities, ids: [code, vat].filter((x) => Boolean(x)) };
   }
 };
 function passesFilters(rec, filters) {
@@ -5963,8 +5970,8 @@ function snapshotUrl(now, back) {
   const month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
   return `${SNAPSHOT_BASE}/BasicCompanyDataAsOneFile-${month}.zip`;
 }
-function sicOf(text2) {
-  return sectionOfSic(text2?.trim().match(/^(\d{4,5})/)?.[1]);
+function sicOf(text3) {
+  return sectionOfSic(text3?.trim().match(/^(\d{4,5})/)?.[1]);
 }
 function statusOf4(raw) {
   const s = raw?.trim().toLowerCase();
@@ -5999,7 +6006,7 @@ var companiesHouseSnapshot = {
       commune: postTown || void 0,
       pays: row2["RegAddress.Country"]?.trim() || "United Kingdom"
     };
-    const record = {
+    const record2 = {
       connectorId: CONNECTOR_ID7,
       id: number.toUpperCase(),
       names: [name, ...previous],
@@ -6025,7 +6032,7 @@ var companiesHouseSnapshot = {
         administrativeSic: administrative
       }
     };
-    return { record, localities: postTown ? [postTown] : [], ids: [number] };
+    return { record: record2, localities: postTown ? [postTown] : [], ids: [number] };
   }
 };
 function passesFilters2(rec, filters) {
@@ -6785,19 +6792,323 @@ function noSweepReason(countryCode, selection) {
   }
   return `no register connector covers ${where}; the territory is OSM-only and the list is not a register extract`;
 }
-function sizeBandLabel(record, band) {
+function sizeBandLabel(record2, band) {
   if (!band) return void 0;
-  const bands = connectorById(record.connectorId)?.sizeBands;
+  const bands = connectorById(record2.connectorId)?.sizeBands;
   return bands?.find((b) => b.code === band)?.label ?? band;
 }
-function employeeFloor(record) {
-  if (typeof record.employees === "number") return record.employees;
-  const bands = connectorById(record.connectorId)?.sizeBands;
+function employeeFloor(record2) {
+  if (typeof record2.employees === "number") return record2.employees;
+  const bands = connectorById(record2.connectorId)?.sizeBands;
   if (!bands) return void 0;
-  const code = record.parent?.sizeBand ?? record.sizeBand;
+  const code = record2.parent?.sizeBand ?? record2.sizeBand;
   const floor = bands.find((b) => b.code === code)?.floor;
   return typeof floor === "number" && floor >= 0 ? floor : void 0;
 }
+
+// src/run.ts
+var DEFAULT_OUT = ".ultraprospect";
+function newRun(outRoot, label) {
+  const slug = slugify(shortLabel(label)) || "run";
+  const id = runId();
+  const root2 = resolve(outRoot);
+  const dir2 = join3(root2, "runs", `${slug}-${id}`);
+  mkdirSync2(dir2, { recursive: true });
+  return { root: root2, dir: dir2, slug, id };
+}
+function resolveRun(pathOrRoot) {
+  const p = resolve(pathOrRoot);
+  if (existsSync3(join3(p, "manifest.json"))) return p;
+  const runsDir = existsSync3(join3(p, "runs")) ? join3(p, "runs") : p;
+  if (!existsSync3(runsDir)) throw new Error(`no run directory at ${p}`);
+  const candidates = readdirSync4(runsDir, { withFileTypes: true }).filter((e) => e.isDirectory() && existsSync3(join3(runsDir, e.name, "manifest.json"))).map((e) => e.name).sort();
+  const newest = candidates.at(-1);
+  if (!newest) throw new Error(`no run with a manifest.json under ${runsDir}`);
+  return join3(runsDir, newest);
+}
+function requireManifest(runDir) {
+  const m = readManifest(runDir);
+  if (!m) throw new Error(`${join3(runDir, "manifest.json")} is missing or unreadable \u2014 is this a run directory?`);
+  return m;
+}
+function writeRunManifest(runDir, manifest) {
+  writeManifest(runDir, manifest);
+}
+function readPlaces(runDir) {
+  const places = readJsonSafe(join3(runDir, "places.json"));
+  if (!places) throw new Error(`${join3(runDir, "places.json")} is missing \u2014 run \`ultraprospect scan\` first`);
+  return places;
+}
+function writePlaces(runDir, places) {
+  writeArtifact(join3(runDir, "places.json"), JSON.stringify(places, null, 2) + "\n");
+}
+function writeJson(runDir, file, value) {
+  writeArtifact(join3(runDir, file), JSON.stringify(value, null, 2) + "\n");
+}
+function readPageText(runDir, extractRelPath) {
+  const p = join3(runDir, extractRelPath);
+  if (!existsSync3(p)) return void 0;
+  return readFileSync6(p, "utf8");
+}
+var LICENCES = [
+  "Places and tags: \xA9 OpenStreetMap contributors, ODbL (https://www.openstreetmap.org/copyright)",
+  "Geocoding: Nominatim (ODbL) and Base Adresse Nationale (Licence Ouverte 2.0)"
+];
+function licencesFor(lanes) {
+  const out2 = [...LICENCES];
+  for (const lane of lanes) {
+    if (lane.lane !== "registry" || !lane.connectorId || lane.returned <= 0) continue;
+    for (const id of lane.connectorId.split(",")) {
+      const licence = connectorById(id.trim())?.licence;
+      if (licence && !out2.includes(licence)) out2.push(licence);
+    }
+  }
+  return out2;
+}
+function emptyManifest(label) {
+  const slug = shortLabel(label);
+  return {
+    version: 1,
+    tool: "ultraprospect",
+    toolVersion: VERSION,
+    builtAt: (/* @__PURE__ */ new Date()).toISOString(),
+    slug,
+    target: { query: "", label: "", lat: 0, lon: 0, bbox: [0, 0, 0, 0], source: "nominatim" },
+    filters: {},
+    lanes: [],
+    counts: {
+      osm: 0,
+      registry: 0,
+      registryWithCoordinates: 0,
+      byConnector: {},
+      places: 0,
+      merged: 0,
+      mergedByIdentifier: 0,
+      undecided: 0,
+      withWebsite: 0,
+      enrichedTier1: 0,
+      enrichedTier2: 0,
+      confirmed: 0,
+      dossiers: 0
+    },
+    truncated: false,
+    notes: [],
+    licences: LICENCES,
+    timings: {}
+  };
+}
+
+// src/watch.ts
+function identityOf(place) {
+  if (place.registry) return `${place.registry.connectorId}:${place.registry.establishmentId ?? place.registry.id}`;
+  if (place.osm) return `osm:${place.osm.id}`;
+  return place.id;
+}
+function diffRuns(before, after) {
+  const prev = new Map(before.map((p) => [identityOf(p), p]));
+  const next = new Map(after.map((p) => [identityOf(p), p]));
+  const delta = {
+    appeared: [],
+    disappeared: [],
+    closed: [],
+    startedHiring: [],
+    stoppedHiring: [],
+    newRoles: [],
+    gotWebsite: [],
+    siteChanged: [],
+    wentDark: []
+  };
+  for (const [key, place] of next) {
+    const old = prev.get(key);
+    if (!old) {
+      delta.appeared.push(place);
+      continue;
+    }
+    if (old.registry?.status === "active" && place.registry?.status === "ceased") delta.closed.push(place);
+    const wasHiring = old.signals?.isHiring === true;
+    const isHiring = place.signals?.isHiring === true;
+    if (!wasHiring && isHiring) delta.startedHiring.push({ place, roles: place.signals?.openRoles ?? 0 });
+    if (wasHiring && place.signals?.isHiring === false) delta.stoppedHiring.push(place);
+    if (isHiring) {
+      const had = new Set(old.jobs.map((j) => j.title.toLowerCase()));
+      const fresh = place.jobs.filter((j) => !had.has(j.title.toLowerCase()));
+      if (fresh.length) delta.newRoles.push({ place, titles: fresh.map((j) => j.title) });
+    }
+    const oldSite = old.website?.confidence === "corroborated" ? old.website.url : void 0;
+    const newSite = place.website?.confidence === "corroborated" ? place.website.url : void 0;
+    if (!oldSite && newSite) delta.gotWebsite.push(place);
+    else if (oldSite && newSite && oldSite !== newSite) delta.siteChanged.push({ place, before: oldSite, after: newSite });
+    if (old.signals?.siteReachable === true && place.signals?.siteReachable === false) delta.wentDark.push(place);
+  }
+  for (const [key, place] of prev) if (!next.has(key)) delta.disappeared.push(place);
+  return delta;
+}
+function section(title, lines) {
+  if (lines.length === 0) return [];
+  return [`## ${title}`, "", ...lines, ""];
+}
+function buildDelta(delta, before, after) {
+  const l = [];
+  l.push(`# What changed \u2014 ${shortLabel(after.slug)}`);
+  l.push("");
+  l.push(`Comparing the run of ${before.builtAt.slice(0, 10)} with the one of ${after.builtAt.slice(0, 10)}.`);
+  l.push("");
+  if (before.truncated || after.truncated) {
+    l.push("> \u26A0 **One of these runs is truncated**, so an appearance or a disappearance here");
+    l.push("> may be a difference in coverage rather than a change on the ground.");
+    l.push("");
+  }
+  const total = delta.appeared.length + delta.disappeared.length + delta.closed.length + delta.startedHiring.length + delta.stoppedHiring.length + delta.newRoles.length + delta.gotWebsite.length + delta.siteChanged.length + delta.wentDark.length;
+  if (total === 0) {
+    l.push("Nothing moved.");
+    return l.join("\n") + "\n";
+  }
+  l.push(
+    ...section(
+      "Started hiring",
+      delta.startedHiring.map((x) => `- **${x.place.name}** \u2014 ${x.roles} open role(s)${x.place.website ? ` \xB7 ${x.place.website.url}` : ""}`)
+    )
+  );
+  l.push(
+    ...section(
+      "New roles at companies already hiring",
+      delta.newRoles.map((x) => `- **${x.place.name}** \u2014 ${x.titles.slice(0, 6).join(", ")}`)
+    )
+  );
+  l.push(
+    ...section(
+      "New to the territory",
+      delta.appeared.map((p) => `- **${p.name}**${p.address.commune ? ` \u2014 ${p.address.commune}` : ""}`)
+    )
+  );
+  l.push(
+    ...section(
+      "Now marked ceased by the register",
+      delta.closed.map((p) => `- **${p.name}** \u2014 ${p.registry?.connectorId ?? "register"} ${p.registry?.establishmentId ?? p.registry?.id ?? "?"}`)
+    )
+  );
+  l.push(
+    ...section(
+      "Gone from the sweep",
+      delta.disappeared.map((p) => `- ${p.name}`)
+    )
+  );
+  l.push(
+    ...section(
+      "Now has a website",
+      delta.gotWebsite.map((p) => `- **${p.name}** \u2014 ${p.website?.url}`)
+    )
+  );
+  l.push(
+    ...section(
+      "Moved their website",
+      delta.siteChanged.map((x) => `- **${x.place.name}** \u2014 ${x.before} \u2192 ${x.after}`)
+    )
+  );
+  l.push(
+    ...section(
+      "Stopped hiring",
+      delta.stoppedHiring.map((p) => `- ${p.name}`)
+    )
+  );
+  l.push(
+    ...section(
+      "Site went unreachable",
+      delta.wentDark.map((p) => `- ${p.name} \u2014 ${p.website?.url ?? ""}`)
+    )
+  );
+  l.push("---");
+  l.push("");
+  l.push("\u201CGone from the sweep\u201D is not the same as \u201Cclosed\u201D: a company can drop out because");
+  l.push("a filter changed, because an Overpass tile failed, or because a mapper deleted a");
+  l.push("node. Only the register can say a business ceased, and that is its own section.");
+  return l.join("\n") + "\n";
+}
+
+// src/feedback.ts
+var FEEDBACK_KINDS = ["wrong-company", "wrong-site", "wrong-contact", "exclude", "useful"];
+function feedbackSource(place) {
+  const identity = identityOf(place);
+  const snapshot = { id: place.id, identity, name: place.name, sources: place.sources, website: place.website, contacts: place.contacts };
+  return { placeId: place.id, identity, digest: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex") };
+}
+function record(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function text(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function parseLedger(input) {
+  if (!record(input) || input.schemaVersion !== 1 || !Array.isArray(input.entries)) throw new Error("feedback needs schemaVersion:1 and an entries array");
+  const ids = /* @__PURE__ */ new Set();
+  const entries = input.entries.map((row2) => {
+    if (!record(row2) || !text(row2.id) || !text(row2.reason) || !text(row2.by) || !text(row2.at) || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(row2.at) || !Number.isFinite(Date.parse(row2.at)) || !FEEDBACK_KINDS.includes(row2.kind) || !record(row2.source) || !text(row2.source.placeId) || !text(row2.source.identity) || typeof row2.source.digest !== "string" || !/^[a-f0-9]{64}$/.test(row2.source.digest)) {
+      throw new Error("malformed feedback entry: identity, digest, kind, author, reason and ISO timestamp are required");
+    }
+    if (ids.has(row2.id)) throw new Error(`duplicate feedback event id: ${row2.id}`);
+    ids.add(row2.id);
+    const subject = row2.subject;
+    if (subject !== void 0 && (!record(subject) || !text(subject.field) || !text(subject.value) || !text(subject.from) || subject.lane !== void 0 && !text(subject.lane)))
+      throw new Error(`${row2.id}: malformed feedback subject`);
+    if ((row2.kind === "wrong-site" || row2.kind === "wrong-contact") && subject === void 0)
+      throw new Error(`${row2.id}: this feedback kind requires a sourced subject`);
+    if (row2.kind !== "wrong-site" && row2.kind !== "wrong-contact" && subject !== void 0) throw new Error(`${row2.id}: this feedback kind has no subject`);
+    return {
+      id: row2.id,
+      source: { placeId: row2.source.placeId, identity: row2.source.identity, digest: row2.source.digest },
+      kind: row2.kind,
+      reason: row2.reason,
+      by: row2.by,
+      at: row2.at,
+      ...subject === void 0 ? {} : { subject }
+    };
+  });
+  return { schemaVersion: 1, entries };
+}
+function readFeedback(runDir) {
+  const file = join9(runDir, "FEEDBACK.json");
+  return existsSync7(file) ? parseLedger(JSON.parse(readFileSync7(file, "utf8"))) : { schemaVersion: 1, entries: [] };
+}
+function validateSource(entry, places) {
+  const matches = places.filter((place2) => identityOf(place2) === entry.source.identity && place2.id === entry.source.placeId);
+  if (matches.length !== 1) throw new Error(`${entry.id}: unknown or ambiguous feedback identity`);
+  const place = matches[0];
+  if (feedbackSource(place).digest !== entry.source.digest) throw new Error(`${entry.id}: stale feedback source snapshot; regenerate feedback subjects`);
+  const subject = entry.subject;
+  if (entry.kind === "wrong-site") {
+    if (!subject || subject.field !== "website" || subject.lane !== void 0 || place.website?.url !== subject.value || !place.website.evidence.includes(subject.from)) {
+      throw new Error(`${entry.id}: website subject is not backed by this company's provenance`);
+    }
+  } else if (entry.kind === "wrong-contact") {
+    const contacts = subject && Object.hasOwn(place.contacts, subject.field) ? place.contacts[subject.field] : [];
+    if (!subject || !contacts.some((contact) => contact.value === subject.value && contact.from === subject.from && contact.lane === subject.lane)) {
+      throw new Error(`${entry.id}: contact subject is not backed by this company's provenance`);
+    }
+  }
+}
+function importFeedback(runDir, places, input) {
+  const incoming = parseLedger(input), previous = readFeedback(runDir);
+  const byId = new Map(previous.entries.map((entry) => [entry.id, entry]));
+  for (const entry of incoming.entries) {
+    validateSource(entry, places);
+    const existing = byId.get(entry.id);
+    if (existing && JSON.stringify(existing) !== JSON.stringify(entry)) throw new Error(`${entry.id}: feedback event id conflict`);
+    byId.set(entry.id, entry);
+  }
+  const ledger = { schemaVersion: 1, entries: [...byId.values()] };
+  writeArtifact(join9(runDir, "FEEDBACK.json"), JSON.stringify(ledger, null, 2) + "\n");
+  return ledger;
+}
+function feedbackSelection(places, ledger) {
+  const exclusions = ledger.entries.filter((entry) => entry.kind !== "useful");
+  const blocked = new Set(exclusions.map((entry) => entry.source.identity));
+  const blockedIds = new Set(exclusions.map((entry) => entry.source.placeId));
+  return places.filter((place) => !blocked.has(identityOf(place)) && !blockedIds.has(place.id));
+}
+
+// src/cli.ts
+import { join as join18 } from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
 
 // src/legal-notice.ts
 var LEGAL_NOTICE_COUNTRIES = ["fr", "de", "es", "gb", "it", "nl", "be", "at", "pt", "pl", "ie", "lu", "cz", "dk", "fi", "se", "no"];
@@ -6830,20 +7141,20 @@ var VAT_PATTERNS = {
   si: /SI\d{8}/i,
   sk: /SK\d{10}/i
 };
-function extractVatNumbers(text2) {
+function extractVatNumbers(text3) {
   const out2 = [];
   const seen = /* @__PURE__ */ new Set();
   let compact = "";
   const origin = [];
-  for (let i = 0; i < text2.length; i++) {
-    const ch = text2[i];
+  for (let i = 0; i < text3.length; i++) {
+    const ch = text3[i];
     if (ch === " " || ch === "	" || ch === "\n" || ch === "\r" || ch === "." || ch === "-") continue;
     compact += ch;
     origin.push(i);
   }
   for (const [cc, re] of Object.entries(VAT_PATTERNS)) {
     for (const m of compact.matchAll(new RegExp(re.source, "gi"))) {
-      const before = text2[(origin[m.index ?? 0] ?? 0) - 1];
+      const before = text3[(origin[m.index ?? 0] ?? 0) - 1];
       if (before && /[A-Za-z]/.test(before)) continue;
       const value = m[0].toUpperCase();
       if (seen.has(value)) continue;
@@ -6853,62 +7164,62 @@ function extractVatNumbers(text2) {
   }
   return out2;
 }
-function extractHandelsregister(text2) {
-  const m = /\bHR([AB])\s*[:\s]?\s*(\d{1,7})\b/i.exec(text2);
+function extractHandelsregister(text3) {
+  const m = /\bHR([AB])\s*[:\s]?\s*(\d{1,7})\b/i.exec(text3);
   if (!m) return void 0;
   const value = `HR${m[1].toUpperCase()} ${m[2]}`;
-  const around = text2.slice(Math.max(0, m.index - 120), m.index + 160);
+  const around = text3.slice(Math.max(0, m.index - 120), m.index + 160);
   const court = /\b(?:Amtsgerichts?|Registergerichts?)\s*:?\s*(?!HR[AB]\b)(?!Amtsgericht|Registergericht)([A-ZÄÖÜ][\wÄÖÜäöüß.]*(?:[- ][A-ZÄÖÜ][\wÄÖÜäöüß.]*)?)/.exec(
     around
   );
   return { value, court: court?.[1]?.trim() };
 }
-function extractUkCompanyNumber(text2) {
+function extractUkCompanyNumber(text3) {
   const m = /\b(?:compan(?:y|ies)\s+(?:reg(?:istration|istered)?\.?\s*)?(?:no\.?|number)|registered\s+in\s+England[^.]{0,40}?no\.?)[\s:.–—-]{0,10}((?:[A-Z]{2})?\d{6,8})\b/i.exec(
-    text2
+    text3
   );
   return m?.[1]?.toUpperCase();
 }
-function extractSirenSiret(text2) {
-  const siret = /\b(?:SIRET)\D{0,12}(\d[\d\s.]{12,17}\d)\b/i.exec(text2);
+function extractSirenSiret(text3) {
+  const siret = /\b(?:SIRET)\D{0,12}(\d[\d\s.]{12,17}\d)\b/i.exec(text3);
   if (siret) return { kind: "siret", value: siret[1].replace(/\D/g, "") };
-  const siren = /\b(?:SIREN|RCS[^\d]{0,30})\D{0,6}(\d[\d\s.]{7,12}\d)\b/i.exec(text2);
+  const siren = /\b(?:SIREN|RCS[^\d]{0,30})\D{0,6}(\d[\d\s.]{7,12}\d)\b/i.exec(text3);
   if (siren) return { kind: "siren", value: siren[1].replace(/\D/g, "") };
   return void 0;
 }
-function extractSpanishNif(text2) {
-  const m = /\b(?:C\.?I\.?F\.?|N\.?I\.?F\.?)\s*[:.]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])\b/i.exec(text2);
+function extractSpanishNif(text3) {
+  const m = /\b(?:C\.?I\.?F\.?|N\.?I\.?F\.?)\s*[:.]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])\b/i.exec(text3);
   return m?.[1]?.toUpperCase();
 }
-function extractLegalIds(text2, countryCode, pageId) {
+function extractLegalIds(text3, countryCode, pageId) {
   const cc = countryCode?.toLowerCase();
   const out2 = [];
   const push = (id) => {
     if (!out2.some((x) => x.kind === id.kind && x.value === id.value)) out2.push(id);
   };
   if (cc === "fr" || !cc) {
-    const fr = extractSirenSiret(text2);
+    const fr = extractSirenSiret(text3);
     if (fr) push({ kind: fr.kind, value: fr.value, countryCode: "fr", from: pageId });
   }
   if (cc === "de" || !cc) {
-    const de = extractHandelsregister(text2);
+    const de = extractHandelsregister(text3);
     if (de) push({ kind: "hrb", value: de.value, countryCode: "de", from: pageId, context: de.court });
   }
   if (cc === "gb") {
-    const gb = extractUkCompanyNumber(text2);
+    const gb = extractUkCompanyNumber(text3);
     if (gb) push({ kind: "company-number", value: gb, countryCode: "gb", from: pageId });
   }
   if (cc === "es" || !cc) {
-    const es = extractSpanishNif(text2);
+    const es = extractSpanishNif(text3);
     if (es) push({ kind: "nif", value: es, countryCode: "es", from: pageId });
   }
-  for (const vat of extractVatNumbers(text2)) {
+  for (const vat of extractVatNumbers(text3)) {
     push({ kind: "vat", value: vat.value, countryCode: vat.countryCode, from: pageId });
   }
   return out2;
 }
-function extractLegalId(text2, countryCode) {
-  return extractLegalIds(text2, countryCode)[0]?.value;
+function extractLegalId(text3, countryCode) {
+  return extractLegalIds(text3, countryCode)[0]?.value;
 }
 function legalNoticeTerms(countryCode) {
   switch ((countryCode ?? "").toLowerCase()) {
@@ -7023,13 +7334,13 @@ var ECOMMERCE_FINGERPRINTS = /add-to-cart|ajouter-au-panier|data-product-id|wooc
 function fingerprints(html, table) {
   return table.filter(([, re]) => re.test(html)).map(([name]) => name);
 }
-function extractEmails(text2, html, pageId) {
+function extractEmails(text3, html, pageId) {
   const out2 = /* @__PURE__ */ new Map();
   for (const m of html.matchAll(/mailto:([^"'?>\s]+@[^"'?>\s]+)/gi)) {
     const value = decodeURIComponent(m[1]).toLowerCase();
     if (isPlausibleEmail(value)) out2.set(value, { value, from: pageId, lane: "web", note: "mailto link" });
   }
-  for (const m of text2.matchAll(/[\w.+-]+@[\w-]+\.[\w.-]{2,}/g)) {
+  for (const m of text3.matchAll(/[\w.+-]+@[\w-]+\.[\w.-]{2,}/g)) {
     const value = m[0].toLowerCase().replace(/[.,;:]$/, "");
     if (isPlausibleEmail(value) && !out2.has(value)) out2.set(value, { value, from: pageId, lane: "web", note: "in the page text" });
   }
@@ -7078,7 +7389,7 @@ function extractLanguages(html) {
   for (const m of html.matchAll(/hreflang=["']([a-z]{2})/gi)) langs.add(m[1].toLowerCase());
   return [...langs];
 }
-function extractTermMentions(text2, pageId, terms) {
+function extractTermMentions(text3, pageId, terms) {
   if (!terms.length) return [];
   const re = new RegExp(
     `(?<!\\p{L})(?:${[...terms].sort((a, b) => b.length - a.length).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\p{L}{0,3}(?!\\p{L})`,
@@ -7086,12 +7397,12 @@ function extractTermMentions(text2, pageId, terms) {
   );
   const out2 = [];
   const seen = /* @__PURE__ */ new Set();
-  for (const m of text2.matchAll(re)) {
+  for (const m of text3.matchAll(re)) {
     const key = m[0].toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     const from = Math.max(0, m.index - 90);
-    const line = text2.slice(from, Math.min(text2.length, m.index + m[0].length + 90)).replace(/\s+/g, " ").trim();
+    const line = text3.slice(from, Math.min(text3.length, m.index + m[0].length + 90)).replace(/\s+/g, " ").trim();
     out2.push({ value: m[0], from: pageId, lane: "web", note: line });
   }
   return out2;
@@ -7799,7 +8110,7 @@ function toCandidate2(poi, rec, scored) {
 }
 function matchLanes(pois, records, refKeys = []) {
   const identifiers = identifierJoins(pois, records, refKeys);
-  const unlocated = records.filter((record) => typeof record.lat !== "number" || typeof record.lon !== "number");
+  const unlocated = records.filter((record2) => typeof record2.lat !== "number" || typeof record2.lon !== "number");
   const index = buildIndex(records);
   const scored = [];
   const usedPoi = new Set(identifiers.declared.map((identifier) => identifier.poiId));
@@ -7884,122 +8195,28 @@ function applyVerdicts(places, verdicts) {
   return { merged: mergedCount, skipped, unknown };
 }
 
-// src/run.ts
-import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync6, readdirSync as readdirSync4 } from "fs";
-import { join as join3, resolve } from "path";
-var DEFAULT_OUT = ".ultraprospect";
-function newRun(outRoot, label) {
-  const slug = slugify(shortLabel(label)) || "run";
-  const id = runId();
-  const root2 = resolve(outRoot);
-  const dir2 = join3(root2, "runs", `${slug}-${id}`);
-  mkdirSync2(dir2, { recursive: true });
-  return { root: root2, dir: dir2, slug, id };
-}
-function resolveRun(pathOrRoot) {
-  const p = resolve(pathOrRoot);
-  if (existsSync3(join3(p, "manifest.json"))) return p;
-  const runsDir = existsSync3(join3(p, "runs")) ? join3(p, "runs") : p;
-  if (!existsSync3(runsDir)) throw new Error(`no run directory at ${p}`);
-  const candidates = readdirSync4(runsDir, { withFileTypes: true }).filter((e) => e.isDirectory() && existsSync3(join3(runsDir, e.name, "manifest.json"))).map((e) => e.name).sort();
-  const newest = candidates.at(-1);
-  if (!newest) throw new Error(`no run with a manifest.json under ${runsDir}`);
-  return join3(runsDir, newest);
-}
-function requireManifest(runDir) {
-  const m = readManifest(runDir);
-  if (!m) throw new Error(`${join3(runDir, "manifest.json")} is missing or unreadable \u2014 is this a run directory?`);
-  return m;
-}
-function writeRunManifest(runDir, manifest) {
-  writeManifest(runDir, manifest);
-}
-function readPlaces(runDir) {
-  const places = readJsonSafe(join3(runDir, "places.json"));
-  if (!places) throw new Error(`${join3(runDir, "places.json")} is missing \u2014 run \`ultraprospect scan\` first`);
-  return places;
-}
-function writePlaces(runDir, places) {
-  writeArtifact(join3(runDir, "places.json"), JSON.stringify(places, null, 2) + "\n");
-}
-function writeJson(runDir, file, value) {
-  writeArtifact(join3(runDir, file), JSON.stringify(value, null, 2) + "\n");
-}
-function readPageText(runDir, extractRelPath) {
-  const p = join3(runDir, extractRelPath);
-  if (!existsSync3(p)) return void 0;
-  return readFileSync6(p, "utf8");
-}
-var LICENCES = [
-  "Places and tags: \xA9 OpenStreetMap contributors, ODbL (https://www.openstreetmap.org/copyright)",
-  "Geocoding: Nominatim (ODbL) and Base Adresse Nationale (Licence Ouverte 2.0)"
-];
-function licencesFor(lanes) {
-  const out2 = [...LICENCES];
-  for (const lane of lanes) {
-    if (lane.lane !== "registry" || !lane.connectorId || lane.returned <= 0) continue;
-    for (const id of lane.connectorId.split(",")) {
-      const licence = connectorById(id.trim())?.licence;
-      if (licence && !out2.includes(licence)) out2.push(licence);
-    }
-  }
-  return out2;
-}
-function emptyManifest(label) {
-  const slug = shortLabel(label);
-  return {
-    version: 1,
-    tool: "ultraprospect",
-    toolVersion: VERSION,
-    builtAt: (/* @__PURE__ */ new Date()).toISOString(),
-    slug,
-    target: { query: "", label: "", lat: 0, lon: 0, bbox: [0, 0, 0, 0], source: "nominatim" },
-    filters: {},
-    lanes: [],
-    counts: {
-      osm: 0,
-      registry: 0,
-      registryWithCoordinates: 0,
-      byConnector: {},
-      places: 0,
-      merged: 0,
-      mergedByIdentifier: 0,
-      undecided: 0,
-      withWebsite: 0,
-      enrichedTier1: 0,
-      enrichedTier2: 0,
-      confirmed: 0,
-      dossiers: 0
-    },
-    truncated: false,
-    notes: [],
-    licences: LICENCES,
-    timings: {}
-  };
-}
-
 // src/fixture.ts
-import { existsSync as existsSync7, mkdirSync as mkdirSync5 } from "fs";
-import { join as join9 } from "path";
+import { existsSync as existsSync8, mkdirSync as mkdirSync5 } from "fs";
+import { join as join10 } from "path";
 function loadFixture(dir2) {
-  const target = readJsonSafe(join9(dir2, "target.json"));
-  if (!target) throw new Error(`${join9(dir2, "target.json")} is missing \u2014 a fixture needs the geocoded target it was recorded for`);
+  const target = readJsonSafe(join10(dir2, "target.json"));
+  if (!target) throw new Error(`${join10(dir2, "target.json")} is missing \u2014 a fixture needs the geocoded target it was recorded for`);
   for (const file of ["osm.json", "registry.json"]) {
-    if (!existsSync7(join9(dir2, file))) throw new Error(`${join9(dir2, file)} is missing \u2014 record it with \`ultraprospect scan --record <dir>\``);
+    if (!existsSync8(join10(dir2, file))) throw new Error(`${join10(dir2, file)} is missing \u2014 record it with \`ultraprospect scan --record <dir>\``);
   }
-  const registry = readJsonSafe(join9(dir2, "registry.json")) ?? [];
+  const registry = readJsonSafe(join10(dir2, "registry.json")) ?? [];
   return {
     target,
-    osm: readJsonSafe(join9(dir2, "osm.json")) ?? [],
+    osm: readJsonSafe(join10(dir2, "osm.json")) ?? [],
     registry,
     connectorId: registry[0]?.connectorId
   };
 }
 function recordFixture(dir2, outcome, target) {
   mkdirSync5(dir2, { recursive: true });
-  writeArtifact(join9(dir2, "target.json"), JSON.stringify(target, null, 2) + "\n");
-  writeArtifact(join9(dir2, "osm.json"), JSON.stringify(outcome.osm, null, 2) + "\n");
-  writeArtifact(join9(dir2, "registry.json"), JSON.stringify(outcome.registry, null, 2) + "\n");
+  writeArtifact(join10(dir2, "target.json"), JSON.stringify(target, null, 2) + "\n");
+  writeArtifact(join10(dir2, "osm.json"), JSON.stringify(outcome.osm, null, 2) + "\n");
+  writeArtifact(join10(dir2, "registry.json"), JSON.stringify(outcome.registry, null, 2) + "\n");
 }
 
 // src/category.ts
@@ -8404,7 +8621,7 @@ function writeScan(runDir, outcome) {
 }
 
 // src/confirm.ts
-import { join as join10 } from "path";
+import { join as join11 } from "path";
 function needsConfirming(places) {
   const targets = places.filter((p) => !p.registry && Boolean(p.name?.trim()));
   return [...targets].sort((a, b) => (b.pages.length > 0 ? 1 : 0) - (a.pages.length > 0 ? 1 : 0));
@@ -8456,9 +8673,9 @@ async function verify(id, connectors, ctx) {
     if (!connector.countries.includes("*") && !connector.countries.includes(id.countryCode)) continue;
     asked.push(connector.id);
     try {
-      const record = await connector.verifyId(id, ctx);
+      const record2 = await connector.verifyId(id, ctx);
       answered++;
-      if (record) return { record, asked, answered };
+      if (record2) return { record: record2, asked, answered };
     } catch {
     }
   }
@@ -8523,9 +8740,9 @@ async function runConfirm(runDir, places, opts = {}) {
     let anyAnswer = false;
     for (const pageId of place.pages) {
       if (attached) break;
-      const text2 = readPageText(runDir, join10("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${pageId}.md`));
-      if (!text2) continue;
-      for (const id of extractLegalIds(text2, opts.countryCode, pageId)) {
+      const text3 = readPageText(runDir, join11("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${pageId}.md`));
+      if (!text3) continue;
+      for (const id of extractLegalIds(text3, opts.countryCode, pageId)) {
         idsFound++;
         const { record: rec, asked, answered } = await verify(id, selection.confirm, ctx);
         if (answered > 0) anyAnswer = true;
@@ -8645,7 +8862,7 @@ function persistConfirm(runDir, places, manifest, outcome) {
   writePlaces(runDir, places);
   writeJson(runDir, "registry.json", mergeRegistryRecords(runDir, outcome.records));
   if (outcome.undecided.length) {
-    const existing = readJsonSafe(join10(runDir, "MATCH.todo.json"))?.pairs ?? [];
+    const existing = readJsonSafe(join11(runDir, "MATCH.todo.json"))?.pairs ?? [];
     writeJson(runDir, "MATCH.todo.json", buildMatchTodo([...existing, ...outcome.undecided]));
   }
   manifest.lanes = [...manifest.lanes.filter((l) => l.lane !== "registry" || l.mode === "sweep"), outcome.coverage];
@@ -8658,7 +8875,7 @@ function persistConfirm(runDir, places, manifest, outcome) {
   writeRunManifest(runDir, manifest);
 }
 function mergeRegistryRecords(runDir, fresh) {
-  const existing = readJsonSafe(join10(runDir, "registry.json")) ?? [];
+  const existing = readJsonSafe(join11(runDir, "registry.json")) ?? [];
   const byKey = /* @__PURE__ */ new Map();
   for (const rec of [...existing, ...fresh]) byKey.set(`${rec.connectorId}:${rec.establishmentId ?? rec.id}`, rec);
   return [...byKey.values()];
@@ -8722,9 +8939,9 @@ function describeSkips(outcome, limited = false) {
 
 // src/pages.ts
 import { mkdirSync as mkdirSync6 } from "fs";
-import { join as join11 } from "path";
+import { join as join12 } from "path";
 function pageDirFor(placeId) {
-  return join11("pages", placeId.replace(/[^a-zA-Z0-9._-]/g, "_"));
+  return join12("pages", placeId.replace(/[^a-zA-Z0-9._-]/g, "_"));
 }
 var MIN_READABLE_CHARS = 120;
 function newPageStore(existing = []) {
@@ -8738,16 +8955,16 @@ async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
   } catch {
     return { ok: false, reason: "unreachable" };
   }
-  const text2 = (result.text ?? "").trim();
+  const text3 = (result.text ?? "").trim();
   const status = result.status ?? 0;
   if (status === 0) return { ok: false, reason: "unreachable" };
   if (status < 200 || status >= 300) return { ok: false, reason: "refused", status };
-  if (text2.length < MIN_READABLE_CHARS) {
-    return { ok: false, reason: "no-readable-text", status, chars: text2.length };
+  if (text3.length < MIN_READABLE_CHARS) {
+    return { ok: false, reason: "no-readable-text", status, chars: text3.length };
   }
   const id = `P${store.next++}`;
   const dir2 = pageDirFor(placeId);
-  const extract = join11(dir2, `${id}.md`);
+  const extract = join12(dir2, `${id}.md`);
   const fetchedAt = (/* @__PURE__ */ new Date()).toISOString();
   const header2 = [
     `# ${id} \u2014 ${result.title ?? url}`,
@@ -8761,8 +8978,8 @@ async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
     "---",
     ""
   ].join("\n");
-  if (!isNoWrite()) mkdirSync6(join11(runDir, dir2), { recursive: true });
-  writeArtifact(join11(runDir, extract), header2 + text2 + markupEvidence(result.html) + "\n");
+  if (!isNoWrite()) mkdirSync6(join12(runDir, dir2), { recursive: true });
+  writeArtifact(join12(runDir, extract), header2 + text3 + markupEvidence(result.html) + "\n");
   return {
     ok: true,
     page: {
@@ -8774,10 +8991,10 @@ async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
         fetchedAt,
         extractor: result.extractor,
         status: result.status,
-        chars: text2.length,
+        chars: text3.length,
         extract
       },
-      text: text2,
+      text: text3,
       title: result.title,
       html: result.html
     }
@@ -9342,11 +9559,11 @@ async function personioSearchJson(board, via) {
   const data = await getJson(`https://${board.token}.jobs.personio.de/search.json`);
   if (!Array.isArray(data)) return [];
   return data.map((j) => ({
-    title: text(j.name) ?? "(untitled)",
+    title: text2(j.name) ?? "(untitled)",
     url: j.id ? `https://${board.token}.jobs.personio.de/job/${j.id}` : void 0,
-    location: text(j.office) ?? (Array.isArray(j.offices) ? text(j.offices[0]) : void 0),
-    department: text(j.department),
-    employmentType: text(j.employment_type),
+    location: text2(j.office) ?? (Array.isArray(j.offices) ? text2(j.offices[0]) : void 0),
+    department: text2(j.department),
+    employmentType: text2(j.employment_type),
     via
   }));
 }
@@ -9358,7 +9575,7 @@ async function getText(url) {
     return void 0;
   }
 }
-function text(value) {
+function text2(value) {
   return typeof value === "string" && value.trim() ? value.trim() : void 0;
 }
 function xmlTag(fragment, tag) {
@@ -9366,7 +9583,7 @@ function xmlTag(fragment, tag) {
   if (!m) return void 0;
   const raw = m[1] ?? "";
   const cdata = /^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/.exec(raw);
-  return text(decodeEntities(cdata ? cdata[1] ?? "" : raw));
+  return text2(decodeEntities(cdata ? cdata[1] ?? "" : raw));
 }
 async function fetchBoard(board) {
   const via = board.provider;
@@ -9374,21 +9591,21 @@ async function fetchBoard(board) {
     case "greenhouse": {
       const data = await getJson(`https://boards-api.greenhouse.io/v1/boards/${board.token}/jobs`);
       return (data?.jobs ?? []).map((j) => ({
-        title: text(j.title) ?? "(untitled)",
-        url: text(j.absolute_url),
-        location: text(j.location?.name),
-        postedAt: text(j.updated_at),
+        title: text2(j.title) ?? "(untitled)",
+        url: text2(j.absolute_url),
+        location: text2(j.location?.name),
+        postedAt: text2(j.updated_at),
         via
       }));
     }
     case "lever": {
       const data = await getJson(`https://api.lever.co/v0/postings/${board.token}?mode=json`);
       return (Array.isArray(data) ? data : []).map((j) => ({
-        title: text(j.text) ?? "(untitled)",
-        url: text(j.hostedUrl) ?? text(j.applyUrl),
-        location: text(j.categories?.location),
-        department: text(j.categories?.team) ?? text(j.categories?.department),
-        employmentType: text(j.categories?.commitment),
+        title: text2(j.text) ?? "(untitled)",
+        url: text2(j.hostedUrl) ?? text2(j.applyUrl),
+        location: text2(j.categories?.location),
+        department: text2(j.categories?.team) ?? text2(j.categories?.department),
+        employmentType: text2(j.categories?.commitment),
         postedAt: j.createdAt ? new Date(j.createdAt).toISOString() : void 0,
         via
       }));
@@ -9396,46 +9613,46 @@ async function fetchBoard(board) {
     case "ashby": {
       const data = await getJson(`https://api.ashbyhq.com/posting-api/job-board/${board.token}`);
       return (data?.jobs ?? []).map((j) => ({
-        title: text(j.title) ?? "(untitled)",
-        url: text(j.jobUrl) ?? text(j.applyUrl),
-        location: text(j.location),
-        department: text(j.department) ?? text(j.team),
-        employmentType: text(j.employmentType),
-        postedAt: text(j.publishedAt),
+        title: text2(j.title) ?? "(untitled)",
+        url: text2(j.jobUrl) ?? text2(j.applyUrl),
+        location: text2(j.location),
+        department: text2(j.department) ?? text2(j.team),
+        employmentType: text2(j.employmentType),
+        postedAt: text2(j.publishedAt),
         via
       }));
     }
     case "recruitee": {
       const data = await getJson(`https://${board.token}.recruitee.com/api/offers/`);
       return (data?.offers ?? []).map((j) => ({
-        title: text(j.title) ?? "(untitled)",
-        url: text(j.careers_url) ?? text(j.careers_apply_url),
-        location: text(j.location) ?? text(j.city),
-        department: text(j.department),
-        employmentType: text(j.employment_type_code),
-        postedAt: text(j.published_at),
+        title: text2(j.title) ?? "(untitled)",
+        url: text2(j.careers_url) ?? text2(j.careers_apply_url),
+        location: text2(j.location) ?? text2(j.city),
+        department: text2(j.department),
+        employmentType: text2(j.employment_type_code),
+        postedAt: text2(j.published_at),
         via
       }));
     }
     case "workable": {
       const data = await getJson(`https://apply.workable.com/api/v1/widget/accounts/${board.token}?details=true`);
       return (data?.jobs ?? []).map((j) => ({
-        title: text(j.title) ?? "(untitled)",
-        url: text(j.url) ?? text(j.application_url),
-        location: [text(j.city), text(j.country)].filter(Boolean).join(", ") || void 0,
-        department: text(j.department),
-        employmentType: text(j.type),
-        postedAt: text(j.published_on),
+        title: text2(j.title) ?? "(untitled)",
+        url: text2(j.url) ?? text2(j.application_url),
+        location: [text2(j.city), text2(j.country)].filter(Boolean).join(", ") || void 0,
+        department: text2(j.department),
+        employmentType: text2(j.type),
+        postedAt: text2(j.published_on),
         via
       }));
     }
     case "teamtailor": {
       const data = await getJson(`https://${board.token}.teamtailor.com/jobs.json`);
       return (data?.jobs ?? data ?? []).map?.((j) => ({
-        title: text(j.title) ?? "(untitled)",
-        url: text(j.careersite_job_url) ?? text(j.url),
-        location: text(j.location),
-        department: text(j.department),
+        title: text2(j.title) ?? "(untitled)",
+        url: text2(j.careersite_job_url) ?? text2(j.url),
+        location: text2(j.location),
+        department: text2(j.department),
         via
       })) ?? [];
     }
@@ -9461,12 +9678,12 @@ async function fetchBoard(board) {
     case "smartrecruiters": {
       const data = await getJson(`https://api.smartrecruiters.com/v1/companies/${board.token}/postings?limit=100`);
       return (data?.content ?? []).map((j) => ({
-        title: text(j.name) ?? "(untitled)",
-        url: j.id ? `https://jobs.smartrecruiters.com/${text(j.company?.identifier) ?? board.token}/${j.id}` : void 0,
-        location: text(j.location?.fullLocation) ?? text(j.location?.city),
-        department: text(j.department?.label),
-        employmentType: text(j.typeOfEmployment?.label),
-        postedAt: text(j.releasedDate),
+        title: text2(j.name) ?? "(untitled)",
+        url: j.id ? `https://jobs.smartrecruiters.com/${text2(j.company?.identifier) ?? board.token}/${j.id}` : void 0,
+        location: text2(j.location?.fullLocation) ?? text2(j.location?.city),
+        department: text2(j.department?.label),
+        employmentType: text2(j.typeOfEmployment?.label),
+        postedAt: text2(j.releasedDate),
         via
       }));
     }
@@ -9708,7 +9925,7 @@ function isName(raw, opts) {
   }
   return true;
 }
-function extractPeople(text2, opts = {}) {
+function extractPeople(text3, opts = {}) {
   const roles = rolesFor(opts.countryCode);
   const found = [];
   const seen = /* @__PURE__ */ new Set();
@@ -9721,19 +9938,19 @@ function extractPeople(text2, opts = {}) {
   };
   for (const role of roles) {
     const escaped = role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    for (const m of text2.matchAll(new RegExp(`${escaped}\\s*[:\uFF1A]\\s*([^\\n]{3,120})`, "gi"))) {
+    for (const m of text3.matchAll(new RegExp(`${escaped}\\s*[:\uFF1A]\\s*([^\\n]{3,120})`, "gi"))) {
       for (const candidate of m[1].split(/\s*(?:,|;|\bund\b|\band\b|&|\bet\b|\by\b)\s*/i)) {
         if (isName(candidate, opts)) add(candidate, role);
       }
     }
-    for (const m of text2.matchAll(new RegExp(`(^|\\n)\\s*([^\\n]{4,70})\\s*\\n\\s*[^\\n]{0,20}${escaped}`, "gi"))) {
+    for (const m of text3.matchAll(new RegExp(`(^|\\n)\\s*([^\\n]{4,70})\\s*\\n\\s*[^\\n]{0,20}${escaped}`, "gi"))) {
       if (isName(m[2], opts)) add(m[2], role);
     }
   }
   return found;
 }
-function peopleFrom(text2, pageId, opts = {}) {
-  return extractPeople(text2, opts).map((p) => ({ value: p.value, role: p.role, from: pageId, lane: "web" }));
+function peopleFrom(text3, pageId, opts = {}) {
+  return extractPeople(text3, opts).map((p) => ({ value: p.value, role: p.role, from: pageId, lane: "web" }));
 }
 
 // src/enrich.ts
@@ -10057,8 +10274,8 @@ function ranked(places) {
 }
 
 // src/dossier.ts
-import { existsSync as existsSync8, readFileSync as readFileSync7 } from "fs";
-import { join as join12 } from "path";
+import { existsSync as existsSync9, readFileSync as readFileSync8 } from "fs";
+import { join as join13 } from "path";
 
 // src/classification/index.ts
 var NACE_VOCABULARY = {
@@ -10093,7 +10310,7 @@ function vocabularyOf(scheme) {
 
 // src/dossier.ts
 function dossierPathFor(place) {
-  return join12("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
+  return join13("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
 }
 function fmtMoney(n, currency) {
   if (typeof n !== "number") return void 0;
@@ -10268,16 +10485,16 @@ function buildDossierPacket(runDir, place, manifest) {
   parts.push(`## Pages (${place.pages.length})`);
   parts.push("");
   for (const id of place.pages) {
-    const rel = join12("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${id}.md`);
-    const abs = join12(runDir, rel);
-    if (!existsSync8(abs)) {
+    const rel = join13("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${id}.md`);
+    const abs = join13(runDir, rel);
+    if (!existsSync9(abs)) {
       parts.push(`### ${id} \u2014 MISSING (${rel})`);
       parts.push("");
       parts.push("This page is listed on the place but its extract is not on disk. Do not cite it.");
       parts.push("");
       continue;
     }
-    parts.push(readFileSync7(abs, "utf8").trimEnd());
+    parts.push(readFileSync8(abs, "utf8").trimEnd());
     parts.push("");
     parts.push("---");
     parts.push("");
@@ -10286,23 +10503,33 @@ function buildDossierPacket(runDir, place, manifest) {
 }
 
 // src/check.ts
-import { existsSync as existsSync9, readFileSync as readFileSync8, readdirSync as readdirSync5 } from "fs";
-import { basename, join as join13 } from "path";
+import { existsSync as existsSync10, readFileSync as readFileSync9, readdirSync as readdirSync5 } from "fs";
+import { basename, join as join14 } from "path";
 var citationRe = () => /\[P(\d+)\]/g;
 var MODEL_MARK = /\[M\]/;
-function isStructural(line) {
+var OSM_SOURCE = /^osm:([nwr]\d+)$/;
+function isTableRow(t) {
+  return t.startsWith("|");
+}
+function isTableSeparator(t) {
+  return t.includes("|") && t.includes("-") && /^[|\s:-]+$/.test(t);
+}
+var LIST_ITEM = /^(?:[-*+]|\d+[.)])\s+/;
+function isStructural(line, next = "") {
   const t = line.trim();
   if (t.length === 0) return true;
-  if (t.startsWith("#") || t.startsWith(">") || t.startsWith("|") || t.startsWith("```")) return true;
+  if (t.startsWith("#") || t.startsWith("```")) return true;
   if (/^[-*_]{3,}$/.test(t)) return true;
-  if (/^[-*]\s*\*\*[^*]+\*\*:?\s*$/.test(t)) return true;
-  if (t.length < 40) return true;
+  if (isTableSeparator(t)) return true;
+  if (isTableRow(t) && isTableSeparator(next)) return true;
+  if (/^[-*+]\s*\*\*(?:What they do|Size and shape|Signals|Angle|Contacts|Gaps)\.?\*\*[.:]?$/i.test(t)) return true;
   return false;
 }
-function isFactual(line) {
-  if (isStructural(line)) return false;
-  if (/^\s*[-*]?\s*https?:\/\/\S+\s*$/.test(line)) return false;
-  return true;
+function assertedText(unit) {
+  return unit.replace(/\[P\d+\]|\[M\]/g, " ").replace(/https?:\/\/\S+/g, " ").replace(/[^\p{L}\p{N}]+/gu, "");
+}
+function isFactual(unit) {
+  return assertedText(unit).length > 0;
 }
 function normalizeForSearch(s) {
   return foldAccents(s).toLowerCase().replace(/[\s.()-]/g, "");
@@ -10314,7 +10541,7 @@ function runCheck(input) {
   const err = (rule, where, message) => errors.push({ level: "error", rule, where, message });
   const warn = (rule, where, message) => warnings.push({ level: "warning", rule, where, message });
   const osmFeatures = /* @__PURE__ */ new Map();
-  for (const poi of readJsonSafe(join13(runDir, "osm.json")) ?? []) {
+  for (const poi of readJsonSafe(join14(runDir, "osm.json")) ?? []) {
     osmFeatures.set(`${poi.osmType[0]}${poi.osmId}`, poi);
   }
   const stripLegalId = (value) => value.replace(/[\s.\-–—:/,\u00a0\u202f]/g, "").toLowerCase();
@@ -10325,15 +10552,31 @@ function runCheck(input) {
     return Object.entries(poi.tags).filter(([tag]) => tag.startsWith("ref:")).some(([, raw]) => stripLegalId(raw).includes(stripLegalId(value)));
   };
   const pageText = /* @__PURE__ */ new Map();
-  const pageOwner = /* @__PURE__ */ new Map();
+  const pageOwners = /* @__PURE__ */ new Map();
   for (const place of places) {
-    const dir2 = join13(runDir, "pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"));
+    const dir2 = join14(runDir, "pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"));
     for (const id of place.pages) {
-      const file = join13(dir2, `${id}.md`);
-      pageOwner.set(id, place.id);
-      if (existsSync9(file)) pageText.set(id, readFileSync8(file, "utf8"));
+      const file = join14(dir2, `${id}.md`);
+      const owners = pageOwners.get(id) ?? /* @__PURE__ */ new Set();
+      owners.add(place.id);
+      pageOwners.set(id, owners);
+      if (existsSync10(file)) pageText.set(id, readFileSync9(file, "utf8"));
     }
   }
+  const osmKeyOf = (place) => {
+    if (place.osm) return `${place.osm.osmType[0]}${place.osm.osmId}`;
+    return OSM_SOURCE.exec(place.id)?.[1];
+  };
+  const owns = (place, from) => {
+    const feature = OSM_SOURCE.exec(from);
+    if (feature) return osmKeyOf(place) === feature[1];
+    return place.pages.includes(from);
+  };
+  const ownerOf = (from) => {
+    const feature = OSM_SOURCE.exec(from);
+    const owners = feature ? places.filter((p) => osmKeyOf(p) === feature[1]).map((p) => p.id) : [...pageOwners.get(from) ?? []];
+    return owners.length > 0 ? owners.join(", ") : "no place in this run";
+  };
   let contacts = 0;
   for (const place of places) {
     const items = [
@@ -10364,6 +10607,14 @@ function runCheck(input) {
           );
           continue;
         }
+        if (!owns(place, item.from)) {
+          err(
+            "contact-foreign",
+            `${place.id} \xB7 ${item.kind} ${item.value}`,
+            `is declared on ${item.from}, which is ${ownerOf(item.from)}, not ${place.id}. The value is real and re-readable \u2014 about another company. It must not ship on this row.`
+          );
+          continue;
+        }
         const declared = poiContacts(poi);
         const values = item.kind === "email" ? declared.emails : item.kind === "phone" ? declared.phones : item.kind === "social" ? declared.socials : [];
         if (!values.some((value) => value.value === item.value)) {
@@ -10375,8 +10626,8 @@ function runCheck(input) {
         }
         continue;
       }
-      const text2 = pageText.get(item.from);
-      if (!text2) {
+      const text3 = pageText.get(item.from);
+      if (!text3) {
         err(
           "contact-unsourced",
           `${place.id} \xB7 ${item.kind} ${item.value}`,
@@ -10384,7 +10635,15 @@ function runCheck(input) {
         );
         continue;
       }
-      if (!normalizeForSearch(text2).includes(normalizeForSearch(item.value))) {
+      if (!owns(place, item.from)) {
+        err(
+          "contact-foreign",
+          `${place.id} \xB7 ${item.kind} ${item.value}`,
+          `was read from ${item.from}, a page fetched for ${ownerOf(item.from)}, not for ${place.id}. The value is real and re-readable \u2014 about another company. It must not ship on this row.`
+        );
+        continue;
+      }
+      if (!normalizeForSearch(text3).includes(normalizeForSearch(item.value))) {
         err(
           "contact-not-on-page",
           `${place.id} \xB7 ${item.kind} ${item.value}`,
@@ -10413,6 +10672,12 @@ function runCheck(input) {
             `${place.id} \xB7 ${id.kind} ${id.value}`,
             `claims to come from ${id.from}, which is not an OSM feature stored in this run's osm.json.`
           );
+        } else if (!owns(place, id.from)) {
+          err(
+            "legal-id-foreign",
+            `${place.id} \xB7 ${id.kind} ${id.value}`,
+            `is declared on ${id.from}, which is ${ownerOf(id.from)}, not ${place.id}. A registration read off another company's feature is that company's identity, and the record attached to it here would be the wrong one.`
+          );
         } else if (!osmCarriesIdentifier(id.from, id.value)) {
           err(
             "legal-id-not-on-page",
@@ -10422,12 +10687,20 @@ function runCheck(input) {
         }
         continue;
       }
-      const text2 = pageText.get(id.from);
-      if (!text2) {
+      const text3 = pageText.get(id.from);
+      if (!text3) {
         err("legal-id-unsourced", `${place.id} \xB7 ${id.kind} ${id.value}`, `claims to come from ${id.from}, which is not a stored page in this run.`);
         continue;
       }
-      const haystack = stripLegalId(text2);
+      if (!owns(place, id.from)) {
+        err(
+          "legal-id-foreign",
+          `${place.id} \xB7 ${id.kind} ${id.value}`,
+          `was read from ${id.from}, a page fetched for ${ownerOf(id.from)}, not for ${place.id}. An identifier copied from another company's Impressum builds this row on that company's identity.`
+        );
+        continue;
+      }
+      const haystack = stripLegalId(text3);
       if (!haystack.includes(stripLegalId(id.value))) {
         err(
           "legal-id-not-on-page",
@@ -10460,12 +10733,12 @@ function runCheck(input) {
       );
     }
   }
-  const dossierDir = join13(runDir, "dossiers");
-  const files = existsSync9(dossierDir) ? readdirSync5(dossierDir).filter((f) => f.endsWith(".md")) : [];
+  const dossierDir = join14(runDir, "dossiers");
+  const files = existsSync10(dossierDir) ? readdirSync5(dossierDir).filter((f) => f.endsWith(".md")) : [];
   const byDossierName = new Map(places.map((p) => [`${p.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`, p]));
   let citations = 0;
   for (const file of files) {
-    const rel = join13("dossiers", file);
+    const rel = join14("dossiers", file);
     const place = byDossierName.get(basename(file));
     if (!place) {
       err(
@@ -10475,13 +10748,13 @@ function runCheck(input) {
       );
       continue;
     }
-    const text2 = readFileSync8(join13(dossierDir, file), "utf8");
+    const text3 = readFileSync9(join14(dossierDir, file), "utf8");
     const owned = new Set(place.pages);
     const asOf = place.registry?.asOf;
     if (asOf) {
       const year = asOf.slice(0, 4);
       const month = asOf.slice(0, 7);
-      const mentionsDate = text2.includes(asOf) || text2.includes(month) || text2.includes(year) && /as of|as at/i.test(text2);
+      const mentionsDate = text3.includes(asOf) || text3.includes(month) || text3.includes(year) && /as of|as at/i.test(text3);
       if (!mentionsDate) {
         err(
           "dated-record-undated",
@@ -10490,7 +10763,7 @@ function runCheck(input) {
         );
       }
     }
-    for (const m of text2.matchAll(citationRe())) {
+    for (const m of text3.matchAll(citationRe())) {
       citations++;
       const id = `P${m[1]}`;
       if (!pageText.has(id)) {
@@ -10500,17 +10773,14 @@ function runCheck(input) {
           `no stored page has this id. check re-opens every citation, so this one was invented or the page was deleted.`
         );
       } else if (!owned.has(id)) {
-        err(
-          "citation-foreign",
-          `${rel} \xB7 ${id}`,
-          `belongs to ${pageOwner.get(id)}, not to ${place.id}. A dossier may only cite pages fetched for its own company.`
-        );
+        err("citation-foreign", `${rel} \xB7 ${id}`, `belongs to ${ownerOf(id)}, not to ${place.id}. A dossier may only cite pages fetched for its own company.`);
       }
     }
-    const lines = text2.split("\n");
+    const lines = text3.split("\n");
     let inFence = false;
     let start = 0;
     let buffer = [];
+    let quoted = false;
     const flush = () => {
       if (buffer.length === 0) return;
       const paragraph = buffer.join(" ");
@@ -10530,9 +10800,19 @@ function runCheck(input) {
         flush();
         continue;
       }
-      if (isStructural(line) && buffer.length === 0) continue;
+      const isQuote = line.trim().startsWith(">");
+      const t = line.trim().replace(/^(?:>\s*)+/, "");
+      if (buffer.length && quoted !== isQuote) flush();
+      quoted = isQuote;
+      const next = (lines[i + 1] ?? "").trim().replace(/^(?:>\s*)+/, "");
+      if (isStructural(t, next)) {
+        flush();
+        continue;
+      }
+      if (LIST_ITEM.test(t) || isTableRow(t)) flush();
       if (buffer.length === 0) start = i;
-      buffer.push(line.trim());
+      buffer.push(t);
+      if (isTableRow(t)) flush();
     }
     flush();
   }
@@ -10574,8 +10854,8 @@ function formatReport(report) {
 }
 
 // src/render.ts
-import { existsSync as existsSync11, readFileSync as readFileSync10 } from "fs";
-import { join as join15 } from "path";
+import { existsSync as existsSync12, readFileSync as readFileSync11 } from "fs";
+import { join as join16 } from "path";
 
 // src/csv.ts
 var HEADER = [
@@ -10733,8 +11013,8 @@ function toCsv(places, opts = {}) {
 }
 
 // src/excerpts.ts
-import { existsSync as existsSync10, readFileSync as readFileSync9 } from "fs";
-import { join as join14 } from "path";
+import { existsSync as existsSync11, readFileSync as readFileSync10 } from "fs";
+import { join as join15 } from "path";
 function pageKey(placeId, pageId) {
   return `${placeId} ${pageId}`;
 }
@@ -10824,9 +11104,9 @@ function collectEvidence(runDir, places) {
         refs.set(pageKey(place.id, pageId), { url: `https://www.openstreetmap.org/${featureType}/${osm[2]}` });
         continue;
       }
-      const path = join14(runDir, "pages", slug, `${pageId}.md`);
+      const path = join15(runDir, "pages", slug, `${pageId}.md`);
       if (!parsed.has(path)) {
-        parsed.set(path, existsSync10(path) ? parsePage(readFileSync9(path, "utf8")) : void 0);
+        parsed.set(path, existsSync11(path) ? parsePage(readFileSync10(path, "utf8")) : void 0);
       }
       const page = parsed.get(path);
       if (!page) continue;
@@ -10955,8 +11235,8 @@ function foldNotes(notes, cap = 25) {
     counts.set(note, (counts.get(note) ?? 0) + 1);
   }
   const isSummary = (t) => /^(scan|confirm|match|resolve|enrich|score|dossier|check|render):/.test(t);
-  const summaries = order.filter(isSummary).map((text2) => ({ text: text2, count: counts.get(text2) }));
-  const rest = order.filter((t) => !isSummary(t)).map((text2) => ({ text: text2, count: counts.get(text2) })).sort((a, b) => b.count - a.count);
+  const summaries = order.filter(isSummary).map((text3) => ({ text: text3, count: counts.get(text3) }));
+  const rest = order.filter((t) => !isSummary(t)).map((text3) => ({ text: text3, count: counts.get(text3) })).sort((a, b) => b.count - a.count);
   return { lines: [...summaries, ...rest].slice(0, cap), distinct: order.length, emitted: notes.length };
 }
 function summarise(places, manifest) {
@@ -11039,8 +11319,8 @@ function summarise(places, manifest) {
 
 // src/html.ts
 var esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-function link(url, text2) {
-  return `<a href="${esc(url)}" rel="noreferrer nofollow">${esc(text2 ?? url)}</a>`;
+function link(url, text3) {
+  return `<a href="${esc(url)}" rel="noreferrer nofollow">${esc(text3 ?? url)}</a>`;
 }
 function hostOf2(url) {
   try {
@@ -11925,12 +12205,14 @@ ${manifest.licences.map((x) => `- ${x}`).join("\n")}
 function readDossiers(runDir, places) {
   const out2 = /* @__PURE__ */ new Map();
   for (const place of places) {
-    const path = join15(runDir, dossierPathFor(place));
-    if (existsSync11(path)) out2.set(place.id, readFileSync10(path, "utf8"));
+    const path = join16(runDir, dossierPathFor(place));
+    if (existsSync12(path)) out2.set(place.id, readFileSync11(path, "utf8"));
   }
   return out2;
 }
 function buildAll(places, manifest, opts = {}) {
+  const feedback = opts.runDir ? readFeedback(opts.runDir) : void 0;
+  if (feedback) places = feedbackSelection(places, feedback);
   const visible = ranked(places).slice(0, HTML_ROW_CAP);
   const ctx = opts.runDir ? { ...collectEvidence(opts.runDir, visible), dossiers: readDossiers(opts.runDir, visible) } : {};
   const files = [
@@ -11939,140 +12221,14 @@ function buildAll(places, manifest, opts = {}) {
     { path: "REPORT.md", content: buildReport(places, manifest) },
     { path: "index.html", content: buildHtml(places, manifest, ctx) }
   ];
+  if (feedback?.entries.length) files.push({ path: "FEEDBACK.json", content: JSON.stringify(feedback, null, 2) + "\n" });
   const privacy = opts.noPeople ? void 0 : buildPrivacyNote(places, manifest);
   if (privacy) files.push({ path: "PRIVACY.md", content: privacy });
   return { files };
 }
 
-// src/watch.ts
-function identityOf(place) {
-  if (place.registry) return `${place.registry.connectorId}:${place.registry.establishmentId ?? place.registry.id}`;
-  if (place.osm) return `osm:${place.osm.id}`;
-  return place.id;
-}
-function diffRuns(before, after) {
-  const prev = new Map(before.map((p) => [identityOf(p), p]));
-  const next = new Map(after.map((p) => [identityOf(p), p]));
-  const delta = {
-    appeared: [],
-    disappeared: [],
-    closed: [],
-    startedHiring: [],
-    stoppedHiring: [],
-    newRoles: [],
-    gotWebsite: [],
-    siteChanged: [],
-    wentDark: []
-  };
-  for (const [key, place] of next) {
-    const old = prev.get(key);
-    if (!old) {
-      delta.appeared.push(place);
-      continue;
-    }
-    if (old.registry?.status === "active" && place.registry?.status === "ceased") delta.closed.push(place);
-    const wasHiring = old.signals?.isHiring === true;
-    const isHiring = place.signals?.isHiring === true;
-    if (!wasHiring && isHiring) delta.startedHiring.push({ place, roles: place.signals?.openRoles ?? 0 });
-    if (wasHiring && place.signals?.isHiring === false) delta.stoppedHiring.push(place);
-    if (isHiring) {
-      const had = new Set(old.jobs.map((j) => j.title.toLowerCase()));
-      const fresh = place.jobs.filter((j) => !had.has(j.title.toLowerCase()));
-      if (fresh.length) delta.newRoles.push({ place, titles: fresh.map((j) => j.title) });
-    }
-    const oldSite = old.website?.confidence === "corroborated" ? old.website.url : void 0;
-    const newSite = place.website?.confidence === "corroborated" ? place.website.url : void 0;
-    if (!oldSite && newSite) delta.gotWebsite.push(place);
-    else if (oldSite && newSite && oldSite !== newSite) delta.siteChanged.push({ place, before: oldSite, after: newSite });
-    if (old.signals?.siteReachable === true && place.signals?.siteReachable === false) delta.wentDark.push(place);
-  }
-  for (const [key, place] of prev) if (!next.has(key)) delta.disappeared.push(place);
-  return delta;
-}
-function section(title, lines) {
-  if (lines.length === 0) return [];
-  return [`## ${title}`, "", ...lines, ""];
-}
-function buildDelta(delta, before, after) {
-  const l = [];
-  l.push(`# What changed \u2014 ${shortLabel(after.slug)}`);
-  l.push("");
-  l.push(`Comparing the run of ${before.builtAt.slice(0, 10)} with the one of ${after.builtAt.slice(0, 10)}.`);
-  l.push("");
-  if (before.truncated || after.truncated) {
-    l.push("> \u26A0 **One of these runs is truncated**, so an appearance or a disappearance here");
-    l.push("> may be a difference in coverage rather than a change on the ground.");
-    l.push("");
-  }
-  const total = delta.appeared.length + delta.disappeared.length + delta.closed.length + delta.startedHiring.length + delta.stoppedHiring.length + delta.newRoles.length + delta.gotWebsite.length + delta.siteChanged.length + delta.wentDark.length;
-  if (total === 0) {
-    l.push("Nothing moved.");
-    return l.join("\n") + "\n";
-  }
-  l.push(
-    ...section(
-      "Started hiring",
-      delta.startedHiring.map((x) => `- **${x.place.name}** \u2014 ${x.roles} open role(s)${x.place.website ? ` \xB7 ${x.place.website.url}` : ""}`)
-    )
-  );
-  l.push(
-    ...section(
-      "New roles at companies already hiring",
-      delta.newRoles.map((x) => `- **${x.place.name}** \u2014 ${x.titles.slice(0, 6).join(", ")}`)
-    )
-  );
-  l.push(
-    ...section(
-      "New to the territory",
-      delta.appeared.map((p) => `- **${p.name}**${p.address.commune ? ` \u2014 ${p.address.commune}` : ""}`)
-    )
-  );
-  l.push(
-    ...section(
-      "Now marked ceased by the register",
-      delta.closed.map((p) => `- **${p.name}** \u2014 ${p.registry?.connectorId ?? "register"} ${p.registry?.establishmentId ?? p.registry?.id ?? "?"}`)
-    )
-  );
-  l.push(
-    ...section(
-      "Gone from the sweep",
-      delta.disappeared.map((p) => `- ${p.name}`)
-    )
-  );
-  l.push(
-    ...section(
-      "Now has a website",
-      delta.gotWebsite.map((p) => `- **${p.name}** \u2014 ${p.website?.url}`)
-    )
-  );
-  l.push(
-    ...section(
-      "Moved their website",
-      delta.siteChanged.map((x) => `- **${x.place.name}** \u2014 ${x.before} \u2192 ${x.after}`)
-    )
-  );
-  l.push(
-    ...section(
-      "Stopped hiring",
-      delta.stoppedHiring.map((p) => `- ${p.name}`)
-    )
-  );
-  l.push(
-    ...section(
-      "Site went unreachable",
-      delta.wentDark.map((p) => `- ${p.name} \u2014 ${p.website?.url ?? ""}`)
-    )
-  );
-  l.push("---");
-  l.push("");
-  l.push("\u201CGone from the sweep\u201D is not the same as \u201Cclosed\u201D: a company can drop out because");
-  l.push("a filter changed, because an Overpass tile failed, or because a mapper deleted a");
-  l.push("node. Only the register can say a business ceased, and that is its own section.");
-  return l.join("\n") + "\n";
-}
-
 // src/mcp/adapter.ts
-import { join as join16 } from "path";
+import { join as join17 } from "path";
 var envKeys = () => Object.fromEntries(CONNECTORS.filter((c) => c.needsKey?.env).map((c) => [c.id, process.env[c.needsKey.env]]));
 var str = (v, name) => {
   if (typeof v !== "string" || !v.trim()) throw new ToolError(`${name} must be a non-empty string`);
@@ -12447,12 +12603,12 @@ ${JSON.stringify({ ok: report.ok, errors: report.errors, warnings: report.warnin
             minScore: typeof args.minScore === "number" ? clampInt(args.minScore, 0, 1e4, 0) : void 0,
             minFit: typeof args.minFit === "string" ? args.minFit : void 0
           });
-          for (const file of outcome.files) writeArtifact(join16(runDir, file.path), file.content);
+          for (const file of outcome.files) writeArtifact(join17(runDir, file.path), file.content);
           return {
             text: JSON.stringify(
               {
                 run: runDir,
-                files: outcome.files.map((f) => join16(runDir, f.path)),
+                files: outcome.files.map((f) => join17(runDir, f.path)),
                 truncated: manifest.truncated,
                 privacy: outcome.files.some((f) => f.path === "PRIVACY.md")
               },
@@ -12467,7 +12623,7 @@ ${JSON.stringify({ ok: report.ok, errors: report.errors, warnings: report.warnin
           const before = resolveRun(str(args.since, "since"));
           const delta = diffRuns(readPlaces(before), readPlaces(after));
           const markdown = buildDelta(delta, requireManifest(before), requireManifest(after));
-          writeArtifact(join16(after, "DELTA.md"), markdown);
+          writeArtifact(join17(after, "DELTA.md"), markdown);
           return { text: markdown, artifact: after };
         }
         case "ultraprospect_doctor": {
@@ -12800,6 +12956,7 @@ var COMMANDS = [
   "resolve",
   "enrich",
   "score",
+  "feedback",
   "dossier",
   "check",
   "render",
@@ -12888,6 +13045,7 @@ COMMANDS
   resolve                Find each company's own website and prove it is theirs.
   enrich --tier 1|2      Read those websites: tier 1 on all of them, tier 2 on the ones you pick.
   score                  Rank by measured signals; fold your ICP verdicts in with --apply.
+  feedback               Export feedback subjects or import user decisions with --apply.
   dossier --id <id>      Print the grounding packet for one company, pages and all.
   check                  The gate: citations resolve, claims are cited, contacts were observed.
   render                 CSV, JSON, report and a self-contained HTML page.
@@ -12973,12 +13131,19 @@ RANKING (score)
 DOSSIER
   --id <place id>        Which company's packet to print. Use --json for the list of ids.
 
+USER FEEDBACK (feedback)
+  --run <dir>           Print source-bound subjects for user feedback as JSON.
+  --apply <file>        Import {schemaVersion:1,entries:[{id,source,kind,reason,by,at,subject?}]}.
+                        Kinds: wrong-company, wrong-site, wrong-contact, exclude, useful.
+                        Flagged rows are quarantined on every render; useful does not cancel exclusions.
+
 ADJUDICATION (match)
   --apply <file>         A JSON array of {osmId, registryId, connectorId?, merge, why}. "-" reads stdin.
 
 BULK OPEN DATA (ingest)
   --country <cc>         Which country's export to ingest: gb (Companies House, 470 MB),
-                         de (Handelsregister via OffeneRegister, 260 MB). Both keyless.
+                         de (Handelsregister via OffeneRegister, 260 MB),
+                         ee (\xC4riregister, 18 MB, daily). All keyless.
   --list                 What is already in the cache: rows, vintage, size on disk.
   --check                Ask each register whether it has published something newer.
                          Exits 1 when a cache is behind, so a cron can act on it.
@@ -13339,7 +13504,7 @@ async function cmdMatch(values, bools) {
   if (!values.run) throw new UsageError("match needs --run <dir>");
   if (!values.apply) throw new UsageError('match needs --apply <file> (a JSON array of {osmId, registryId, merge}), or "-" for stdin');
   const runDir = resolveRun(values.run);
-  const raw = values.apply === "-" ? readFileSync11(0, "utf8") : readFileSync11(values.apply, "utf8");
+  const raw = values.apply === "-" ? readFileSync12(0, "utf8") : readFileSync12(values.apply, "utf8");
   let verdicts;
   try {
     const parsedJson = JSON.parse(raw);
@@ -13397,7 +13562,7 @@ async function cmdResolve(values, bools) {
       if (line) say(`resolve: ${line}`);
     }
     say(`resolve: ${plan.length} place(s) need a website, ${plan.reduce((n, p) => n + p.queries.length, 0)} quer(y|ies) to run.`);
-    say(`  worklist: ${join17(runDir, "RESOLVE.todo.json")}`);
+    say(`  worklist: ${join18(runDir, "RESOLVE.todo.json")}`);
     say("  Run your own WebSearch once per query. Pool EVERY hit into ONE JSON array,");
     say('  duplicates and all: [{"url": "\u2026", "title": "\u2026", "snippet": "\u2026", "placeId": "\u2026"}]');
     say(`next: ultraprospect resolve --run ${runDir} --web-results <file>`);
@@ -13406,7 +13571,7 @@ async function cmdResolve(values, bools) {
   }
   let webResults;
   if (values["web-results"]) {
-    const raw = values["web-results"] === "-" ? readFileSync11(0, "utf8") : readFileSync11(values["web-results"], "utf8");
+    const raw = values["web-results"] === "-" ? readFileSync12(0, "utf8") : readFileSync12(values["web-results"], "utf8");
     try {
       const parsed = JSON.parse(raw);
       webResults = Array.isArray(parsed) ? parsed : parsed?.hits ?? [];
@@ -13505,7 +13670,7 @@ async function cmdEnrich(values, bools) {
   return outcome.enriched > 0 ? EXIT_OK : EXIT_FAILURE;
 }
 function readJsonArg(value, what) {
-  const raw = value === "-" ? readFileSync11(0, "utf8") : readFileSync11(value, "utf8");
+  const raw = value === "-" ? readFileSync12(0, "utf8") : readFileSync12(value, "utf8");
   try {
     return JSON.parse(raw);
   } catch (e) {
@@ -13574,7 +13739,7 @@ async function cmdDossier(values, bools) {
   const packet = buildDossierPacket(runDir, place, requireManifest(runDir));
   out(packet.markdown);
   say("");
-  say(`write your dossier to ${join17(runDir, dossierPathFor(place))}`);
+  say(`write your dossier to ${join18(runDir, dossierPathFor(place))}`);
   say(`next: ultraprospect check --run ${runDir}`);
   return EXIT_OK;
 }
@@ -13604,16 +13769,35 @@ async function cmdRender(values, bools) {
     minScore: values["min-score"] ? clampInt(values["min-score"], 0, 1e4, 0) : void 0,
     minFit: values["min-fit"] ?? void 0
   });
-  for (const file of outcome.files) writeArtifact(join17(runDir, file.path), file.content);
-  if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join17(runDir, f.path)) }));
-  else for (const file of outcome.files) out(join17(runDir, file.path));
+  for (const file of outcome.files) writeArtifact(join18(runDir, file.path), file.content);
+  if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join18(runDir, f.path)) }));
+  else for (const file of outcome.files) out(join18(runDir, file.path));
   say("");
   if (manifest.truncated) {
     say("  \u26A0 this run is TRUNCATED \u2014 the report and the page both lead with that, and so must you.");
   }
   const privacy = outcome.files.some((f) => f.path === "PRIVACY.md");
   if (privacy) say("  PRIVACY.md was written: this run holds named individuals. Read it before sharing the CSV.");
-  say(`next: open ${join17(runDir, "index.html")}`);
+  say(`next: open ${join18(runDir, "index.html")}`);
+  return EXIT_OK;
+}
+async function cmdFeedback(values) {
+  if (!values.run) throw new UsageError("feedback needs --run <dir>");
+  const runDir = resolveRun(values.run), places = readPlaces(runDir);
+  if (values.apply) {
+    const ledger = importFeedback(runDir, places, readJsonArg(values.apply, "--apply"));
+    out(jsonLine(ledger));
+    say(`feedback: ${ledger.entries.length} recorded event(s); next: ultraprospect render --run ${runDir}`);
+  } else {
+    out(
+      jsonLine({
+        schemaVersion: 1,
+        entries: [],
+        subjects: places.map((place) => ({ source: feedbackSource(place), name: place.name, website: place.website, contacts: place.contacts }))
+      })
+    );
+    say(`feedback: fill entries from the user's decisions, then import with feedback --run ${runDir} --apply <file>`);
+  }
   return EXIT_OK;
 }
 async function cmdWatch(values, bools) {
@@ -13624,7 +13808,7 @@ async function cmdWatch(values, bools) {
   if (afterDir === beforeDir) throw new UsageError("--run and --since resolve to the same run; there is nothing to compare");
   const delta = diffRuns(readPlaces(beforeDir), readPlaces(afterDir));
   const markdown = buildDelta(delta, requireManifest(beforeDir), requireManifest(afterDir));
-  writeArtifact(join17(afterDir, "DELTA.md"), markdown);
+  writeArtifact(join18(afterDir, "DELTA.md"), markdown);
   if (bools.has("json")) {
     out(
       jsonLine({
@@ -13639,7 +13823,7 @@ async function cmdWatch(values, bools) {
       })
     );
   } else {
-    out(join17(afterDir, "DELTA.md"));
+    out(join18(afterDir, "DELTA.md"));
   }
   say("");
   say(
@@ -13703,14 +13887,14 @@ async function main(argv) {
   }
   const { command, values, bools } = parsed;
   if (bools.has("stdout") || process.env.ULTRAPROSPECT_NO_WRITE === "1") setNoWrite(true);
-  const text2 = positionalText(parsed);
+  const text3 = positionalText(parsed);
   switch (command) {
     case "ingest":
       return cmdIngest(values, bools);
     case "where":
-      return cmdWhere(values, bools, text2);
+      return cmdWhere(values, bools, text3);
     case "scan":
-      return cmdScan(values, bools, text2);
+      return cmdScan(values, bools, text3);
     case "match":
       return cmdMatch(values, bools);
     case "confirm":
@@ -13721,6 +13905,8 @@ async function main(argv) {
       return cmdEnrich(values, bools);
     case "score":
       return cmdScore(values, bools);
+    case "feedback":
+      return cmdFeedback(values);
     case "dossier":
       return cmdDossier(values, bools);
     case "check":

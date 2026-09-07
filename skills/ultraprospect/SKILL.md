@@ -1,6 +1,7 @@
 ---
 name: ultraprospect
-description: "Build a sourced prospect list for every company in a place, street, or radius. Use for territory-wide company discovery, register confirmation, website resolution, qualification, and citation-aware export; not for one-company lookups."
+description: "Build a sourced, territory-wide company prospect list with registry checks, qualification, and citation-aware exports."
+disable-model-invocation: true
 license: MIT
 metadata:
   version: 3.12.0
@@ -84,6 +85,7 @@ gate. Read it rather than guessing a flag.
 | Write up one company from its evidence | `dossier --run <dir> --id <id>` |
 | Prove the write-up is grounded before anyone reads it | `check --run <dir>` |
 | Hand it over: CSV, report, one self-contained page | `render --run <dir>` |
+| Import the user's corrections or exclusions | Read [user feedback](references/feedback.md), then `feedback --run <dir> [--apply <file>]` and render again |
 | See what moved since last month's sweep | `watch --run <new> --since <old>` |
 | Spread the judgement across subagents | `orchestrate --run <dir>` |
 | Drive it all from another harness | `mcp` — serves where, ingest, scan, places, confirm, enrich, score, dossier, check, render, watch, doctor |
@@ -199,22 +201,24 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    unfiltered. Nearly all the matches, a fifth of the noise.
 
 2b. **Ingest first where a register publishes a file instead of an API.** The
-   United Kingdom and Germany both do, and both exports are keyless.
+   United Kingdom, Germany and Estonia do, and their exports are keyless.
    `ingest --country gb` fetches Companies House's monthly snapshot (470 MB) and
    turns the UK into a territory that can be ENUMERATED; `ingest --country de`
    fetches the German register export (260 MB) and gives `confirm` a source that
-   names the holder of an HRB number. Each runs once and everything afterwards is
+   names the holder of an HRB number. `ingest --country ee` indexes Estonia's
+   daily export for enumeration by administrative unit. Each runs once and everything afterwards is
    a local read — `ingest --list` says what is cached and how much disk it took.
-   Without the ingest, both connectors report themselves unavailable with that
+   Without the ingest, these connectors report themselves unavailable with that
    command in the message, and the run continues.
 
 3. **Read the coverage before reading the data.** `manifest.lanes` says what
    each lane returned, whether it was capped, and — for the register lane —
    whether the territory was `"sweep"`-ed or `"confirm"`-ed. The report prints
-   `mode` as its own column. `manifest.truncated` is the headline. Two registers
+   `mode` as its own column. `manifest.truncated` is the headline. Three registers
    can be enumerated keylessly and they are not enumerated the same way: France
    by bounding box through its API, the United Kingdom by POST TOWN out of the
-   snapshot. Everywhere else the lane says in words that no register could be
+   snapshot, and Estonia by administrative unit after `ingest --country ee`.
+   Everywhere else the lane says in words that no register could be
    swept, and that is a property of the world's open data, not a failure of the
    run.
 
@@ -464,7 +468,7 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | Industrial sites are missing | Re-run the scan with the current build. The `industrial` catalogue group includes `man_made=works` and every feature carrying an `industrial` tag. |
 | Contacts are empty after `scan` although OSM has phone tags | They are now carried as declared contacts with an `osm:<id>` source. Re-run the scan with the current build. |
 | `truncated: true` on the register lane | A French territory exceeded the API's 10 000-result ceiling even after the NACE split, or `--max-results` produced a per-section sample after 21 section probes. It is not a prefix and not the whole; narrow the filters. |
-| Register lane `mode: "confirm"`, not `"sweep"` | Expected everywhere but France and the United Kingdom. OSM covered the ground; run `confirm` to attach register identities company by company. |
+| Register lane `mode: "confirm"`, not `"sweep"` | Expected everywhere but France, the United Kingdom and Estonia; the latter two require an ingested snapshot. OSM covered the ground; run `confirm` to attach register identities company by company. |
 | The UK register lane returned nothing | No snapshot in the cache. Run `ingest --country gb` once, then re-scan. The lane's reason says so verbatim. |
 | A UK sweep missed a company you can see on the street | Its registered office is in another post town — very often its accountant's. The sweep enumerates by post town, and the lane's reason says a post town is not a bounding box. |
 | `merged` is 0 on a GB run | Companies House snapshot records carry no coordinates. Read the register lane's `withCoordinates` and `reason`: scored fusion could not run, so zero does not mean the names failed to match. |
@@ -583,3 +587,4 @@ Subagents never write; the folds stay with you, the orchestrator. Re-run
 | You are ranking, writing a dossier, or reading a gate failure | [references/scoring-and-citations.md](references/scoring-and-citations.md) |
 | A run behaved oddly, or you need exit codes and env vars | [references/operations.md](references/operations.md) |
 | The deliverable will be shared, stored, or contains people | [references/privacy-and-licensing.md](references/privacy-and-licensing.md) |
+| The user marks a company/site/contact wrong, excludes it, or finds it useful | [references/feedback.md](references/feedback.md) |
