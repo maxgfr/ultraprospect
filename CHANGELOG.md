@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [3.14.1](https://github.com/maxgfr/ultraprospect/compare/v3.14.0...v3.14.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **engine:** unify pins, repins and shared engine adapters ([e4b9fb4](https://github.com/maxgfr/ultraprospect/commit/e4b9fb4b7b440d0b41ff435430a498ce2d16b848))
+* **engine:** unify pins, repins and shared engine adapters ([6337e2e](https://github.com/maxgfr/ultraprospect/commit/6337e2ebc241ea69418270cf6047d2af63024fcb))
+
 # [3.14.0](https://github.com/maxgfr/ultraprospect/compare/v3.13.1...v3.14.0) (2026-09-08)
 
 
