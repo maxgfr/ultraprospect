@@ -9,6 +9,8 @@ metadata:
 
 # ultraprospect — a territory, turned into prospects you can cite
 
+Use bundled WebIndex retrieval to inspect and cite source passages. Report unavailable sources; search snippets alone do not substantiate conclusions.
+
 Like its `ultra*` siblings this is a **division of labour**. The engine decides
 the mechanics: geocode the place, sweep what can be swept, tile around the
 upstream caps, fuse what is certainly the same company, confirm the rest against

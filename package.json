@@ -1,7 +1,7 @@
 {
   "name": "ultraprospect",
   "version": "3.13.1",
-  "description": "Turn a place into a qualified prospect list — keyless discovery from OpenStreetMap worldwide plus whichever company register a country actually has, matched into one entity, enriched two tiers deep from each company's own website, and written up as citation-checked dossiers. A skills.sh agent skill.",
+  "description": "Turn a place into a qualified prospect list \u2014 keyless discovery from OpenStreetMap worldwide plus whichever company register a country actually has, matched into one entity, enriched two tiers deep from each company's own website, and written up as citation-checked dossiers. A skills.sh agent skill.",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "bin": {
@@ -27,11 +27,13 @@
     "format": "biome format --write .",
     "verify:bundle": "node scripts/verify-skill-bundle.mjs",
     "verify:engine": "node scripts/verify-engine-usage.mjs",
-    "check:build": "tsup && node scripts/copy-bundle.mjs && git diff --exit-code -- scripts/ultraprospect.mjs skills/ultraprospect/scripts/ultraprospect.mjs && node scripts/verify-skill-bundle.mjs && node scripts/sync-engine.mjs --check && node scripts/verify-engine-usage.mjs",
+    "check:build": "tsup && node scripts/copy-bundle.mjs && git diff --exit-code -- scripts/ultraprospect.mjs skills/ultraprospect/scripts/ultraprospect.mjs && node scripts/verify-skill-bundle.mjs && node scripts/sync-engine.mjs --check && node scripts/verify-engine-usage.mjs && node scripts/sync-engine.mjs --check && node scripts/verify-engine-usage.mjs",
     "demo": "node scripts/ultraprospect.mjs scan --fixture assets/fixtures/vincennes --out /tmp/ultraprospect-demo",
     "eval": "node evals/run.mjs --suite offline",
     "eval:network": "node evals/run.mjs --suite network",
-    "release": "semantic-release"
+    "release": "semantic-release",
+    "engine:prepare": "pnpm run build",
+    "engine:gate": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run check:build && pnpm run eval && pnpm run demo"
   },
   "keywords": [
     "skills",
@@ -69,6 +71,7 @@
     "semantic-release": "^24.2.0",
     "tsup": "^8.5.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "@maxgfr/webindex": "https://codeload.github.com/maxgfr/webindex/tar.gz/5789560fa2b8c9a34326292e50f8f0fa951fa79d"
   }
 }

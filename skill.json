@@ -1,0 +1,38 @@
+{
+  "name": "ultraprospect",
+  "vendorDir": "src/vendor",
+  "engines": {
+    "webindex": {
+      "repo": "maxgfr/webindex",
+      "minRef": "v1.18.3",
+      "meta": "webindex.meta.json",
+      "files": [
+        {
+          "remote": "scripts/engine.mjs",
+          "local": "webindex-engine.mjs"
+        },
+        {
+          "remote": "scripts/engine.d.mts",
+          "local": "webindex-engine.d.mts"
+        }
+      ],
+      "forks": {},
+      "usageFloor": 46
+    }
+  },
+  "repin": {
+    "artifacts": [
+      "src/vendor",
+      "scripts",
+      "skills",
+      "package.json",
+      "pnpm-lock.yaml",
+      "skill.json",
+      ".github/workflows/engine-repin.yml"
+    ],
+    "workflows": [
+      "ci.yml",
+      "release.yml"
+    ]
+  }
+}

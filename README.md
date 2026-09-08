@@ -450,3 +450,5 @@ drift detection and nothing to remember. The role labels that name a person live
 in `src/people.ts`, keyed by language the same way the legal-notice terms are.
 
 MIT.
+
+See [shared engine maintenance](ENGINE-MAINTENANCE.md) for pins, source adoption checks and the daily repin workflow.
