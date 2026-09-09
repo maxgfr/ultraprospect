@@ -547,9 +547,9 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 
 | You have | Do |
 |---|---|
-| The Workflow tool | `orchestrate --run <dir>`, then launch `orchestration/<phase>.workflow.mjs` |
-| Subagents but no Workflow tool | `orchestrate --run <dir>`, dispatch each agent with the contract in `orchestration/agents/<role>.md` |
-| Neither | `orchestrate --run <dir> --eco` and work down `RUNBOOK.md` yourself |
+| The Workflow tool | `orchestrate --run <dir>`, then launch `<dir>/orchestration/<phase>.workflow.mjs` |
+| Subagents but no Workflow tool | `orchestrate --run <dir>`, dispatch each agent with the contract in `<dir>/orchestration/agents/<role>.md` |
+| Neither | `orchestrate --run <dir> --eco` and work down `<dir>/orchestration/RUNBOOK.md` yourself |
 
 Three phases fan out — `resolve`, `match` and `dossier`. Searching for a
 company's website is per-company thinking, and it is the phase the run rests on.
@@ -569,9 +569,9 @@ that settles it is what still catches the mistake afterwards:
 | `dossier` | **sonnet** | `check` catches a citation that does not resolve and a contact never observed. It cannot catch a packet that was skimmed, which is the whole of what the phase is paid for. |
 
 The emitted `*.workflow.mjs` already carries these, and each
-`agents/<role>.md` repeats its own — only one of the three harnesses above reads
+`<dir>/orchestration/agents/<role>.md` repeats its own — only one of the three harnesses above reads
 the workflow file, and a rule that lives only there is absent from the other two.
-Dispatching subagents by hand, or working down `RUNBOOK.md`, use the same
+Dispatching subagents by hand, or working down `<dir>/orchestration/RUNBOOK.md`, use the same
 tiering. It is a property of the phase, not of the country: it holds identically
 for a French sweep and a German confirm.
 
