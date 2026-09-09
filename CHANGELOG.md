@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [3.14.4](https://github.com/maxgfr/ultraprospect/compare/v3.14.3...v3.14.4) (2026-09-09)
+
+
+### Bug Fixes
+
+* réépingler webindex après harmonisation du chemin d’orchestration ([ca70143](https://github.com/maxgfr/ultraprospect/commit/ca7014322f136230fedd0bd364b3e4dd7acdb668))
+
 ## [3.14.3](https://github.com/maxgfr/ultraprospect/compare/v3.14.2...v3.14.3) (2026-09-08)
 
 
