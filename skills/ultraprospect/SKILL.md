@@ -1,10 +1,11 @@
 ---
 name: ultraprospect
-description: "Build a sourced, territory-wide company prospect list with registry checks, qualification, and citation-aware exports."
+description: Build a sourced, territory-wide company prospect list with registry checks, qualification, and citation-aware exports.
 disable-model-invocation: true
 license: MIT
 metadata:
   version: 3.14.5
+  opencode/autoinvoke: 'false'
 ---
 
 # ultraprospect — a territory, turned into prospects you can cite
