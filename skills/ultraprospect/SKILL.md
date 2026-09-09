@@ -4,7 +4,7 @@ description: Build a sourced, territory-wide company prospect list with registry
 disable-model-invocation: true
 license: MIT
 metadata:
-  version: 3.14.5
+  version: 3.14.6
   opencode/autoinvoke: 'false'
 ---
 
