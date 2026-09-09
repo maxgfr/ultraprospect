@@ -21,6 +21,18 @@ afterEach(() => {
 });
 
 describe("fixture identifier fusion", () => {
+  it.each(["osm.json", "registry.json"])("refuses corrupt recorded %s instead of silently replaying an empty lane", (file) => {
+    const source = loadFixture(fixture);
+    const dir = outDir();
+    writeFileSync(join(dir, "target.json"), JSON.stringify(source.target));
+    writeFileSync(join(dir, "osm.json"), "[]");
+    writeFileSync(join(dir, "registry.json"), "[]");
+    expect(loadFixture(dir)).toMatchObject({ osm: [], registry: [] });
+    for (const invalid of ["{broken", "null", "{}", '"not a lane"']) {
+      writeFileSync(join(dir, file), invalid);
+      expect(() => loadFixture(dir)).toThrow(new RegExp(file.replace(".", "\\.")));
+    }
+  });
   it("explains when coordinate-less register records make scored fusion impossible", async () => {
     const source = loadFixture(fixture);
     const dir = outDir();

@@ -8322,10 +8322,15 @@ function loadFixture(dir2) {
   for (const file of ["osm.json", "registry.json"]) {
     if (!existsSync8(join10(dir2, file))) throw new Error(`${join10(dir2, file)} is missing \u2014 record it with \`ultraprospect scan --record <dir>\``);
   }
-  const registry = readJsonSafe(join10(dir2, "registry.json")) ?? [];
+  const lane = (file) => {
+    const value = readJsonSafe(join10(dir2, file));
+    if (!Array.isArray(value)) throw new Error(`${join10(dir2, file)} must contain a JSON array \u2014 repair or re-record the fixture`);
+    return value;
+  };
+  const registry = lane("registry.json");
   return {
     target,
-    osm: readJsonSafe(join10(dir2, "osm.json")) ?? [],
+    osm: lane("osm.json"),
     registry,
     connectorId: registry[0]?.connectorId
   };

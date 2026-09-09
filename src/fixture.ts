@@ -37,10 +37,15 @@ export function loadFixture(dir: string): Fixture {
   for (const file of ["osm.json", "registry.json"]) {
     if (!existsSync(join(dir, file))) throw new Error(`${join(dir, file)} is missing — record it with \`ultraprospect scan --record <dir>\``);
   }
-  const registry = (readJsonSafe(join(dir, "registry.json")) as RegistryRecord[]) ?? [];
+  const lane = <T>(file: string): T[] => {
+    const value = readJsonSafe(join(dir, file));
+    if (!Array.isArray(value)) throw new Error(`${join(dir, file)} must contain a JSON array — repair or re-record the fixture`);
+    return value as T[];
+  };
+  const registry = lane<RegistryRecord>("registry.json");
   return {
     target,
-    osm: (readJsonSafe(join(dir, "osm.json")) as OsmPoi[]) ?? [],
+    osm: lane<OsmPoi>("osm.json"),
     registry,
     connectorId: registry[0]?.connectorId,
   };
