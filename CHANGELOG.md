@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [3.14.5](https://github.com/maxgfr/ultraprospect/compare/v3.14.4...v3.14.5) (2026-09-09)
+
+
+### Bug Fixes
+
+* reject corrupt recorded fixture lanes ([367cf91](https://github.com/maxgfr/ultraprospect/commit/367cf912d9eb683b67b9b329170aead4df1c770d))
+
 ## [3.14.4](https://github.com/maxgfr/ultraprospect/compare/v3.14.3...v3.14.4) (2026-09-09)
 
 
