@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [3.14.7](https://github.com/maxgfr/ultraprospect/compare/v3.14.6...v3.14.7) (2026-09-10)
+
+
+### Bug Fixes
+
+* **engine:** update shared engines and maintenance tool ([020697f](https://github.com/maxgfr/ultraprospect/commit/020697f63c184d24930cf4a821fb258d262783ec))
+
 ## [3.14.6](https://github.com/maxgfr/ultraprospect/compare/v3.14.5...v3.14.6) (2026-09-09)
 
 
