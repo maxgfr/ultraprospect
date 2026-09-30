@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [3.14.9](https://github.com/maxgfr/ultraprospect/compare/v3.14.8...v3.14.9) (2026-09-30)
+
+
+### Bug Fixes
+
+* **engine:** repin webindex v1.26.1 ([e98d675](https://github.com/maxgfr/ultraprospect/commit/e98d675edb88e4385de63827d74d5d6484844e3d))
+
 ## [3.14.8](https://github.com/maxgfr/ultraprospect/compare/v3.14.7...v3.14.8) (2026-09-13)
 
 
