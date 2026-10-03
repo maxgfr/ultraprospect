@@ -4325,6 +4325,144 @@ var init_video = __esm({
   }
 });
 
+// src/cli-kit.ts
+import { basename } from "path";
+function parseArgs(argv, spec) {
+  const commands = new Set(spec.commands);
+  const valueFlags = new Set(spec.valueFlags);
+  const boolFlags = new Set(spec.boolFlags);
+  if (argv.length === 0) return { kind: "help" };
+  if (isHelpWord(argv[0])) return argv[1] !== void 0 && commands.has(argv[1]) ? { kind: "help", command: argv[1] } : { kind: "help" };
+  if (isVersionWord(argv[0])) return { kind: "version" };
+  const command2 = argv[0];
+  if (!commands.has(command2)) {
+    throw new UsageError(`unknown command "${command2}" \u2014 run --help for the supported commands`);
+  }
+  const values = {};
+  const bools = /* @__PURE__ */ new Set();
+  const positional = [];
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--") {
+      positional.push(...argv.slice(i + 1));
+      break;
+    }
+    if (!arg.startsWith("--") && arg !== "-h" && arg !== "-v") {
+      positional.push(arg);
+      continue;
+    }
+    const eq = arg.indexOf("=");
+    const key = eq !== -1 ? arg.slice(2, eq) : arg.slice(2);
+    if (!boolFlags.has(key) && !valueFlags.has(key)) {
+      if (isHelpWord(arg)) return { kind: "help", command: command2 };
+      if (isVersionWord(arg)) return { kind: "version" };
+    }
+    if (boolFlags.has(key)) {
+      if (eq !== -1) throw new UsageError(`--${key} is a boolean flag and takes no value`);
+      bools.add(key);
+      continue;
+    }
+    if (!valueFlags.has(key)) {
+      throw new UsageError(`unknown flag "--${key}" \u2014 run --help for the supported options`);
+    }
+    if (eq !== -1) {
+      values[key] = arg.slice(eq + 1);
+      continue;
+    }
+    const next = argv[i + 1];
+    if (next === void 0 || next.startsWith("--")) {
+      throw new UsageError(`missing value for --${key}`);
+    }
+    values[key] = next;
+    i++;
+  }
+  return { kind: "command", command: command2, positional, values, bools };
+}
+function isHelpWord(a) {
+  return a === "--help" || a === "-h" || a === "help";
+}
+function isVersionWord(a) {
+  return a === "--version" || a === "-v" || a === "version";
+}
+function argValue(p, name) {
+  return p.values[name];
+}
+function argBool(p, name) {
+  return p.bools.has(name);
+}
+function argInt(p, name, range = {}) {
+  const raw = p.values[name];
+  if (raw === void 0) return void 0;
+  const n = raw.trim() ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(n) || !Number.isInteger(n)) {
+    throw new UsageError(`--${name} expects a whole number, got "${raw}"`);
+  }
+  const { min, max } = range;
+  if (min !== void 0 && n < min || max !== void 0 && n > max) {
+    const bound = min !== void 0 && max !== void 0 ? `from ${min} to ${max}` : min !== void 0 ? `of at least ${min}` : `of at most ${max}`;
+    throw new UsageError(`--${name} expects a whole number ${bound}, got "${raw}"`);
+  }
+  return n;
+}
+function argList(p, name) {
+  const raw = p.values[name];
+  if (raw === void 0) return [];
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+function argOneOf(p, name, allowed) {
+  const raw = p.values[name];
+  if (raw === void 0) return void 0;
+  if (!allowed.includes(raw)) {
+    throw new UsageError(`invalid --${name} "${raw}" \u2014 expected one of: ${allowed.join(", ")}`);
+  }
+  return raw;
+}
+function positionalText(p) {
+  return p.positional.join(" ");
+}
+function jsonLine(value) {
+  return `${JSON.stringify(value, null, 2)}
+`;
+}
+function docFlagRegex() {
+  return /(?<![a-z0-9-])--([a-z][a-z0-9-]*)/g;
+}
+function documentedFlags(text) {
+  const seen = /* @__PURE__ */ new Set();
+  for (const m of text.matchAll(docFlagRegex())) seen.add(m[1]);
+  return [...seen];
+}
+function helpCoversFlag(help, flag) {
+  return new RegExp(`--${escapeRegExp(flag)}(?![a-z0-9-])`).test(help);
+}
+function missingFromHelp(help, flags) {
+  return [...flags].filter((f) => !helpCoversFlag(help, f));
+}
+function pipedEnum(line, flag) {
+  const cleaned = line.replace(/`/g, "").replace(/\\\|/g, "|");
+  const m = cleaned.match(new RegExp(`--${escapeRegExp(flag)}[^a-z|]*((?:[a-z][a-z0-9-]*\\s*\\|\\s*)+[a-z][a-z0-9-]*)`));
+  return m ? m[1].split("|").map((s) => s.trim()) : null;
+}
+function isInvokedDirectly(argv1 = process.argv[1], cli = brand().cli) {
+  if (!argv1) return false;
+  return basename(argv1).replace(/\.(mjs|cjs|js)$/, "") === cli;
+}
+var EXIT_OK, EXIT_FAILURE, EXIT_USAGE, EXIT_HUMAN, UsageError;
+var init_cli_kit = __esm({
+  "src/cli-kit.ts"() {
+    "use strict";
+    init_brand();
+    init_text();
+    EXIT_OK = 0;
+    EXIT_FAILURE = 1;
+    EXIT_USAGE = 2;
+    EXIT_HUMAN = 3;
+    UsageError = class extends Error {
+      exitCode = EXIT_USAGE;
+    };
+  }
+});
+
 // src/browser/ws.ts
 import { createHash, randomBytes } from "crypto";
 import { EventEmitter } from "events";
@@ -5012,143 +5150,6 @@ var init_deps = __esm({
   }
 });
 
-// src/cli-kit.ts
-import { basename } from "path";
-function parseArgs(argv, spec) {
-  const commands = new Set(spec.commands);
-  const valueFlags = new Set(spec.valueFlags);
-  const boolFlags = new Set(spec.boolFlags);
-  if (argv.length === 0) return { kind: "help" };
-  if (isHelpWord(argv[0])) return argv[1] !== void 0 && commands.has(argv[1]) ? { kind: "help", command: argv[1] } : { kind: "help" };
-  if (isVersionWord(argv[0])) return { kind: "version" };
-  const command2 = argv[0];
-  if (!commands.has(command2)) {
-    throw new UsageError(`unknown command "${command2}" \u2014 run --help for the supported commands`);
-  }
-  const values = {};
-  const bools = /* @__PURE__ */ new Set();
-  const positional = [];
-  for (let i = 1; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--") {
-      positional.push(...argv.slice(i + 1));
-      break;
-    }
-    if (!arg.startsWith("--") && arg !== "-h" && arg !== "-v") {
-      positional.push(arg);
-      continue;
-    }
-    const eq = arg.indexOf("=");
-    const key = eq !== -1 ? arg.slice(2, eq) : arg.slice(2);
-    if (!boolFlags.has(key) && !valueFlags.has(key)) {
-      if (isHelpWord(arg)) return { kind: "help", command: command2 };
-      if (isVersionWord(arg)) return { kind: "version" };
-    }
-    if (boolFlags.has(key)) {
-      if (eq !== -1) throw new UsageError(`--${key} is a boolean flag and takes no value`);
-      bools.add(key);
-      continue;
-    }
-    if (!valueFlags.has(key)) {
-      throw new UsageError(`unknown flag "--${key}" \u2014 run --help for the supported options`);
-    }
-    if (eq !== -1) {
-      values[key] = arg.slice(eq + 1);
-      continue;
-    }
-    const next = argv[i + 1];
-    if (next === void 0 || next.startsWith("--")) {
-      throw new UsageError(`missing value for --${key}`);
-    }
-    values[key] = next;
-    i++;
-  }
-  return { kind: "command", command: command2, positional, values, bools };
-}
-function isHelpWord(a) {
-  return a === "--help" || a === "-h" || a === "help";
-}
-function isVersionWord(a) {
-  return a === "--version" || a === "-v" || a === "version";
-}
-function argValue(p, name) {
-  return p.values[name];
-}
-function argBool(p, name) {
-  return p.bools.has(name);
-}
-function argInt(p, name, range = {}) {
-  const raw = p.values[name];
-  if (raw === void 0) return void 0;
-  const n = raw.trim() ? Number(raw) : Number.NaN;
-  if (!Number.isFinite(n) || !Number.isInteger(n)) {
-    throw new UsageError(`--${name} expects a whole number, got "${raw}"`);
-  }
-  const { min, max } = range;
-  if (min !== void 0 && n < min || max !== void 0 && n > max) {
-    const bound = min !== void 0 && max !== void 0 ? `from ${min} to ${max}` : min !== void 0 ? `of at least ${min}` : `of at most ${max}`;
-    throw new UsageError(`--${name} expects a whole number ${bound}, got "${raw}"`);
-  }
-  return n;
-}
-function argList(p, name) {
-  const raw = p.values[name];
-  if (raw === void 0) return [];
-  return raw.split(",").map((s) => s.trim()).filter(Boolean);
-}
-function argOneOf(p, name, allowed) {
-  const raw = p.values[name];
-  if (raw === void 0) return void 0;
-  if (!allowed.includes(raw)) {
-    throw new UsageError(`invalid --${name} "${raw}" \u2014 expected one of: ${allowed.join(", ")}`);
-  }
-  return raw;
-}
-function positionalText(p) {
-  return p.positional.join(" ");
-}
-function jsonLine(value) {
-  return `${JSON.stringify(value, null, 2)}
-`;
-}
-function docFlagRegex() {
-  return /(?<![a-z0-9-])--([a-z][a-z0-9-]*)/g;
-}
-function documentedFlags(text) {
-  const seen = /* @__PURE__ */ new Set();
-  for (const m of text.matchAll(docFlagRegex())) seen.add(m[1]);
-  return [...seen];
-}
-function helpCoversFlag(help, flag) {
-  return new RegExp(`--${escapeRegExp(flag)}(?![a-z0-9-])`).test(help);
-}
-function missingFromHelp(help, flags) {
-  return [...flags].filter((f) => !helpCoversFlag(help, f));
-}
-function pipedEnum(line, flag) {
-  const cleaned = line.replace(/`/g, "").replace(/\\\|/g, "|");
-  const m = cleaned.match(new RegExp(`--${escapeRegExp(flag)}[^a-z|]*((?:[a-z][a-z0-9-]*\\s*\\|\\s*)+[a-z][a-z0-9-]*)`));
-  return m ? m[1].split("|").map((s) => s.trim()) : null;
-}
-function isInvokedDirectly(argv1 = process.argv[1], cli = brand().cli) {
-  if (!argv1) return false;
-  return basename(argv1).replace(/\.(mjs|cjs|js)$/, "") === cli;
-}
-var EXIT_OK, EXIT_FAILURE, EXIT_USAGE, UsageError;
-var init_cli_kit = __esm({
-  "src/cli-kit.ts"() {
-    "use strict";
-    init_brand();
-    init_text();
-    EXIT_OK = 0;
-    EXIT_FAILURE = 1;
-    EXIT_USAGE = 2;
-    UsageError = class extends Error {
-      exitCode = EXIT_USAGE;
-    };
-  }
-});
-
 // src/browser/extensions.ts
 import { existsSync as existsSync5, statSync as statSync3 } from "fs";
 import { isAbsolute as isAbsolute2, join as join7 } from "path";
@@ -5597,6 +5598,17 @@ function tabList(map, pages, current2) {
     return { id, targetId, url: p?.url ?? "", title: p?.title ?? "", active: targetId === current2 };
   });
 }
+function assertOpenableUrl(url) {
+  const u = url.trim();
+  let ok = /^about:blank$/i.test(u) || u.startsWith("#");
+  if (!ok) {
+    try {
+      ok = /^https?:$/.test(new URL(u).protocol);
+    } catch {
+    }
+  }
+  if (!ok) throw new UsageError(`only http(s) URLs (and about:blank) can be opened \u2014 use \`${brand().cli} extract <path>\` for local files`);
+}
 async function createTarget(cdp) {
   const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
   return targetId;
@@ -5674,6 +5686,7 @@ var init_session = __esm({
   "src/browser/session.ts"() {
     "use strict";
     init_brand();
+    init_cli_kit();
     init_cdp();
     init_deps();
     init_discovery();
@@ -5889,6 +5902,7 @@ var init_session = __esm({
        * is the page now, still loading: it resolves, with a `note`.
        */
       async navigate(url, opts = {}) {
+        assertOpenableUrl(url);
         const waitUntil = opts.waitUntil ?? "load";
         const timeoutMs = opts.timeoutMs ?? NAVIGATION_TIMEOUT_MS;
         const nav = this.watch();
@@ -6014,6 +6028,7 @@ var init_session = __esm({
       }
       /** Open a tab, make it current and, given a url, load it. */
       async newTab(url, opts = {}) {
+        if (url !== void 0) assertOpenableUrl(url);
         const targetId = await createTarget(this.cdp);
         try {
           await this.switchTo(targetId);
@@ -8908,7 +8923,7 @@ var init_challenge = __esm({
 });
 
 // src/browser/overlay.ts
-var CONSENT_SELECTORS, HELPERS, OVERLAYS_SOURCE, OVERLAY_ROOT_SOURCE, DESCRIBE_SOURCE, OVERLAY_INFO_SOURCE, READ_DOCUMENT;
+var CONSENT_SELECTORS, BARE_TEXT_MAX, CONTROL_TAGS, CONTROL_ROLES, HELPERS, OVERLAYS_SOURCE, OVERLAY_ROOT_SOURCE, DESCRIBE_SOURCE, OVERLAY_INFO_SOURCE, READ_DOCUMENT;
 var init_overlay = __esm({
   "src/browser/overlay.ts"() {
     "use strict";
@@ -8952,6 +8967,25 @@ var init_overlay = __esm({
       'iframe[name="__cmpLocator"]',
       'iframe[name="__gppLocator"]'
     ];
+    BARE_TEXT_MAX = 40;
+    CONTROL_TAGS = ["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA", "IFRAME", "SUMMARY", "DETAILS"];
+    CONTROL_ROLES = [
+      "button",
+      "link",
+      "checkbox",
+      "radio",
+      "switch",
+      "tab",
+      "menuitem",
+      "menuitemcheckbox",
+      "menuitemradio",
+      "option",
+      "textbox",
+      "searchbox",
+      "combobox",
+      "slider",
+      "spinbutton"
+    ];
     HELPERS = `const up = (n) => n.parentElement || (n.parentNode && n.parentNode.host) || n.host || null;
   const body = document.body;
   const roleOf = (el) => String((el.getAttribute && el.getAttribute("role")) || "").toLowerCase();
@@ -8967,6 +9001,48 @@ var init_overlay = __esm({
     } catch (e) {
       return false;
     }
+  };
+  const CONTROL_TAGS = ${JSON.stringify(CONTROL_TAGS)};
+  const CONTROL_ROLES = ${JSON.stringify(CONTROL_ROLES)};
+  /** Something to act on: a native control, a control role, a focusable (tabindex >= 0) or editable element. */
+  const isControl = (el) => {
+    const attr = (n) => (el.getAttribute ? el.getAttribute(n) : null);
+    const tag = String(el.tagName || "").toUpperCase();
+    if (tag === "A") return attr("href") !== null;
+    if (tag === "INPUT") return String(attr("type") || "").toLowerCase() !== "hidden";
+    if (CONTROL_TAGS.indexOf(tag) >= 0 || CONTROL_ROLES.indexOf(roleOf(el)) >= 0) return true;
+    const tab = attr("tabindex");
+    if (tab !== null && tab !== "" && Number(tab) >= 0) return true;
+    const edit = attr("contenteditable");
+    return edit === "" || edit === "true" || edit === "plaintext-only";
+  };
+  const textLength = (n) => String((typeof n.innerText === "string" ? n.innerText : n.textContent) || "").replace(/\\s+/g, " ").trim().length;
+  /**
+   * Nothing to answer in it: no control, itself or inside (open shadow roots
+   * included), and under ${BARE_TEXT_MAX} characters of text. An ad slot holding
+   * an image is one; a cookie wall, a login dialog, a notice to read are not.
+   * Never bare: a consent vendor's container (its buttons may be plain divs),
+   * nor anything holding a custom element with no open shadow root (a closed
+   * one hides its text and controls from here).
+   */
+  const bare = (el) => {
+    let text = textLength(el);
+    const stack = [el];
+    for (let seen = 0; stack.length > 0; seen++) {
+      // Too big to look through: whatever it is, it is no empty layer.
+      if (text >= ${BARE_TEXT_MAX} || seen > 5000) return false;
+      const n = stack.pop();
+      if (n.nodeType === 1 && (isControl(n) || isConsent(n))) return false;
+      if (n.nodeType === 1 && String(n.tagName || "").indexOf("-") >= 0 && !n.shadowRoot) return false;
+      for (const k of Array.from(n.children || [])) stack.push(k);
+      if (n.shadowRoot) {
+        for (const k of Array.from(n.shadowRoot.children || [])) {
+          text += textLength(k);
+          stack.push(k);
+        }
+      }
+    }
+    return text < ${BARE_TEXT_MAX};
   };
   /** Fixed or sticky, itself or an ancestor up to the body: what a click's covering node belongs to. */
   const pinned = (el) => {
@@ -9046,7 +9122,8 @@ var init_overlay = __esm({
         else take = true;
       }
     }
-    // An overlay is taken whole: what is inside it is its own.
+    // An overlay is taken whole: what is inside it is its own. A bare one is none, nor is anything inside it.
+    if (take && bare(el)) return;
     if (take) {
       found.push(el);
       return;
@@ -9082,7 +9159,7 @@ var init_overlay = __esm({
   ${HELPERS}
   ${DESCRIBE_SOURCE}
   const overlays = (${OVERLAYS_SOURCE})();
-  return { what: describe(this), overlay: overlays.indexOf(this) >= 0 || isDialog(this) || isConsent(this) };
+  return { what: describe(this), overlay: (overlays.indexOf(this) >= 0 || isDialog(this) || isConsent(this)) && !bare(this) };
 }`;
     READ_DOCUMENT = `(() => {
   const findOverlays = ${OVERLAYS_SOURCE};
@@ -9122,6 +9199,17 @@ var init_overlay = __esm({
 });
 
 // src/browser/wait.ts
+function timeoutText(c, elapsedMs) {
+  if ("text" in c) return `text ${JSON.stringify(c.text)} did not appear after ${elapsedMs} ms`;
+  if ("gone" in c) return `text ${JSON.stringify(c.gone)} is still on the page after ${elapsedMs} ms`;
+  if ("selector" in c) return `no element matches ${JSON.stringify(c.selector)} after ${elapsedMs} ms`;
+  if ("url" in c) return `the url did not match ${JSON.stringify(c.url)} after ${elapsedMs} ms`;
+  if ("load" in c) return `the page did not finish loading after ${elapsedMs} ms`;
+  if ("idle" in c) return `the network did not go idle after ${elapsedMs} ms`;
+  if ("clear" in c)
+    return `the challenge is still there after ${elapsedMs} ms \u2014 a human must solve it in the browser window (\`${brand().cli} browser open <url>\` shows it), then run wait --clear again`;
+  return `timed out after ${elapsedMs} ms`;
+}
 async function watchNetwork(page) {
   const inflight3 = /* @__PURE__ */ new Set();
   const handlers = [
@@ -9236,11 +9324,12 @@ var WaitTimeoutError, WaitCancelledError, POLL_MS2, DEFAULT_TIMEOUT_MS3, CLEAR_T
 var init_wait = __esm({
   "src/browser/wait.ts"() {
     "use strict";
+    init_brand();
     init_challenge();
     init_deps();
     WaitTimeoutError = class extends Error {
       constructor(condition, elapsedMs) {
-        super(`timed out waiting for ${JSON.stringify(condition)} after ${elapsedMs} ms`);
+        super(timeoutText(condition, elapsedMs));
         this.condition = condition;
         this.elapsedMs = elapsedMs;
         this.name = "WaitTimeoutError";
@@ -9468,7 +9557,7 @@ var init_read = __esm({
 });
 
 // src/version.ts
-var ENGINE_VERSION = "1.29.3";
+var ENGINE_VERSION = "1.32.0";
 
 // src/index.ts
 init_brand();
@@ -9481,6 +9570,8 @@ init_session();
 init_read();
 
 // src/browser/snapshot.ts
+init_cli_kit();
+init_cdp();
 init_overlay();
 init_state();
 var NAME_MAX = 120;
@@ -9509,8 +9600,11 @@ var REF_ROLES = /* @__PURE__ */ new Set([
   "iframe",
   "heading"
 ]);
+var CONTAINER_ROLES = /* @__PURE__ */ new Set(["table", "figure", "article", "main", "complementary", "form"]);
+var NAMED_CONTAINER_ROLES = /* @__PURE__ */ new Set(["region", "image", "img"]);
 var VALUE_ROLES = /* @__PURE__ */ new Set(["textbox", "searchbox", "combobox", "spinbutton", "slider"]);
 var FIELD_ROLES = /* @__PURE__ */ new Set(["textbox", "searchbox", "combobox", "spinbutton"]);
+var HINT_ROLES = /* @__PURE__ */ new Set(["textbox", "searchbox", "combobox", "spinbutton", "checkbox", "radio", "button"]);
 var str2 = (v) => typeof v?.value === "string" ? v.value : typeof v?.value === "number" ? String(v.value) : "";
 var squash = (s) => s.replace(/\s+/g, " ").trim();
 function buildTree(nodes) {
@@ -9557,14 +9651,21 @@ function states(n) {
   return out;
 }
 var Renderer = class {
-  constructor(table, frames) {
+  constructor(table, frames, hints = {}) {
     this.frames = frames;
+    this.hints = hints;
     this.refs = { ...table.refs };
+    this.containers = new Set(table.containers ?? []);
     this.next = table.next;
   }
   frames;
+  hints;
   refs;
+  /** The refs that name a container only, never a control. */
+  containers;
   next;
+  /** The form controls rendered, in document order, with the name each was shown with. */
+  controls = [];
   seen = /* @__PURE__ */ new Set();
   trees = /* @__PURE__ */ new Map();
   refFor(backendId) {
@@ -9610,8 +9711,10 @@ var Renderer = class {
     if (HOISTED.has(role)) return this.children(tree, n, parent);
     const name = squash(str2(n.name));
     const hasRole = REF_ROLES.has(role.toLowerCase());
-    const wantsRef = n.backendDOMNodeId !== void 0 && (hasRole || truthy(prop(n, "focusable")) || truthy(prop(n, "editable")));
-    const editor = wantsRef && !hasRole && !name && truthy(prop(n, "editable")) && parent?.ref === true && FIELD_ROLES.has(parent.role);
+    const acts = n.backendDOMNodeId !== void 0 && (hasRole || truthy(prop(n, "focusable")) || truthy(prop(n, "editable")));
+    const container = CONTAINER_ROLES.has(role) || NAMED_CONTAINER_ROLES.has(role) && name !== "";
+    const wantsRef = acts || n.backendDOMNodeId !== void 0 && container;
+    const editor = acts && !hasRole && !name && truthy(prop(n, "editable")) && parent?.ref === true && FIELD_ROLES.has(parent.role);
     if (COLLAPSIBLE.has(role) && !name && !wantsRef || editor) return [{ t: "break" }, ...this.children(tree, n, parent), { t: "break" }];
     const isFrame = role.toLowerCase() === "iframe";
     const shown = isFrame ? "iframe" : role;
@@ -9619,7 +9722,16 @@ var Renderer = class {
     if (name) head += ` "${(name.length > NAME_MAX ? `${name.slice(0, NAME_MAX)}\u2026` : name).replace(/"/g, '\\"')}"`;
     const level = prop(n, "level");
     if (level !== void 0 && role === "heading") head += ` [level=${String(level)}]`;
-    if (wantsRef) head += ` [ref=${this.refFor(n.backendDOMNodeId)}]`;
+    if (wantsRef) {
+      const ref = this.refFor(n.backendDOMNodeId);
+      if (acts) this.containers.delete(ref);
+      else this.containers.add(ref);
+      head += ` [ref=${ref}]`;
+      const id = n.backendDOMNodeId;
+      if (acts && HINT_ROLES.has(role)) this.controls.push({ id, name });
+      const hint = this.hints[id];
+      if (hint) head += ` ${hint}`;
+    }
     for (const s of states(n)) head += ` ${s}`;
     let kids;
     let note = "";
@@ -9635,7 +9747,9 @@ var Renderer = class {
     kids = kids.filter((k) => !(k.t === "text" && (name && k.text === name || value && k.text === value)));
     const rawUrl = role === "link" ? prop(n, "url") : void 0;
     const url = typeof rawUrl === "string" ? rawUrl : "";
-    return [{ t: "node", head: value ? `${head}${note}: ${value}` : `${head}${note}`, ref: wantsRef, ...url ? { url } : {}, note, children: kids }];
+    return [
+      { t: "node", head: value ? `${head}${note}: ${value}` : `${head}${note}`, ref: wantsRef, act: acts, ...url ? { url } : {}, note, children: kids }
+    ];
   }
 };
 function nested(items, depth, out) {
@@ -9649,15 +9763,26 @@ function nested(items, depth, out) {
     }
   }
 }
-function flat(items, out) {
+var LINK_URL_MAX = 80;
+function compactUrl(url, base2) {
+  let shown = url;
+  try {
+    const u = new URL(url, base2);
+    if (u.origin !== "null" && u.origin === new URL(base2).origin) shown = `${u.pathname}${u.search}${u.hash}`;
+  } catch {
+  }
+  const chars = Array.from(shown);
+  return chars.length > LINK_URL_MAX ? `${chars.slice(0, LINK_URL_MAX).join("")}\u2026` : shown;
+}
+function flat(items, out, base2) {
   for (const it of items) {
     if (it.t !== "node") continue;
-    if (it.ref) out.push({ text: it.head, ref: true });
-    flat(it.children, out);
+    if (it.act) out.push({ text: it.url ? `${it.head} \u2192 ${compactUrl(it.url, base2)}` : it.head, ref: true });
+    flat(it.children, out, base2);
   }
 }
 function renderSnapshot(nodes, opts) {
-  const r = new Renderer(opts.refs, opts.frames ?? {});
+  const r = new Renderer(opts.refs, opts.frames ?? {}, opts.hints);
   const main = buildTree(nodes);
   const all = [];
   let items = [];
@@ -9670,14 +9795,14 @@ function renderSnapshot(nodes, opts) {
       if (!hit) continue;
       const lines = [];
       const over = merge(r.collect(hit.tree, hit.node));
-      if (opts.interactive) flat(over, lines);
+      if (opts.interactive) flat(over, lines, opts.refs.url);
       else nested(over, 1, lines);
       if (lines.length === 0) continue;
       all.push({ text: OVERLAY_HEADER, ref: false }, ...opts.interactive ? lines.map((l) => ({ ...l, text: `  ${l.text}` })) : lines);
     }
     if (main.root) items = merge(r.collect(main, main.root));
   }
-  if (opts.interactive) flat(items, all);
+  if (opts.interactive) flat(items, all, opts.refs.url);
   else nested(items, 0, all);
   let kept = all;
   let tail = "";
@@ -9706,10 +9831,22 @@ function renderSnapshot(nodes, opts) {
   const text = [...kept.map((l) => l.text), ...tail ? [tail] : []].join("\n");
   return {
     text,
-    refs: { loaderId: opts.refs.loaderId, url: opts.refs.url, next: r.next, refs: r.refs },
+    refs: {
+      loaderId: opts.refs.loaderId,
+      url: opts.refs.url,
+      next: r.next,
+      refs: r.refs,
+      ...r.containers.size ? { containers: [...r.containers].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))) } : {}
+    },
     truncated: tail !== "",
-    refCount: kept.filter((l) => l.ref).length
+    refCount: kept.filter((l) => l.ref).length,
+    unclear: unclearControls(r.controls)
   };
+}
+function unclearControls(controls) {
+  const count = /* @__PURE__ */ new Map();
+  for (const c of controls) count.set(c.name, (count.get(c.name) ?? 0) + 1);
+  return controls.filter((c) => c.name === "" || (count.get(c.name) ?? 0) > 1).map((c) => c.id);
 }
 
 // src/browser.ts
@@ -14928,6 +15065,7 @@ export {
   ERR_METHOD_NOT_FOUND,
   EVIDENCE_TOKEN,
   EXIT_FAILURE,
+  EXIT_HUMAN,
   EXIT_OK,
   EXIT_USAGE,
   FILE_LINE_TOKEN,

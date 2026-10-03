@@ -26,6 +26,7 @@ import { existsSync as existsSync2, readFileSync as readFileSync4, writeFileSync
 import { join as join3 } from "path";
 import { mkdirSync, renameSync, unlinkSync, writeFileSync as writeFileSync4 } from "fs";
 import { existsSync as existsSync3, readdirSync as readdirSync3, readFileSync as readFileSync5, statSync } from "fs";
+import { basename } from "path";
 import { createHash, randomBytes } from "crypto";
 import { EventEmitter } from "events";
 import { accessSync, constants, statSync as statSync2 } from "fs";
@@ -33,7 +34,6 @@ import { homedir } from "os";
 import { posix, win32 } from "path";
 import { spawn as nodeSpawn } from "child_process";
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from "fs/promises";
-import { basename } from "path";
 import { existsSync as existsSync5, statSync as statSync3 } from "fs";
 import { isAbsolute as isAbsolute2, join as join7 } from "path";
 import { chmodSync, copyFileSync as copyFileSync2, existsSync as existsSync6, lstatSync, mkdirSync as mkdirSync3, readdirSync as readdirSync5, readFileSync as readFileSync7, realpathSync, rmSync as rmSync4, statSync as statSync4, writeFileSync as writeFileSync5 } from "fs";
@@ -3288,6 +3288,93 @@ var init_video = __esm({
     init_list();
   }
 });
+function parseArgs(argv, spec) {
+  const commands = new Set(spec.commands);
+  const valueFlags = new Set(spec.valueFlags);
+  const boolFlags = new Set(spec.boolFlags);
+  if (argv.length === 0) return { kind: "help" };
+  if (isHelpWord(argv[0])) return argv[1] !== void 0 && commands.has(argv[1]) ? { kind: "help", command: argv[1] } : { kind: "help" };
+  if (isVersionWord(argv[0])) return { kind: "version" };
+  const command2 = argv[0];
+  if (!commands.has(command2)) {
+    throw new UsageError(`unknown command "${command2}" \u2014 run --help for the supported commands`);
+  }
+  const values = {};
+  const bools = /* @__PURE__ */ new Set();
+  const positional = [];
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--") {
+      positional.push(...argv.slice(i + 1));
+      break;
+    }
+    if (!arg.startsWith("--") && arg !== "-h" && arg !== "-v") {
+      positional.push(arg);
+      continue;
+    }
+    const eq = arg.indexOf("=");
+    const key = eq !== -1 ? arg.slice(2, eq) : arg.slice(2);
+    if (!boolFlags.has(key) && !valueFlags.has(key)) {
+      if (isHelpWord(arg)) return { kind: "help", command: command2 };
+      if (isVersionWord(arg)) return { kind: "version" };
+    }
+    if (boolFlags.has(key)) {
+      if (eq !== -1) throw new UsageError(`--${key} is a boolean flag and takes no value`);
+      bools.add(key);
+      continue;
+    }
+    if (!valueFlags.has(key)) {
+      throw new UsageError(`unknown flag "--${key}" \u2014 run --help for the supported options`);
+    }
+    if (eq !== -1) {
+      values[key] = arg.slice(eq + 1);
+      continue;
+    }
+    const next = argv[i + 1];
+    if (next === void 0 || next.startsWith("--")) {
+      throw new UsageError(`missing value for --${key}`);
+    }
+    values[key] = next;
+    i++;
+  }
+  return { kind: "command", command: command2, positional, values, bools };
+}
+function isHelpWord(a) {
+  return a === "--help" || a === "-h" || a === "help";
+}
+function isVersionWord(a) {
+  return a === "--version" || a === "-v" || a === "version";
+}
+function positionalText(p) {
+  return p.positional.join(" ");
+}
+function jsonLine(value) {
+  return `${JSON.stringify(value, null, 2)}
+`;
+}
+function isInvokedDirectly(argv1 = process.argv[1], cli = brand().cli) {
+  if (!argv1) return false;
+  return basename(argv1).replace(/\.(mjs|cjs|js)$/, "") === cli;
+}
+var EXIT_OK;
+var EXIT_FAILURE;
+var EXIT_USAGE;
+var EXIT_HUMAN;
+var UsageError;
+var init_cli_kit = __esm({
+  "src/cli-kit.ts"() {
+    "use strict";
+    init_brand();
+    init_text();
+    EXIT_OK = 0;
+    EXIT_FAILURE = 1;
+    EXIT_USAGE = 2;
+    EXIT_HUMAN = 3;
+    UsageError = class extends Error {
+      exitCode = EXIT_USAGE;
+    };
+  }
+});
 function encodeFrame(opcode, payload, opts = {}) {
   const mask = opts.mask ?? true;
   const len = payload.length;
@@ -3973,91 +4060,6 @@ var init_deps = __esm({
     init_discovery();
   }
 });
-function parseArgs(argv, spec) {
-  const commands = new Set(spec.commands);
-  const valueFlags = new Set(spec.valueFlags);
-  const boolFlags = new Set(spec.boolFlags);
-  if (argv.length === 0) return { kind: "help" };
-  if (isHelpWord(argv[0])) return argv[1] !== void 0 && commands.has(argv[1]) ? { kind: "help", command: argv[1] } : { kind: "help" };
-  if (isVersionWord(argv[0])) return { kind: "version" };
-  const command2 = argv[0];
-  if (!commands.has(command2)) {
-    throw new UsageError(`unknown command "${command2}" \u2014 run --help for the supported commands`);
-  }
-  const values = {};
-  const bools = /* @__PURE__ */ new Set();
-  const positional = [];
-  for (let i = 1; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--") {
-      positional.push(...argv.slice(i + 1));
-      break;
-    }
-    if (!arg.startsWith("--") && arg !== "-h" && arg !== "-v") {
-      positional.push(arg);
-      continue;
-    }
-    const eq = arg.indexOf("=");
-    const key = eq !== -1 ? arg.slice(2, eq) : arg.slice(2);
-    if (!boolFlags.has(key) && !valueFlags.has(key)) {
-      if (isHelpWord(arg)) return { kind: "help", command: command2 };
-      if (isVersionWord(arg)) return { kind: "version" };
-    }
-    if (boolFlags.has(key)) {
-      if (eq !== -1) throw new UsageError(`--${key} is a boolean flag and takes no value`);
-      bools.add(key);
-      continue;
-    }
-    if (!valueFlags.has(key)) {
-      throw new UsageError(`unknown flag "--${key}" \u2014 run --help for the supported options`);
-    }
-    if (eq !== -1) {
-      values[key] = arg.slice(eq + 1);
-      continue;
-    }
-    const next = argv[i + 1];
-    if (next === void 0 || next.startsWith("--")) {
-      throw new UsageError(`missing value for --${key}`);
-    }
-    values[key] = next;
-    i++;
-  }
-  return { kind: "command", command: command2, positional, values, bools };
-}
-function isHelpWord(a) {
-  return a === "--help" || a === "-h" || a === "help";
-}
-function isVersionWord(a) {
-  return a === "--version" || a === "-v" || a === "version";
-}
-function positionalText(p) {
-  return p.positional.join(" ");
-}
-function jsonLine(value) {
-  return `${JSON.stringify(value, null, 2)}
-`;
-}
-function isInvokedDirectly(argv1 = process.argv[1], cli = brand().cli) {
-  if (!argv1) return false;
-  return basename(argv1).replace(/\.(mjs|cjs|js)$/, "") === cli;
-}
-var EXIT_OK;
-var EXIT_FAILURE;
-var EXIT_USAGE;
-var UsageError;
-var init_cli_kit = __esm({
-  "src/cli-kit.ts"() {
-    "use strict";
-    init_brand();
-    init_text();
-    EXIT_OK = 0;
-    EXIT_FAILURE = 1;
-    EXIT_USAGE = 2;
-    UsageError = class extends Error {
-      exitCode = EXIT_USAGE;
-    };
-  }
-});
 function extensionDirs(raw) {
   const name = envName("BROWSER_EXTENSIONS");
   return (raw ?? "").split(",").map((s) => s.trim()).filter(Boolean).map((dir2) => {
@@ -4492,6 +4494,17 @@ function tabList(map, pages, current2) {
     return { id, targetId, url: p?.url ?? "", title: p?.title ?? "", active: targetId === current2 };
   });
 }
+function assertOpenableUrl(url) {
+  const u = url.trim();
+  let ok = /^about:blank$/i.test(u) || u.startsWith("#");
+  if (!ok) {
+    try {
+      ok = /^https?:$/.test(new URL(u).protocol);
+    } catch {
+    }
+  }
+  if (!ok) throw new UsageError(`only http(s) URLs (and about:blank) can be opened \u2014 use \`${brand().cli} extract <path>\` for local files`);
+}
 async function createTarget(cdp) {
   const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
   return targetId;
@@ -4579,6 +4592,7 @@ var init_session = __esm({
   "src/browser/session.ts"() {
     "use strict";
     init_brand();
+    init_cli_kit();
     init_cdp();
     init_deps();
     init_discovery();
@@ -4794,6 +4808,7 @@ var init_session = __esm({
        * is the page now, still loading: it resolves, with a `note`.
        */
       async navigate(url, opts = {}) {
+        assertOpenableUrl(url);
         const waitUntil = opts.waitUntil ?? "load";
         const timeoutMs = opts.timeoutMs ?? NAVIGATION_TIMEOUT_MS;
         const nav = this.watch();
@@ -4919,6 +4934,7 @@ var init_session = __esm({
       }
       /** Open a tab, make it current and, given a url, load it. */
       async newTab(url, opts = {}) {
+        if (url !== void 0) assertOpenableUrl(url);
         const targetId = await createTarget(this.cdp);
         try {
           await this.switchTo(targetId);
@@ -7852,6 +7868,9 @@ var init_challenge = __esm({
   }
 });
 var CONSENT_SELECTORS;
+var BARE_TEXT_MAX;
+var CONTROL_TAGS;
+var CONTROL_ROLES;
 var HELPERS;
 var OVERLAYS_SOURCE;
 var OVERLAY_ROOT_SOURCE;
@@ -7901,6 +7920,25 @@ var init_overlay = __esm({
       'iframe[name="__cmpLocator"]',
       'iframe[name="__gppLocator"]'
     ];
+    BARE_TEXT_MAX = 40;
+    CONTROL_TAGS = ["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA", "IFRAME", "SUMMARY", "DETAILS"];
+    CONTROL_ROLES = [
+      "button",
+      "link",
+      "checkbox",
+      "radio",
+      "switch",
+      "tab",
+      "menuitem",
+      "menuitemcheckbox",
+      "menuitemradio",
+      "option",
+      "textbox",
+      "searchbox",
+      "combobox",
+      "slider",
+      "spinbutton"
+    ];
     HELPERS = `const up = (n) => n.parentElement || (n.parentNode && n.parentNode.host) || n.host || null;
   const body = document.body;
   const roleOf = (el) => String((el.getAttribute && el.getAttribute("role")) || "").toLowerCase();
@@ -7916,6 +7954,48 @@ var init_overlay = __esm({
     } catch (e) {
       return false;
     }
+  };
+  const CONTROL_TAGS = ${JSON.stringify(CONTROL_TAGS)};
+  const CONTROL_ROLES = ${JSON.stringify(CONTROL_ROLES)};
+  /** Something to act on: a native control, a control role, a focusable (tabindex >= 0) or editable element. */
+  const isControl = (el) => {
+    const attr = (n) => (el.getAttribute ? el.getAttribute(n) : null);
+    const tag = String(el.tagName || "").toUpperCase();
+    if (tag === "A") return attr("href") !== null;
+    if (tag === "INPUT") return String(attr("type") || "").toLowerCase() !== "hidden";
+    if (CONTROL_TAGS.indexOf(tag) >= 0 || CONTROL_ROLES.indexOf(roleOf(el)) >= 0) return true;
+    const tab = attr("tabindex");
+    if (tab !== null && tab !== "" && Number(tab) >= 0) return true;
+    const edit = attr("contenteditable");
+    return edit === "" || edit === "true" || edit === "plaintext-only";
+  };
+  const textLength = (n) => String((typeof n.innerText === "string" ? n.innerText : n.textContent) || "").replace(/\\s+/g, " ").trim().length;
+  /**
+   * Nothing to answer in it: no control, itself or inside (open shadow roots
+   * included), and under ${BARE_TEXT_MAX} characters of text. An ad slot holding
+   * an image is one; a cookie wall, a login dialog, a notice to read are not.
+   * Never bare: a consent vendor's container (its buttons may be plain divs),
+   * nor anything holding a custom element with no open shadow root (a closed
+   * one hides its text and controls from here).
+   */
+  const bare = (el) => {
+    let text = textLength(el);
+    const stack = [el];
+    for (let seen = 0; stack.length > 0; seen++) {
+      // Too big to look through: whatever it is, it is no empty layer.
+      if (text >= ${BARE_TEXT_MAX} || seen > 5000) return false;
+      const n = stack.pop();
+      if (n.nodeType === 1 && (isControl(n) || isConsent(n))) return false;
+      if (n.nodeType === 1 && String(n.tagName || "").indexOf("-") >= 0 && !n.shadowRoot) return false;
+      for (const k of Array.from(n.children || [])) stack.push(k);
+      if (n.shadowRoot) {
+        for (const k of Array.from(n.shadowRoot.children || [])) {
+          text += textLength(k);
+          stack.push(k);
+        }
+      }
+    }
+    return text < ${BARE_TEXT_MAX};
   };
   /** Fixed or sticky, itself or an ancestor up to the body: what a click's covering node belongs to. */
   const pinned = (el) => {
@@ -7995,7 +8075,8 @@ var init_overlay = __esm({
         else take = true;
       }
     }
-    // An overlay is taken whole: what is inside it is its own.
+    // An overlay is taken whole: what is inside it is its own. A bare one is none, nor is anything inside it.
+    if (take && bare(el)) return;
     if (take) {
       found.push(el);
       return;
@@ -8031,7 +8112,7 @@ var init_overlay = __esm({
   ${HELPERS}
   ${DESCRIBE_SOURCE}
   const overlays = (${OVERLAYS_SOURCE})();
-  return { what: describe(this), overlay: overlays.indexOf(this) >= 0 || isDialog(this) || isConsent(this) };
+  return { what: describe(this), overlay: (overlays.indexOf(this) >= 0 || isDialog(this) || isConsent(this)) && !bare(this) };
 }`;
     READ_DOCUMENT = `(() => {
   const findOverlays = ${OVERLAYS_SOURCE};
@@ -8069,6 +8150,17 @@ var init_overlay = __esm({
 })()`;
   }
 });
+function timeoutText(c, elapsedMs) {
+  if ("text" in c) return `text ${JSON.stringify(c.text)} did not appear after ${elapsedMs} ms`;
+  if ("gone" in c) return `text ${JSON.stringify(c.gone)} is still on the page after ${elapsedMs} ms`;
+  if ("selector" in c) return `no element matches ${JSON.stringify(c.selector)} after ${elapsedMs} ms`;
+  if ("url" in c) return `the url did not match ${JSON.stringify(c.url)} after ${elapsedMs} ms`;
+  if ("load" in c) return `the page did not finish loading after ${elapsedMs} ms`;
+  if ("idle" in c) return `the network did not go idle after ${elapsedMs} ms`;
+  if ("clear" in c)
+    return `the challenge is still there after ${elapsedMs} ms \u2014 a human must solve it in the browser window (\`${brand().cli} browser open <url>\` shows it), then run wait --clear again`;
+  return `timed out after ${elapsedMs} ms`;
+}
 async function watchNetwork(page) {
   const inflight3 = /* @__PURE__ */ new Set();
   const handlers = [
@@ -8190,11 +8282,12 @@ var KEYS;
 var init_wait = __esm({
   "src/browser/wait.ts"() {
     "use strict";
+    init_brand();
     init_challenge();
     init_deps();
     WaitTimeoutError = class extends Error {
       constructor(condition, elapsedMs) {
-        super(`timed out waiting for ${JSON.stringify(condition)} after ${elapsedMs} ms`);
+        super(timeoutText(condition, elapsedMs));
         this.condition = condition;
         this.elapsedMs = elapsedMs;
         this.name = "WaitTimeoutError";
@@ -8431,6 +8524,8 @@ init_doc();
 init_video();
 init_session();
 init_read();
+init_cli_kit();
+init_cdp();
 init_overlay();
 init_state();
 init_challenge();
