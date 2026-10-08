@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [3.15.0](https://github.com/maxgfr/ultraprospect/compare/v3.14.11...v3.15.0) (2026-10-08)
+
+
+### Features
+
+* **skill:** let the agent invoke ultraprospect on request ([ad7bb2c](https://github.com/maxgfr/ultraprospect/commit/ad7bb2cef0cfa97bdacd0cf5cf689f9a259b829a))
+
 ## [3.14.11](https://github.com/maxgfr/ultraprospect/compare/v3.14.10...v3.14.11) (2026-10-03)
 
 
