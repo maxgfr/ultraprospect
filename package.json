@@ -72,6 +72,6 @@
     "tsup": "^8.5.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10",
-    "@maxgfr/webindex": "https://codeload.github.com/maxgfr/webindex/tar.gz/ec4470a2359508cd6b3c4215db02c349bb80289f"
+    "@maxgfr/webindex": "https://codeload.github.com/maxgfr/webindex/tar.gz/f65006190489aada6cf956efff8cc0567367e512"
   }
 }
