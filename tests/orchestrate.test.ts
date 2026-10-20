@@ -149,8 +149,8 @@ describe("emitOrchestration", () => {
 
   it("sends each phase to the model its failure mode deserves", () => {
     // The fan-out decides HOW MANY agents; this decides WHICH HEAD. It is the
-    // line this file's header already draws, pushed one notch: a searcher runs
-    // WebSearch and drops each hit in a basket, and a mis-tagged hit cannot
+    // line this file's header already draws, pushed one notch: a searcher runs a
+    // web search and drops each hit in a basket, and a mis-tagged hit cannot
     // reach the deliverable — the engine fetches the page and keeps it only if
     // it corroborates THAT place. The adjudicator and the writer have no such
     // net under them, and a wrong merge is invisible forever.
