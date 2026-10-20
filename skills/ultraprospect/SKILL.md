@@ -4,7 +4,6 @@ description: Build a sourced, territory-wide company prospect list with registry
 license: MIT
 metadata:
   version: 3.15.2
-  opencode/autoinvoke: 'true'
 ---
 
 # ultraprospect — a territory, turned into prospects you can cite
