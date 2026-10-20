@@ -18,7 +18,7 @@
 //     an agent tempted to answer forty adjudications in one argument is an agent
 //     about to rubber-stamp them.
 //   * `resolve` is the phase the whole run rests on and it is the CLIENT'S
-//     WebSearch, not ours. Exposing it as a tool would invite the keyless
+//     web search, not ours. Exposing it as a tool would invite the keyless
 //     fallback, which is measurably weaker: on a real Vincennes sweep the silent
 //     path corroborated 11 sites out of 1164.
 //   * `orchestrate` emits files for a harness that already has this adapter.

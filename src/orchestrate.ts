@@ -82,7 +82,7 @@ const DOSSIER_SCHEMA = {
  * judgement — read through one further question: what still catches the mistake
  * afterwards.
  *
- *   resolve  — the cheap head. Running a WebSearch and tagging each hit with
+ *   resolve  — the cheap head. Running a web search and tagging each hit with
  *              its placeId is search plus bookkeeping, and the failure it
  *              invites is caught by construction: the engine fetches every
  *              candidate and keeps it only if the page corroborates THAT place,
@@ -268,7 +268,7 @@ two or three \`queries\` already phrased for it.
 
 ## Do
 
-**Run your own WebSearch, once per query.** Different queries are different
+**Run your own web search, once per query.** Different queries are different
 angles, not rephrasings: the shopfront name, the legal name, the registration
 number in quotes — the highest-precision query there is${terms.length ? `, and "«name» ${terms[0]}"` : ""}.
 ${

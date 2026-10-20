@@ -10205,8 +10205,11 @@ function emitWorkflowScript(phase, emission, runAbs, engineAbs, smallWorklist, c
   const script = [
     `export const meta = ${JSON.stringify(meta)}`,
     ``,
-    `// NOT a plain Node script: launch it with the Workflow tool \u2014`,
+    `// Optional Claude Code fast path \u2014 NOT a plain Node script: launch it with the`,
+    `// Workflow tool for a one-call parallel fan-out:`,
     `// Workflow({ scriptPath: ${JSON.stringify(scriptPath)} }).`,
+    `// Any other host: dispatch one subagent per batch with`,
+    `// ${join17(runAbs, "orchestration", "agents", `${emission.role}.md`)}, or follow RUNBOOK.md alone.`,
     `//`,
     `// Emitted by \`${cli} orchestrate\` from the CURRENT worklist. The worklist is the`,
     `// source of truth: if it changes, re-run \`${cli} orchestrate --phase ${phase.name}\``,
@@ -10258,8 +10261,9 @@ function runbookMd(phases, defs, runAbs, engineAbs, cli, preamble = [], smallWor
   if (preamble.length) lines.push(...preamble, ``);
   lines.push(
     `The subagents return fragments; **you** are the sole writer. Each phase below`,
-    `either fans out through its \`*.workflow.mjs\` or runs sequentially here \u2014 the`,
-    `fold at the end of a phase is yours either way.`,
+    `fans out through its \`agents/<role>.md\` contract \u2014 one subagent per batch, on`,
+    `any host that has subagents \u2014 or runs sequentially here. The fold at the end`,
+    `of a phase is yours either way.`,
     ``
   );
   phases.forEach((ph, i) => {
@@ -10278,10 +10282,13 @@ function runbookMd(phases, defs, runAbs, engineAbs, cli, preamble = [], smallWor
       const batches = phaseBatches(ph, emission, smallWorklist);
       const widest = batches.reduce((w, b) => Math.max(w, b.length), 0);
       lines.push(
-        `Fan out: \`Workflow({ scriptPath: "${join17(runAbs, "orchestration", `${ph.name}.workflow.mjs`)}" })\``,
-        `(${batches.length} agent(s) of at most ${widest} item(s), contract \`agents/${emission.role}.md\`).`,
+        `Fan out: dispatch one subagent per batch with the contract \`agents/${emission.role}.md\``,
+        `(${batches.length} agent(s) of at most ${widest} item(s)): ${batches.map((b) => shq(b.join(","))).join(" \xB7 ")}.`,
         ``,
         `Sequentially instead: play \`agents/${emission.role}.md\` yourself over ${shq(ph.ids.join(","))}.`,
+        ``,
+        `Optional \u2014 Claude Code: launch \`${ph.name}.workflow.mjs\` (emitted unless \`--eco\`) with the`,
+        `Workflow tool for one-call parallel fan-out \u2014 \`Workflow({ scriptPath: "${join17(runAbs, "orchestration", `${ph.name}.workflow.mjs`)}" })\`.`,
         ``,
         `Then fold, as the sole writer:`,
         ``,
@@ -21145,7 +21152,7 @@ two or three \`queries\` already phrased for it.
 
 ## Do
 
-**Run your own WebSearch, once per query.** Different queries are different
+**Run your own web search, once per query.** Different queries are different
 angles, not rephrasings: the shopfront name, the legal name, the registration
 number in quotes \u2014 the highest-precision query there is${terms.length ? `, and "\xABname\xBB ${terms[0]}"` : ""}.
 ${terms.length ? `
@@ -21410,7 +21417,7 @@ FILTERS (scan)
 
 WEBSITE DISCOVERY (resolve)
   --queries              Print the search queries to run, one per line, and stop.
-  --web-results <file>   Hits from your own WebSearch: [{url,title,snippet,placeId?}]. "-" reads stdin.
+  --web-results <file>   Hits from your own web search: [{url,title,snippet,placeId?}]. "-" reads stdin.
   --engine-search        Fall back to the keyless engines: every query, pooled and rank-fused.
   --limit <n>            Only resolve this many places.
   --skip <reasons>       Spend no search on rows that cannot become a prospect:
@@ -21881,7 +21888,7 @@ async function cmdResolve(values, bools) {
     }
     say(`resolve: ${plan.length} place(s) need a website, ${plan.reduce((n, p) => n + p.queries.length, 0)} quer(y|ies) to run.`);
     say(`  worklist: ${join25(runDir, "RESOLVE.todo.json")}`);
-    say("  Run your own WebSearch once per query. Pool EVERY hit into ONE JSON array,");
+    say("  Run your own web search once per query. Pool EVERY hit into ONE JSON array,");
     say('  duplicates and all: [{"url": "\u2026", "title": "\u2026", "snippet": "\u2026", "placeId": "\u2026"}]');
     say(`next: ultraprospect resolve --run ${runDir} --web-results <file>`);
     say(`  or fan it out:  ultraprospect orchestrate --run ${runDir} --phase resolve`);
@@ -21899,12 +21906,12 @@ async function cmdResolve(values, bools) {
   }
   if (!webResults?.length && !bools.has("engine-search") && targets.length > 0) {
     say(`resolve: ${targets.length} place(s) need a website and no search results were supplied.`);
-    say("  This lane is YOUR WebSearch. Without it, only the handful of sites OSM already");
+    say("  This lane is YOUR web search. Without it, only the handful of sites OSM already");
     say("  tagged can be checked, and the run will look like a territory with no websites.");
     say("");
     say(`next: ultraprospect resolve --run ${runDir} --queries        # the queries to run`);
     say(`  then: ultraprospect resolve --run ${runDir} --web-results hits.json`);
-    say(`  or:   ultraprospect resolve --run ${runDir} --engine-search  # keyless fallback, still weaker than your own WebSearch`);
+    say(`  or:   ultraprospect resolve --run ${runDir} --engine-search  # keyless fallback, still weaker than your own web search`);
     throw Object.assign(new Error("no search results supplied"), { exitCode: EXIT_USAGE, handled: true });
   }
   const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }))));
@@ -22187,6 +22194,14 @@ async function cmdOrchestrate(values, bools) {
     );
   } else {
     for (const file of result.written) out(file);
+    if (result.exitCode === 0) {
+      const orch = join25(runDir, "orchestration");
+      say(`next: dispatch one subagent per batch with ${join25(orch, "agents", "<role>.md")} (batches in ${join25(orch, "RUNBOOK.md")}),`);
+      say("      or work down RUNBOOK.md yourself (the --eco path).");
+      if (result.written.some((f) => f.endsWith(".workflow.mjs"))) {
+        say("      optional \u2014 Claude Code: launch <phase>.workflow.mjs with the Workflow tool for one-call parallel fan-out.");
+      }
+    }
   }
   for (const notice of result.notices) say(`  ${notice}`);
   for (const error of result.errors) say(`  ${error}`);

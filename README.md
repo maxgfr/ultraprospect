@@ -273,10 +273,10 @@ documentation says:
 
 ## Install
 
-As an agent skill:
+As an agent skill, for any agent the [skills](https://skills.sh) CLI supports:
 
 ```bash
-npx skills add maxgfr/ultraprospect
+npx skills add maxgfr/ultraprospect        # optional: -a <agent> to target one agent (e.g. -a codex)
 ```
 
 Or run the bundle directly — it is one dependency-free file, Node 18+:

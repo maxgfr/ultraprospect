@@ -249,7 +249,7 @@ FILTERS (scan)
 
 WEBSITE DISCOVERY (resolve)
   --queries              Print the search queries to run, one per line, and stop.
-  --web-results <file>   Hits from your own WebSearch: [{url,title,snippet,placeId?}]. "-" reads stdin.
+  --web-results <file>   Hits from your own web search: [{url,title,snippet,placeId?}]. "-" reads stdin.
   --engine-search        Fall back to the keyless engines: every query, pooled and rank-fused.
   --limit <n>            Only resolve this many places.
   --skip <reasons>       Spend no search on rows that cannot become a prospect:
@@ -811,7 +811,7 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
   const targets = resolveTargets(places, selection);
 
   // The queries lane: the engine sizes the sweep, the agent runs its own
-  // WebSearch, and the hits come back through --web-results. The engine never
+  // web search, and the hits come back through --web-results. The engine never
   // pretends to be a search engine.
   if (bools.has("queries")) {
     // The run's own town backfills a place that has no address of its own —
@@ -838,7 +838,7 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
     }
     say(`resolve: ${plan.length} place(s) need a website, ${plan.reduce((n, p) => n + p.queries.length, 0)} quer(y|ies) to run.`);
     say(`  worklist: ${join(runDir, "RESOLVE.todo.json")}`);
-    say("  Run your own WebSearch once per query. Pool EVERY hit into ONE JSON array,");
+    say("  Run your own web search once per query. Pool EVERY hit into ONE JSON array,");
     say('  duplicates and all: [{"url": "…", "title": "…", "snippet": "…", "placeId": "…"}]');
     say(`next: ultraprospect resolve --run ${runDir} --web-results <file>`);
     say(`  or fan it out:  ultraprospect orchestrate --run ${runDir} --phase resolve`);
@@ -865,12 +865,12 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
   // this lane, and silently skipping it produces a confidently empty run.
   if (!webResults?.length && !bools.has("engine-search") && targets.length > 0) {
     say(`resolve: ${targets.length} place(s) need a website and no search results were supplied.`);
-    say("  This lane is YOUR WebSearch. Without it, only the handful of sites OSM already");
+    say("  This lane is YOUR web search. Without it, only the handful of sites OSM already");
     say("  tagged can be checked, and the run will look like a territory with no websites.");
     say("");
     say(`next: ultraprospect resolve --run ${runDir} --queries        # the queries to run`);
     say(`  then: ultraprospect resolve --run ${runDir} --web-results hits.json`);
-    say(`  or:   ultraprospect resolve --run ${runDir} --engine-search  # keyless fallback, still weaker than your own WebSearch`);
+    say(`  or:   ultraprospect resolve --run ${runDir} --engine-search  # keyless fallback, still weaker than your own web search`);
     throw Object.assign(new Error("no search results supplied"), { exitCode: EXIT_USAGE, handled: true });
   }
 
@@ -1198,6 +1198,15 @@ async function cmdOrchestrate(values: Record<string, string>, bools: ReadonlySet
     );
   } else {
     for (const file of result.written) out(file);
+    if (result.exitCode === 0) {
+      // The host-neutral route first; the Workflow scripts are a Claude Code extra.
+      const orch = join(runDir, "orchestration");
+      say(`next: dispatch one subagent per batch with ${join(orch, "agents", "<role>.md")} (batches in ${join(orch, "RUNBOOK.md")}),`);
+      say("      or work down RUNBOOK.md yourself (the --eco path).");
+      if (result.written.some((f) => f.endsWith(".workflow.mjs"))) {
+        say("      optional — Claude Code: launch <phase>.workflow.mjs with the Workflow tool for one-call parallel fan-out.");
+      }
+    }
   }
   for (const notice of result.notices) say(`  ${notice}`);
   for (const error of result.errors) say(`  ${error}`);
