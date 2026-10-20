@@ -7,6 +7,10 @@ pnpm run eval          # offline pipeline eval over a recorded sweep
 pnpm run check:build   # the committed bundle matches the source, and the skill installs whole
 ```
 
+To try the in-repo skill with your agent, `npx skills add .` installs it from
+`skills/ultraprospect/` (add `-a <agent>` to target one). The install output
+(`.agents/skills/`, `.claude/skills/`, `skills-lock.json`) is gitignored — never commit it.
+
 Conventional Commits drive the release (`feat:` minor, `fix:` patch, `!` major).
 
 ## Two rules that are not style preferences
