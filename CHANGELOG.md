@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [3.16.0](https://github.com/maxgfr/ultraprospect/compare/v3.15.2...v3.16.0) (2026-10-20)
+
+
+### Features
+
+* make orchestration and install agent-neutral ([#18](https://github.com/maxgfr/ultraprospect/issues/18)) ([9303c72](https://github.com/maxgfr/ultraprospect/commit/9303c722ee24c231b6776067607e3630625cc7f8))
+
 ## [3.15.2](https://github.com/maxgfr/ultraprospect/compare/v3.15.1...v3.15.2) (2026-10-12)
 
 
