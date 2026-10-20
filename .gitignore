@@ -12,3 +12,8 @@ prospects/
 evals/last-run.json
 eval-network-report.md
 eval-network-summary.json
+
+# agent skill installs (produced by `npx skills add .`, never committed)
+.agents/skills/
+.claude/skills/
+skills-lock.json
