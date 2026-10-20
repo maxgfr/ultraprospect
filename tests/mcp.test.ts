@@ -102,7 +102,7 @@ describe("the tool list", () => {
       "match",
       // Imports the user's sourced decisions from a file, not model-scored flags.
       "feedback",
-      // The client's own WebSearch, and the keyless fallback is measurably weaker.
+      // The client's own web search, and the keyless fallback is measurably weaker.
       "resolve",
       // Emits files for a harness that already has this adapter.
       "orchestrate",

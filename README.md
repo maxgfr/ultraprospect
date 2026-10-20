@@ -5,7 +5,7 @@
 **On request by default.** `ultraprospect` runs when you ask for it: `$ultraprospect` in Codex,
 `/ultraprospect` in Claude Code or OpenCode, or just asking the agent for a prospect list of a territory.
 The agent can call it for you, but never picks it up on its own, and CLI
-commands are unchanged. One setting per host makes it explicit-only — see
+commands are unchanged. A host setting makes it explicit-only — see
 [On request or explicit-only](#on-request-or-explicit-only).
 
 **Turn a place into a prospect list you can defend.** Give it a town, a street
@@ -460,10 +460,9 @@ See [shared engine maintenance](ENGINE-MAINTENANCE.md) for pins, source adoption
 that way: the agent may call it through its skill tool, but the skill's
 description restricts it to explicit requests, so the agent calls it when you
 ask, not on its own. Use `$ultraprospect` in Codex, `/ultraprospect` in Claude Code or
-OpenCode (prefixing the plugin namespace when it is installed as a Claude
-plugin), or simply ask for a prospect list of a territory.
+OpenCode, or simply ask for a prospect list of a territory.
 
-Making it explicit-only is one setting per host, applied to the **installed**
+Making it explicit-only is a host setting, applied to the **installed**
 copy of the skill:
 
 | Host | Shipped, on request | Explicit-only |
@@ -472,6 +471,5 @@ copy of the skill:
 
 Claude Code can do it without touching the file:
 `"skillOverrides": { "ultraprospect": "user-invocable-only" }` in `settings.json`
-leaves `/ultraprospect` working while hiding the skill from the model. Plugin installs
-ignore `skillOverrides`, so edit the frontmatter there. Updating or reinstalling
-the skill restores the shipped default, so reapply the change afterwards.
+leaves `/ultraprospect` working while hiding the skill from the model. Updating or
+reinstalling the skill restores the shipped default, so reapply the change afterwards.
