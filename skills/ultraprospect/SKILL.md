@@ -274,7 +274,7 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
    # 1. size it, and spend nothing on rows that cannot become a prospect
    ultraprospect resolve --run <dir> --queries --skip chain,unnamed,public,vacant
 
-   # 2. run EVERY printed query through your own WebSearch, one at a time
+   # 2. run EVERY printed query through your own web search, one at a time
 
    # 3. pool every hit into ONE array — duplicates, directories, noise and all
    cat > hits.json <<'JSON'
@@ -374,7 +374,7 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
      companies in that country actually word it on their careers pages, and take
      the words you SEE rather than the ones you expect. `resolve --engine-search`
      drives webindex's keyless search from inside this bundle, but prefer your
-     own WebSearch: the keyless engines block automated clients, and when they
+     own web search: the keyless engines block automated clients, and when they
      do the lane says so in words rather than reporting an empty web.
    - **Mind the inflection.** Matching tolerates up to three trailing letters,
      which carries German `-n`/`-ern`, French `-s` and Spanish `-os`. Languages
@@ -488,8 +488,8 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 | A company shows `web_presence: social-only` | Not a gap. We searched, found no site of its own, and found a social profile that is theirs. For a local trader that is usually the whole web presence. |
 | `web_presence` is empty | `resolve` has not run for that row. Different from `none`, which is a measured absence — do not report the two the same way. |
 | `resolve` exits 2 saying no results were supplied | Working as designed. Run `--queries`, do the searching, pass `--web-results`. |
-| `--engine-search` says the keyless fallback was **blocked** | The engines refused the request — a 403, or an anti-bot challenge served with a 200. Nothing was searched, which is NOT the same as nothing being there. Do your own WebSearch and pass `--web-results`; never report the run as a territory with no web presence. |
-| `--engine-search` corroborated almost nothing | Expected, and the reason `resolve` refuses to run without your hits. Measured on a Saint-Mandé sweep: 0 sites out of 12 through the keyless fallback, 9 out of 12 from the same queries run through the agent's own WebSearch. |
+| `--engine-search` says the keyless fallback was **blocked** | The engines refused the request — a 403, or an anti-bot challenge served with a 200. Nothing was searched, which is NOT the same as nothing being there. Do your own web search and pass `--web-results`; never report the run as a territory with no web presence. |
+| `--engine-search` corroborated almost nothing | Expected, and the reason `resolve` refuses to run without your hits. Measured on a Saint-Mandé sweep: 0 sites out of 12 through the keyless fallback, 9 out of 12 from the same queries run through the agent's own web search. |
 | A company's own domain shows as `unverified` | The page did not carry its name, address or registration number. Often a JavaScript-only site — the evidence string says which. It is a candidate, not a confirmed site. |
 | `enrich` says "no place has a corroborated website" | `resolve` has not run, or corroborated nothing. Enrichment only ever reads sites we proved belong to the company. |
 | A company with a careers page shows `isHiring` unset | Deliberate. A board was detected but its openings could not be read, and "not hiring" would be a different claim. |
@@ -546,9 +546,9 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
 
 | You have | Do |
 |---|---|
-| The Workflow tool | `orchestrate --run <dir>`, then launch `<dir>/orchestration/<phase>.workflow.mjs` |
-| Subagents but no Workflow tool | `orchestrate --run <dir>`, dispatch each agent with the contract in `<dir>/orchestration/agents/<role>.md` |
-| Neither | `orchestrate --run <dir> --eco` and work down `<dir>/orchestration/RUNBOOK.md` yourself |
+| Subagents (any host) | `orchestrate --run <dir>`, dispatch each agent with the contract in `<dir>/orchestration/agents/<role>.md` (`RUNBOOK.md` lists the batches) |
+| A single agent | `orchestrate --run <dir> --eco` and work down `<dir>/orchestration/RUNBOOK.md` yourself |
+| *Optional — Claude Code* | Same `orchestrate --run <dir>`; launch `<dir>/orchestration/<phase>.workflow.mjs` with the Workflow tool for one-call parallel fan-out |
 
 Three phases fan out — `resolve`, `match` and `dossier`. Searching for a
 company's website is per-company thinking, and it is the phase the run rests on.
@@ -568,8 +568,8 @@ that settles it is what still catches the mistake afterwards:
 | `dossier` | **sonnet** | `check` catches a citation that does not resolve and a contact never observed. It cannot catch a packet that was skimmed, which is the whole of what the phase is paid for. |
 
 The emitted `*.workflow.mjs` already carries these, and each
-`<dir>/orchestration/agents/<role>.md` repeats its own — only one of the three harnesses above reads
-the workflow file, and a rule that lives only there is absent from the other two.
+`<dir>/orchestration/agents/<role>.md` repeats its own — only the optional Claude Code route reads
+the workflow file, and a rule that lives only there would be absent from the other two.
 Dispatching subagents by hand, or working down `<dir>/orchestration/RUNBOOK.md`, use the same
 tiering. It is a property of the phase, not of the country: it holds identically
 for a French sweep and a German confirm.

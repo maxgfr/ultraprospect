@@ -14,7 +14,7 @@
 //
 // THREE lanes feed candidates, in this order:
 //   1. The tag OSM already had — still only a claim, still corroborated.
-//   2. The agent's own WebSearch, pooled into a JSON file and passed with
+//   2. The agent's own web search, pooled into a JSON file and passed with
 //      `--web-results`. The engine prints the queries to run; the agent runs
 //      them; the engine ingests the hits. Same shape as ultrasearch, and the
 //      main path — `resolve` refuses to run without it rather than quietly
@@ -366,7 +366,7 @@ export interface ResolveTodo {
   skipped?: { placeId: string; name: string; reasons: string[] }[];
 }
 
-/** A hit the agent's WebSearch produced, or one of ours. */
+/** A hit the agent's web search produced, or one of ours. */
 export interface WebHit {
   url: string;
   title?: string;
@@ -488,7 +488,7 @@ export function corroborate(place: Place, pageText: string, pageTitle?: string, 
 }
 
 export interface ResolveOptions {
-  /** Hits the agent produced with its own WebSearch. */
+  /** Hits the agent produced with its own web search. */
   webResults?: WebHit[];
   /** The run's territory, used when a place carries no address of its own. */
   town?: string;
