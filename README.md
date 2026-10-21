@@ -462,13 +462,12 @@ description restricts it to explicit requests, so the agent calls it when you
 ask, not on its own. Use `$ultraprospect` in Codex, `/ultraprospect` in Claude Code or
 OpenCode, or simply ask for a prospect list of a territory.
 
-Making it explicit-only is one setting per host, applied to the **installed**
-copy of the skill:
+Making it explicit-only is one setting, read by Claude Code and OpenCode,
+applied to the **installed** copy of the skill:
 
 | Host | Shipped, on request | Explicit-only |
 | --- | --- | --- |
 | Claude Code, OpenCode | no `disable-model-invocation` in `SKILL.md` | add `disable-model-invocation: true` |
-| Codex | no `agents/openai.yaml` beside `SKILL.md` (implicit invocation allowed) | add `agents/openai.yaml` with `policy:` / `allow_implicit_invocation: false` |
 
 Claude Code can do it without touching the file:
 `"skillOverrides": { "ultraprospect": "user-invocable-only" }` in `settings.json`
