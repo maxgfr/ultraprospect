@@ -151,6 +151,20 @@ describe("expandRecord", () => {
     expect(branch!.address).toMatchObject({ numero: "10", typeVoie: "RUE", libelleVoie: "DE LA PAIX", commune: "PARIS" });
   });
 
+  it("puts a practitioner's name ahead of a sign that only names the trade", () => {
+    // Issoire, 2026-10: a kiné registered as "MASSEUR-KINESITHERAPEUTE" became a
+    // prospect called that, and the web search for it found every kiné in town.
+    const sign = (enseigne: string) => ({
+      ...entity,
+      nom_complet: "LOU PIGNOL",
+      matching_etablissements: [{ ...entity.matching_etablissements[0], liste_enseignes: [enseigne] }],
+    });
+    expect(expandRecord(sign("MASSEUR-KINESITHERAPEUTE"))[0]!.names[0]).toBe("LOU PIGNOL");
+    expect(expandRecord(sign("CABINET DE KINESITHERAPIE"))[0]!.names[0]).toBe("LOU PIGNOL");
+    // A sign that is a name keeps its place: it is what is over the door.
+    expect(expandRecord(sign("KINE DU PAVILLON"))[0]!.names[0]).toBe("KINE DU PAVILLON");
+  });
+
   it("carries coordinates as numbers", () => {
     const [first] = expandRecord(entity);
     expect(first!.lat).toBeCloseTo(48.9008, 3);

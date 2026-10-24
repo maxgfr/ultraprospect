@@ -8,6 +8,7 @@ import {
   firstText,
   foldAccents,
   haversineM,
+  isGenericTradeName,
   isNameContained,
   jaccard,
   nameSimilarity,
@@ -203,5 +204,19 @@ describe("misc helpers", () => {
 
   it("foldAccents strips diacritics", () => {
     expect(foldAccents("Île-de-Fränce")).toBe("Ile-de-France");
+  });
+});
+
+describe("isGenericTradeName", () => {
+  it("knows a sign that only names the trade", () => {
+    expect(isGenericTradeName("CABINET DE KINESITHERAPIE")).toBe(true);
+    expect(isGenericTradeName("Masseur-Kinésithérapeute")).toBe(true);
+    expect(isGenericTradeName("Pharmacie")).toBe(true);
+  });
+
+  it("leaves a sign that names a business alone", () => {
+    expect(isGenericTradeName("Pharmacie du Pont")).toBe(false);
+    expect(isGenericTradeName("Crèche Burgeat")).toBe(false);
+    expect(isGenericTradeName("")).toBe(false);
   });
 });

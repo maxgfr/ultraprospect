@@ -37,7 +37,7 @@ import { politeUa } from "../net.js";
 import { NACE_SECTIONS, naceSection } from "../classification/nace.js";
 import { divisionsOfSection } from "../classification/naf-codes.js";
 import type { Dirigeant, GeoTarget, LaneCoverage, PostalAddress } from "../types.js";
-import { firstText } from "../util.js";
+import { firstText, isGenericTradeName } from "../util.js";
 import type {
   Availability,
   CanaryCheck,
@@ -317,7 +317,11 @@ export function expandRecord(entity: any): RegistryRecord[] {
       // and what OSM will have mapped. The legal name follows for matching.
       const tradingNames = ((e.liste_enseignes ?? []) as unknown[]).filter((n): n is string => Boolean(typeof n === "string" && n.trim()));
       const legalName = firstText(entity?.nom_complet, entity?.nom_raison_sociale);
-      const names = [...tradingNames, entity?.nom_complet, entity?.nom_raison_sociale, entity?.sigle].filter((n): n is string => Boolean(n?.trim()));
+      // A sign that only names the trade ("CABINET DE KINESITHERAPIE") names no
+      // one: the practitioner's legal name goes ahead of it.
+      const ownSigns = tradingNames.filter((n) => !isGenericTradeName(n));
+      const tradeSigns = tradingNames.filter((n) => isGenericTradeName(n));
+      const names = [...ownSigns, entity?.nom_complet, entity?.nom_raison_sociale, entity?.sigle, ...tradeSigns].filter((n): n is string => Boolean(n?.trim()));
 
       return {
         ...base,

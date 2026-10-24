@@ -120,7 +120,48 @@ const GENERIC_TRADE_WORDS = new Set([
   "market",
   "school",
   "office",
+  // Liberal professions: a sole practitioner's register sign is often just the
+  // job title, "MASSEUR-KINESITHERAPEUTE" over the door of a named person.
+  "kine",
+  "kinesitherapie",
+  "kinesitherapeute",
+  "kinesitherapeutes",
+  "masseur",
+  "masseurs",
+  "physiotherapie",
+  "reeducation",
+  "infirmier",
+  "infirmiere",
+  "infirmiers",
+  "soins",
+  "medical",
+  "medicale",
+  "paramedical",
+  "sante",
+  "osteopathe",
+  "osteopathie",
+  "orthophonie",
+  "orthophoniste",
+  "pedicure",
+  "podologue",
+  "podologie",
+  "dentaire",
+  "dentiste",
+  "psychologue",
+  "avocat",
+  "notaire",
 ]);
+
+const CONNECTIVES = new Set(["de", "du", "des", "la", "le", "les", "et", "of", "the", "and"]);
+
+/**
+ * True when a name is nothing but trade nouns — "Cabinet de kinésithérapie" —
+ * and so says what a business does without saying which one it is.
+ */
+export function isGenericTradeName(raw: string): boolean {
+  const tokens = [...tokenSet(normalizeName(raw))].filter((t) => !CONNECTIVES.has(t));
+  return tokens.length > 0 && tokens.every((t) => GENERIC_TRADE_WORDS.has(t));
+}
 
 /**
  * True when one name is the other plus qualifiers: "Marionnaud" inside
