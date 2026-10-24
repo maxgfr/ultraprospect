@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [3.16.2](https://github.com/maxgfr/ultraprospect/compare/v3.16.1...v3.16.2) (2026-10-24)
+
+
+### Bug Fixes
+
+* **cli:** stop advising --category when Overpass, not the area, failed ([3eefeb7](https://github.com/maxgfr/ultraprospect/commit/3eefeb7bddeff179a65e7192fe8f751d35297df1))
+* **fr-sirene:** name a practitioner, not the trade on their sign ([45d1b84](https://github.com/maxgfr/ultraprospect/commit/45d1b84491d5f9809ae65943800a4c6f03d8c51b))
+* **geocode:** do not call a place ambiguous against its own namesake parent ([0067fc1](https://github.com/maxgfr/ultraprospect/commit/0067fc1e9983d69ba6f05fe2659c1d23f2e2a0cb))
+
 ## [3.16.1](https://github.com/maxgfr/ultraprospect/compare/v3.16.0...v3.16.1) (2026-10-20)
 
 
