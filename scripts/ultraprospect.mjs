@@ -12445,8 +12445,43 @@ var GENERIC_TRADE_WORDS = /* @__PURE__ */ new Set([
   "store",
   "market",
   "school",
-  "office"
+  "office",
+  // Liberal professions: a sole practitioner's register sign is often just the
+  // job title, "MASSEUR-KINESITHERAPEUTE" over the door of a named person.
+  "kine",
+  "kinesitherapie",
+  "kinesitherapeute",
+  "kinesitherapeutes",
+  "masseur",
+  "masseurs",
+  "physiotherapie",
+  "reeducation",
+  "infirmier",
+  "infirmiere",
+  "infirmiers",
+  "soins",
+  "medical",
+  "medicale",
+  "paramedical",
+  "sante",
+  "osteopathe",
+  "osteopathie",
+  "orthophonie",
+  "orthophoniste",
+  "pedicure",
+  "podologue",
+  "podologie",
+  "dentaire",
+  "dentiste",
+  "psychologue",
+  "avocat",
+  "notaire"
 ]);
+var CONNECTIVES = /* @__PURE__ */ new Set(["de", "du", "des", "la", "le", "les", "et", "of", "the", "and"]);
+function isGenericTradeName(raw) {
+  const tokens = [...tokenSet(normalizeName(raw))].filter((t) => !CONNECTIVES.has(t));
+  return tokens.length > 0 && tokens.every((t) => GENERIC_TRADE_WORDS.has(t));
+}
 function isNameContained(a, b) {
   const ta = tokenSet(a);
   const tb = tokenSet(b);
@@ -12712,7 +12747,9 @@ function expandRecord(entity) {
     const activityCode = e.activite_principale ?? entity?.activite_principale ?? void 0;
     const tradingNames = (e.liste_enseignes ?? []).filter((n) => Boolean(typeof n === "string" && n.trim()));
     const legalName = firstText(entity?.nom_complet, entity?.nom_raison_sociale);
-    const names = [...tradingNames, entity?.nom_complet, entity?.nom_raison_sociale, entity?.sigle].filter((n) => Boolean(n?.trim()));
+    const ownSigns = tradingNames.filter((n) => !isGenericTradeName(n));
+    const tradeSigns = tradingNames.filter((n) => isGenericTradeName(n));
+    const names = [...ownSigns, entity?.nom_complet, entity?.nom_raison_sociale, entity?.sigle, ...tradeSigns].filter((n) => Boolean(n?.trim()));
     return {
       ...base2,
       establishmentId: e.siret ?? void 0,
@@ -16197,7 +16234,13 @@ function isRival(top, other) {
   const [tLat, tLon] = [Number(top.lat), Number(top.lon)];
   const [oLat, oLon] = [Number(other.lat), Number(other.lon)];
   if (![tLat, tLon, oLat, oLon].every(Number.isFinite)) return false;
+  if (bboxHolds(other, tLat, tLon) || bboxHolds(top, oLat, oLon)) return false;
   return haversineM(tLat, tLon, oLat, oLon) > DISTINCT_PLACE_M;
+}
+function bboxHolds(h, lat, lon) {
+  const bb = h.boundingbox?.map(Number) ?? [];
+  if (bb.length !== 4 || !bb.every(Number.isFinite)) return false;
+  return lat >= bb[0] && lat <= bb[1] && lon >= bb[2] && lon <= bb[3];
 }
 function toCandidate(h) {
   return {
@@ -21818,8 +21861,10 @@ async function cmdScan(values, bools, positional) {
   if (outcome.manifest.truncated) {
     say("");
     say("  \u26A0 TRUNCATED \u2014 this run does NOT cover the whole territory:");
-    for (const lane of outcome.manifest.lanes.filter((l) => l.truncated)) say(`      ${lane.lane}: ${lane.reason}`);
-    say("      narrow with --category / --section / --min-employees, or raise --max-results");
+    const truncated = outcome.manifest.lanes.filter((l) => l.truncated);
+    for (const lane of truncated) say(`      ${lane.lane}: ${lane.reason}`);
+    if (truncated.some((l) => l.lane === "osm")) say("      osm: the Overpass mirrors refused; re-run later (`ultraprospect doctor` shows which answer)");
+    if (truncated.some((l) => l.lane !== "osm")) say("      narrow with --category / --section / --min-employees, or raise --max-results");
   }
   say("");
   say(`next: ultraprospect resolve --run ${run.dir}`);

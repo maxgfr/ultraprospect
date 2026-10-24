@@ -746,8 +746,12 @@ async function cmdScan(values: Record<string, string>, bools: ReadonlySet<string
   if (outcome.manifest.truncated) {
     say("");
     say("  ⚠ TRUNCATED — this run does NOT cover the whole territory:");
-    for (const lane of outcome.manifest.lanes.filter((l) => l.truncated)) say(`      ${lane.lane}: ${lane.reason}`);
-    say("      narrow with --category / --section / --min-employees, or raise --max-results");
+    const truncated = outcome.manifest.lanes.filter((l) => l.truncated);
+    for (const lane of truncated) say(`      ${lane.lane}: ${lane.reason}`);
+    // Narrowing helps a register that hit its cap. An Overpass tile that every
+    // mirror refused is a capacity problem on their side, which no filter fixes.
+    if (truncated.some((l) => l.lane === "osm")) say("      osm: the Overpass mirrors refused; re-run later (`ultraprospect doctor` shows which answer)");
+    if (truncated.some((l) => l.lane !== "osm")) say("      narrow with --category / --section / --min-employees, or raise --max-results");
   }
   say("");
   say(`next: ultraprospect resolve --run ${run.dir}`);
