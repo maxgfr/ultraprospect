@@ -105,7 +105,17 @@ function isRival(top: NominatimHit, other: NominatimHit): boolean {
   const [tLat, tLon] = [Number(top.lat), Number(top.lon)];
   const [oLat, oLon] = [Number(other.lat), Number(other.lon)];
   if (![tLat, tLon, oLat, oLon].every(Number.isFinite)) return false;
+  // One inside the other's outline is one place at two scales, not two places:
+  // Issoire the commune sits in the arrondissement of Issoire, whose centroid is
+  // 20 km away. Every French sous-préfecture has such a namesake parent.
+  if (bboxHolds(other, tLat, tLon) || bboxHolds(top, oLat, oLon)) return false;
   return haversineM(tLat, tLon, oLat, oLon) > DISTINCT_PLACE_M;
+}
+
+function bboxHolds(h: NominatimHit, lat: number, lon: number): boolean {
+  const bb = h.boundingbox?.map(Number) ?? [];
+  if (bb.length !== 4 || !bb.every(Number.isFinite)) return false;
+  return lat >= bb[0]! && lat <= bb[1]! && lon >= bb[2]! && lon <= bb[3]!;
 }
 
 function toCandidate(h: NominatimHit): GeoCandidate {
