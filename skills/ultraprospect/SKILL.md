@@ -3,7 +3,7 @@ name: ultraprospect
 description: Build a sourced, territory-wide company prospect list with registry checks, qualification, and citation-aware exports. Use only when the user explicitly asks for ultraprospect or a prospect list for a territory.
 license: MIT
 metadata:
-  version: 3.16.2
+  version: 3.16.3
 ---
 
 # ultraprospect — a territory, turned into prospects you can cite
