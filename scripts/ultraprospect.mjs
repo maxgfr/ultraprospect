@@ -11704,7 +11704,7 @@ function readBody(req) {
 }
 
 // src/version.ts
-var VERSION = "3.16.4";
+var VERSION = "3.16.5";
 
 // src/engine.ts
 function brandEngine() {
