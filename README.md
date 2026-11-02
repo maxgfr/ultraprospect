@@ -367,6 +367,62 @@ scheme.
 
 `--help` is the full surface and a build gate keeps it in sync with the code.
 
+## Public tenders
+
+The same tool, pointed at public procurement: find the calls for tenders that
+fit what you sell, in every country that publishes them, qualify them, draft the
+response — and read the award history to see the missions coming before they
+are published.
+
+```bash
+ultraprospect tenders --template > profile.json            # what you sell, your references R1…, certifications C1…
+ultraprospect tenders --profile profile.json --since 30d   # every source those countries have, de-duplicated
+ultraprospect tenders --run <dir> --queries                # the web lane for countries no API reaches
+ultraprospect tender  --run <dir> --id <id> --documents    # the notice and its DCE, as citable pages
+ultraprospect bid     --run <dir> --id <id>                # the packet for RESPONSE.md + COMPLIANCE.md
+ultraprospect check   --run <dir>                          # refuses an invented reference or a wrong deadline
+ultraprospect awards  --country fr --cpv 72 --since 2y     # who wins, who buys, what comes back to market
+```
+
+| Source | Countries | Coverage | Key |
+|---|---|---|---|
+| BOAMP | France | all thresholds | none |
+| Bekanntmachungsservice daily export | Germany | all thresholds | none |
+| Find a Tender + Contracts Finder | United Kingdom | above + below threshold | none |
+| TED | EU-27, EEA, candidates | above the EU thresholds | none |
+| CanadaBuys | Canada | federal | none |
+| SAM.gov · USAspending | United States | federal calls · awards | free key · none |
+| AusTender | Australia | contract notices only | none |
+| PNCP · Prozorro · SECOP II | Brazil · Ukraine · Colombia | national | none |
+| World Bank | worldwide | its financed projects | none |
+| the web lane | anywhere | what the search reached, corroborated on the page | none |
+
+It refuses the same things the territory half refuses, in procurement's terms:
+
+- **It never invents a deadline.** The German export publishes none, measured;
+  those notices are "status unknown" until their TED copy or their own page says
+  otherwise. A draft whose deadline differs from the notice's fails the gate.
+- **It never presents TED as a country's market.** Above the EU thresholds every
+  member state publishes to TED; below them — where most contracts a small firm
+  can win live — only the national portal does. A run names every country it saw
+  only above the thresholds, or not at all, and offers the web lane for them.
+- **It never claims anything about you that your profile does not hold.** A bid
+  cites `[R1]` for a reference and `[C1]` for a certification, and the gate
+  re-reads both against `profile.json`. A requirement you cannot meet is a gap
+  in `COMPLIANCE.md`.
+- **It never gets past a registration wall.** A DCE behind a buyer platform's
+  login is reported with its URL; registering is yours to do.
+- **It never dresses an estimate as a date.** A re-tender window is drawn only
+  from a duration the award notice publishes, and labelled as estimated.
+
+Same notice, two portals: TED's `procedure-identifier`, BOAMP's
+`contractfolderid` and the German `tender.id` are one eForms UUID, so copies
+merge exactly and look-alikes with no shared id go to the agent instead. The
+judgement — go / no-go, the response itself — fans out like the rest:
+`orchestrate` on a tenders run emits `web`, `qualify` and `bid` phases, each a
+schema-bound subagent, with no API key. Details:
+[skills/ultraprospect/references/tenders.md](skills/ultraprospect/references/tenders.md).
+
 ## Fanning it out
 
 Three phases spread across subagents — `resolve`, `match` and `dossier`. Each

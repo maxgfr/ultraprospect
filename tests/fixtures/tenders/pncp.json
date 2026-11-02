@@ -1,0 +1,62 @@
+{
+ "data": [
+  {
+   "valorTotalHomologado": null,
+   "orgaoEntidade": {
+    "cnpj": "04104816000116",
+    "razaoSocial": "MUNICIPIO DE ARIQUEMES",
+    "poderId": "N",
+    "esferaId": "M"
+   },
+   "dataInclusao": "2023-11-01T16:36:44",
+   "dataAtualizacao": "2023-11-01T16:36:44",
+   "sequencialCompra": 114,
+   "emendaParlamentar": null,
+   "numeroCompra": "4",
+   "processo": "4",
+   "objetoCompra": "CREDENCIAMENTO de instituições, empresas públicas ou privadas especializadas na prestação de serviço técnico em emissão de laudo de avaliação e parecer técnico de avaliação mercadológica para fins de aquisição de imóvel, permuta, locação e avaliações de patrimônio, visando atender as demandas do Prefeitura Municipal de Ariquemes/RO.",
+   "informacaoComplementar": "CREDENCIAMENTO de instituições, empresas públicas ou privadas especializadas na prestação de serviço técnico em emissão de laudo de avaliação e parecer técnico de avaliação mercadológica para fins de aquisição de imóvel, permuta, locação e avaliações de patrimônio, visando atender as demandas do Prefeitura Municipal de Ariquemes/RO.",
+   "dataAberturaProposta": "2023-11-06T08:00:00",
+   "dataEncerramentoProposta": "2026-11-06T17:30:00",
+   "dataPublicacaoPncp": "2023-11-01T16:36:44",
+   "dataAtualizacaoGlobal": "2023-11-01T16:36:44",
+   "unidadeOrgao": {
+    "ufNome": "Rondônia",
+    "ufSigla": "RO",
+    "municipioNome": "Ariquemes",
+    "codigoIbge": "1100023",
+    "codigoUnidade": "1",
+    "nomeUnidade": "PREFEITURA MUNICIPAL DE ARIQUEMES"
+   },
+   "orgaoSubRogado": null,
+   "unidadeSubRogada": null,
+   "amparoLegal": {
+    "nome": "Lei 14.133/2021, Art. 78, I",
+    "descricao": "Credenciamento: processo administrativo de chamamento público em que a Administração Pública convoca interessados em prestar serviços ou fornecer bens para que, preenchidos os requisitos necessários, se credenciem no órgão ou na entidade para executar o objeto quando convocados",
+    "codigo": 47
+   },
+   "linkSistemaOrigem": "https://transparencia.ariquemes.ro.gov.br/transparencia/index.php?link=aplicacoes/licitacao/frmlicitacao_direta&token=9444bbe52388a724e7bd7401eef90ac6",
+   "linkProcessoEletronico": null,
+   "justificativaPresencial": "",
+   "numeroControlePNCP": "04104816000116-1-000114/2023",
+   "anoCompra": 2023,
+   "srp": false,
+   "valorTotalEstimado": 133876.7,
+   "modalidadeId": 12,
+   "modalidadeNome": "Credenciamento",
+   "modoDisputaId": 2,
+   "modoDisputaNome": "Fechado",
+   "tipoInstrumentoConvocatorioCodigo": 1,
+   "tipoInstrumentoConvocatorioNome": "Edital",
+   "fontesOrcamentarias": [],
+   "situacaoCompraId": 1,
+   "situacaoCompraNome": "Divulgada no PNCP",
+   "usuarioNome": "Fiorilli Software"
+  }
+ ],
+ "totalRegistros": 26038,
+ "totalPaginas": 2604,
+ "numeroPagina": 1,
+ "paginasRestantes": 2603,
+ "empty": false
+}

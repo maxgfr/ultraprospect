@@ -1,6 +1,6 @@
 ---
 name: ultraprospect
-description: Build a sourced, territory-wide company prospect list with registry checks, qualification, and citation-aware exports. Use only when the user explicitly asks for ultraprospect or a prospect list for a territory.
+description: Build a sourced, territory-wide company prospect list with registry checks, qualification, and citation-aware exports — and find, qualify and draft answers to public calls for tenders across countries (TED, national portals, awards). Use only when the user explicitly asks for ultraprospect, a prospect list for a territory, or public tenders / appels d'offres to find or answer.
 license: MIT
 metadata:
   version: 3.16.5
@@ -89,7 +89,12 @@ gate. Read it rather than guessing a flag.
 | Import the user's corrections or exclusions | Read [user feedback](references/feedback.md), then `feedback --run <dir> [--apply <file>]` and render again |
 | See what moved since last month's sweep | `watch --run <new> --since <old>` |
 | Spread the judgement across subagents | `orchestrate --run <dir>` |
-| Drive it all from another harness | `mcp` — serves where, ingest, scan, places, confirm, enrich, score, dossier, check, render, watch, doctor |
+| Drive it all from another harness | `mcp` — serves where, ingest, scan, places, confirm, enrich, score, dossier, check, render, watch, doctor, tenders, tender, bid, awards |
+| Find public calls for tenders that fit what the user sells | `tenders --profile profile.json` — see [Public tenders](#public-tenders--find-the-calls-qualify-them-draft-the-answer) |
+| Reach the national portals no API covers | `tenders --run <dir> --queries`, then `--web-results` |
+| Read one notice and its documents (the DCE) | `tender --run <dir> --id <id> --documents` |
+| Draft the response to one notice | `bid --run <dir> --id <id>`, then `check --run <dir>` |
+| Who wins these contracts, and when they come back | `awards --country fr --cpv 72 --since 2y` |
 | Find out why a run came back thin | `doctor` |
 
 ## Cheat sheet
@@ -127,6 +132,14 @@ ultraprospect watch --run <new> --since <old>                 # who opened, clos
 ultraprospect orchestrate --run <dir>                         # fan the two judgement phases out
 ultraprospect mcp                                             # serve it over MCP, stdio
 ultraprospect scan --fixture <dir>                            # replay a recorded sweep, offline
+ultraprospect tenders --template > profile.json               # the bidder: offer, CPV, keywords per language, R#, C#
+ultraprospect tenders --profile profile.json --since 30d      # every source the profile's countries have
+ultraprospect tenders --country eu --cpv 72 --status open     # all 27, above-threshold via TED + national where wired
+ultraprospect tenders --run <dir> --queries                   # the web lane for countries no API reaches
+ultraprospect tenders --run <dir> --apply verdicts.json       # fold go / maybe / no-go back in
+ultraprospect tender --run <dir> --id <id> --documents        # the notice + its DCE, as citable pages
+ultraprospect bid --run <dir> --id <id>                       # the grounding packet for RESPONSE.md + COMPLIANCE.md
+ultraprospect awards --country fr --cpv 72 --since 2y         # who wins, who buys, what comes back to market
 ```
 
 ## Workflow
@@ -542,6 +555,99 @@ ultraprospect scan --fixture <dir>                            # replay a recorde
   three of them volunteer-run. The engine identifies itself, paces itself per
   host and honours robots.txt.
 
+## Public tenders — find the calls, qualify them, draft the answer
+
+The same division of labour, pointed at public procurement. The engine finds and
+normalises notices from every source a country has, de-duplicates the copies,
+reads the notice and its documents into citable pages, and accounts for what it
+could not see. You judge which calls are worth answering, and you draft the
+answer — every claim about the buyer cited to a page, every claim about the
+bidder cited to the profile. For sources, thresholds and measured limits, read
+[references/tenders.md](references/tenders.md).
+
+> **The tender rules — on top of the core ones:**
+>
+> 1. **The deadline is a published fact, never an estimate.** Write it exactly
+>    as the notice gives it. A notice with no deadline in its record is "status
+>    unknown" until a page you cite says otherwise. `check` compares the
+>    deadline in `RESPONSE.md` with the notice's.
+> 2. **Above-threshold is not the national market.** TED covers the EU above
+>    the thresholds; most contracts a small firm can win sit below them, on the
+>    national portal. `manifest.gaps` names every country this run saw only
+>    above the thresholds, or not at all. Say so — and run the web lane for them.
+> 3. **Nothing about the bidder that the profile does not hold.** No reference,
+>    certification, turnover or headcount from memory or from "what such a firm
+>    usually has". Cite `[R#]`, `[C#]`, `[profile.<field>]`. A requirement the
+>    profile cannot meet is a **gap** in `COMPLIANCE.md`. A false declaration is
+>    a ground for exclusion in most procurement law.
+> 4. **A DCE you did not read is a DCE you did not read.** When the documents sit
+>    behind a registration wall, `tender` says so and stops: registering with a
+>    contracting authority is the user's act. The draft then says, in its first
+>    paragraph, that it rests on the notice alone.
+> 5. **Translate the concept, not the word.** CPV is the cross-language key; the
+>    keywords are not. Put each market's own terms in the profile —
+>    `keywords: {"fr": [...], "it": [...]}` — and check the phrasing on the live
+>    web as for `enrich --terms`. An English word on an Italian portal finds
+>    English pages.
+> 6. **A renewal date is an estimate, and says so.** `awards` draws a re-tender
+>    window only from a duration the notice publishes, labelled "estimated from
+>    the notice's duration". Repeat the label wherever you repeat the date.
+
+### Tender workflow
+
+1. **Write the profile first.** `tenders --template > profile.json`, then fill it
+   with the user — offer, CPV prefixes, keywords per language, countries,
+   references `R1…`, certifications `C1…`. Everything a bid may claim lives here.
+2. **Search.** `tenders --profile profile.json --since 30d` (or `--country fr,de
+   --cpv 72 --keywords …`). Read `truncated` and the `gap:` lines first.
+3. **Web lane for the gaps.** `tenders --run <dir> --queries` writes
+   `WEB.todo.json`: per country, its language, the profile's terms in it, and
+   queries naming its portals. Run them with your own web search, pool every hit
+   tagged with its `country`, and fold with `tenders --run <dir> --web-results
+   hits.json`. The engine keeps a page only if it carries a procurement term of
+   that market AND one of the user's terms, and drops one whose labelled deadline
+   has passed. `--engine-search` is the keyless fallback, and often blocked.
+4. **Qualify.** `TENDERS.todo.json` lists the open calls, soonest deadline first,
+   plus look-alike `pairs` from different sources that share no procedure id.
+   Answer each call `go` / `maybe` / `no-go` with a `fit`, a `why` and any
+   `blockers`, and each pair `{pair: [keep, drop], same}`. Fold with
+   `tenders --run <dir> --apply verdicts.json`. A `go` on an expired call is
+   refused. When the summary is not enough, the answer is `maybe` — then read it.
+5. **Read every go in full.** `tender --run <dir> --id <id> --documents` stores
+   the API record, the notice text (TED: the PDF in the buyer's language) and
+   each public DCE document as `[P#]` — PDFs, office files, ZIP members — and
+   keeps a document only when it names this procedure, so a platform's help PDF
+   is never cited as the buyer's requirement.
+6. **Draft.** `bid --run <dir> --id <id>` prints the packet: deadline, profile
+   ids, the jurisdiction's administrative checklist, the two templates, every
+   page. Write `bids/<id>/RESPONSE.md` (one section per published award
+   criterion, in order) and `bids/<id>/COMPLIANCE.md` (requirement → where
+   stated → evidence → met / gap / to confirm).
+7. **Gate.** `check --run <dir>`. On a tenders run it refuses: a `[R#]` the
+   profile does not hold, a claim about the bidder with no profile id, a deadline
+   that differs from the notice, a page of another notice, an unlabelled renewal
+   date, a `go` on a closed call. Exit 1 means do not hand it over.
+8. **Hand over.** `render --run <dir>` writes `TENDERS.csv`, `REPORT.md` and
+   `index.html`, coverage first. A draft is a draft: the user signs and submits.
+9. **Find the missions before they are published.** `awards --country fr --cpv 72
+   --since 2y` (or `awards --run <dir>`): who wins, who buys, at what price, and
+   which contracts come back to market within `--horizon` months. The top
+   identified winners are confirmed against their register — competitors to
+   watch, partners or subcontracting targets to call, and buyers to `scan`.
+10. **Watch.** Re-run the same search next week; `watch --run <new> --since
+    <old>` lists new calls, calls closing within two weeks, moved deadlines.
+
+### Tender fan-out
+
+`orchestrate --run <tenders run>` emits three phases, each a schema-bound
+subagent — the harness doing what a structured-output API call would, with no
+key: `web` (**haiku** — search plus bookkeeping; the engine corroborates every
+hit), `qualify` (**sonnet** — no gate re-checks a no-go that should have been a
+go; that contract is simply lost), and `bid` (**opus** — `check` catches an
+invented reference or a wrong deadline, never a response that answers the
+criteria badly, which is the whole deliverable). Same rules as the territory
+fan-out: subagents return fragments, you fold them.
+
 ## Orchestration — route by harness
 
 | You have | Do |
@@ -589,3 +695,4 @@ Subagents never write; the folds stay with you, the orchestrator. Re-run
 | A run behaved oddly, or you need exit codes and env vars | [references/operations.md](references/operations.md) |
 | The deliverable will be shared, stored, or contains people | [references/privacy-and-licensing.md](references/privacy-and-licensing.md) |
 | The user marks a company/site/contact wrong, excludes it, or finds it useful | [references/feedback.md](references/feedback.md) |
+| You are searching, qualifying or answering public tenders, or reading awards | [references/tenders.md](references/tenders.md) |

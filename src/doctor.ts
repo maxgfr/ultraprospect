@@ -13,6 +13,7 @@
 // because something is already slow.
 import { EXIT_FAILURE, EXIT_OK, cacheDir, httpGet, httpJson } from "./engine.js";
 import { CONNECTORS } from "./registry/index.js";
+import { TENDER_CONNECTORS } from "./tenders/index.js";
 import { politeUa } from "./net.js";
 import { OVERPASS_MIRRORS } from "./overpass.js";
 import { VERSION } from "./version.js";
@@ -159,6 +160,28 @@ export async function probeAll(countryCode?: string, keys?: Record<string, strin
       return { ok: result.ok, detail: result.detail };
     });
     probes.push({ name: connector.id, target: new URL(connector.docsUrl).host, required: false, unverified: connector.unverified?.why, ...probe });
+  }
+
+  // ---- The tender sources -----------------------------------------------------
+  //
+  // Same narrowing as the registers: with a country, only the sources that
+  // serve it (and the worldwide ones); without one, every source.
+  const cc = countryCode?.toLowerCase();
+  for (const source of TENDER_CONNECTORS.filter((c) => !cc || c.countries.includes("*") || c.countries.includes(cc))) {
+    const availability = source.availability();
+    const target = new URL(source.docsUrl).host;
+    if (!availability.available) {
+      probes.push({ name: `tenders:${source.id}`, target, required: false, ok: true, skipped: true, detail: availability.reason ?? "unavailable", ms: 0 });
+      continue;
+    }
+    const probe = await timed(() => source.probe());
+    probes.push({
+      name: `tenders:${source.id}`,
+      target,
+      required: false,
+      unverified: source.unverified ? "the mapper has not yet been checked against a live answer of every field it reads" : undefined,
+      ...probe,
+    });
   }
 
   // Mirrors are probed in parallel: they are independent, and doing it serially

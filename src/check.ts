@@ -55,7 +55,7 @@ export interface CheckReport {
  * unresolved id went unreported and a properly cited line was flagged as
  * uncited. A gate that quietly stops checking is worse than no gate.
  */
-const citationRe = () => /\[P(\d+)\]/g;
+export const citationRe = () => /\[P(\d+)\]/g;
 const MODEL_MARK = /\[M\]/;
 
 /**
@@ -509,50 +509,10 @@ export function runCheck(input: CheckInput): CheckReport {
     // of those against one genuinely-cited paragraph, and the only ways out
     // would have been one-line paragraphs or an id on every line: exactly the
     // id-sprinkling that makes a citation stop meaning anything.
-    const lines = text.split("\n");
-    let inFence = false;
-    let start = 0;
-    let buffer: string[] = [];
-    let quoted = false;
-    const flush = () => {
-      if (buffer.length === 0) return;
-      const paragraph = buffer.join(" ");
-      buffer = [];
-      if (!isFactual(paragraph)) return;
-      if (citationRe().test(paragraph) || MODEL_MARK.test(paragraph)) return;
-      err("claim-uncited", `${rel}:${start + 1}`, `a factual paragraph with no [P#] and no [M]: "${paragraph.trim().slice(0, 90)}"`);
-    };
-
-    for (const [i, line] of lines.entries()) {
-      if (line.trim().startsWith("```")) {
-        flush();
-        inFence = !inFence;
-        continue;
-      }
-      if (inFence) continue;
-      if (line.trim() === "") {
-        flush();
-        continue;
-      }
-      const isQuote = line.trim().startsWith(">");
-      const t = line.trim().replace(/^(?:>\s*)+/, "");
-      if (buffer.length && quoted !== isQuote) flush();
-      quoted = isQuote;
-      const next = (lines[i + 1] ?? "").trim().replace(/^(?:>\s*)+/, "");
-      // A heading, a rule, a table's scaffolding: structure closes the paragraph
-      // before it and is not a claim in its own right.
-      if (isStructural(t, next)) {
-        flush();
-        continue;
-      }
-      // Bullets and table data rows are separate claims; consecutive quote
-      // lines form one wrapped paragraph with its citation at the end.
-      if (LIST_ITEM.test(t) || isTableRow(t)) flush();
-      if (buffer.length === 0) start = i;
-      buffer.push(t);
-      if (isTableRow(t)) flush();
+    for (const unit of factualParagraphs(text)) {
+      if (citationRe().test(unit.text) || MODEL_MARK.test(unit.text)) continue;
+      err("claim-uncited", `${rel}:${unit.line}`, `a factual paragraph with no [P#] and no [M]: "${unit.text.trim().slice(0, 90)}"`);
     }
-    flush();
   }
 
   // ---- Warnings ---------------------------------------------------------------
@@ -579,6 +539,60 @@ export function runCheck(input: CheckInput): CheckReport {
     warnings,
     counts: { dossiers: files.length, citations, contacts, legalIds, places: places.length },
   };
+}
+
+/**
+ * The factual paragraphs of a markdown write-up, each with its first line.
+ *
+ * The unit every citation rule counts in — see Rule 2 in `runCheck`. Exported
+ * so the tender gate holds a bid to exactly the same definition of "a claim".
+ */
+export function factualParagraphs(text: string): { line: number; text: string }[] {
+  const out: { line: number; text: string }[] = [];
+  const lines = text.split("\n");
+  let inFence = false;
+  let start = 0;
+  let buffer: string[] = [];
+  let quoted = false;
+  const flush = () => {
+    if (buffer.length === 0) return;
+    const paragraph = buffer.join(" ");
+    buffer = [];
+    if (!isFactual(paragraph)) return;
+    out.push({ line: start + 1, text: paragraph });
+  };
+
+  for (const [i, line] of lines.entries()) {
+    if (line.trim().startsWith("```")) {
+      flush();
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (line.trim() === "") {
+      flush();
+      continue;
+    }
+    const isQuote = line.trim().startsWith(">");
+    const t = line.trim().replace(/^(?:>\s*)+/, "");
+    if (buffer.length && quoted !== isQuote) flush();
+    quoted = isQuote;
+    const next = (lines[i + 1] ?? "").trim().replace(/^(?:>\s*)+/, "");
+    // A heading, a rule, a table's scaffolding: structure closes the paragraph
+    // before it and is not a claim in its own right.
+    if (isStructural(t, next)) {
+      flush();
+      continue;
+    }
+    // Bullets and table data rows are separate claims; consecutive quote
+    // lines form one wrapped paragraph with its citation at the end.
+    if (LIST_ITEM.test(t) || isTableRow(t)) flush();
+    if (buffer.length === 0) start = i;
+    buffer.push(t);
+    if (isTableRow(t)) flush();
+  }
+  flush();
+  return out;
 }
 
 /** Human-readable rendering of a report. */

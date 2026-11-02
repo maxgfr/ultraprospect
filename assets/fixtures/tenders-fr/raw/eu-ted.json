@@ -1,0 +1,660 @@
+{
+  "tenders": [
+    {
+      "id": "eu-ted:737618-2026",
+      "connectorId": "eu-ted",
+      "noticeId": "737618-2026",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "France – Matériel et fournitures informatiques – Acquisition et maintenance de moyens réseau et téléphonie pour TBS Education",
+      "description": "Acquisition de matériels et de logiciels, réalisation de diverses prestations dont des prestations de maintenance, dédiés aux systèmes réseau et téléphonie de TBS EDUCATION.",
+      "language": "fr",
+      "buyer": {
+        "name": "Toulouse Business School",
+        "legalId": "81751739400018",
+        "country": "fr",
+        "city": "Toulouse cedex 7"
+      },
+      "cpv": [
+        "30200000",
+        "32429000"
+      ],
+      "nature": "supplies",
+      "procedure": "open",
+      "lots": [],
+      "publishedAt": "2026-10-26",
+      "deadline": "2026-11-24T12:00:00+02:00",
+      "documentsUrl": "https://www.marches-publics.gouv.fr/",
+      "documentsAccess": "unknown",
+      "submissionUrl": "https://www.marches-publics.gouv.fr/",
+      "places": [
+        "FRJ23",
+        "FRA"
+      ],
+      "criteria": [
+        {
+          "name": "Prix des prestations",
+          "weight": "per-exa"
+        },
+        {
+          "name": "Valeur technique",
+          "weight": "per-exa"
+        }
+      ],
+      "awards": [],
+      "sourceUrl": "https://ted.europa.eu/en/notice/-/detail/737618-2026",
+      "coverage": "above-threshold",
+      "aliases": [
+        "737618-2026",
+        "2bc49902-f9af-4f2b-aeca-b94686fee70c",
+        "23ddc15a-d496-4c0e-8e10-a7a71be02bb5"
+      ],
+      "national": {
+        "noticeType": "cn-standard",
+        "xml": "https://ted.europa.eu/en/notice/737618-2026/xml",
+        "noticeDocument": "https://ted.europa.eu/fr/notice/737618-2026/pdf"
+      }
+    },
+    {
+      "id": "eu-ted:737700-2026",
+      "connectorId": "eu-ted",
+      "noticeId": "737700-2026",
+      "country": "fr",
+      "kind": "call",
+      "status": "unknown",
+      "title": "France – Services de traitement de données – PERSONNALISATION 4",
+      "description": "prestation de personnalisation de cartes à puce répondant aux normes CEN TS 16794 et Calypso 3, dont la Carte Police, permettant aux usagers d’obtenir et de charger, le cas échéant, différents titres de transport, pour in fine circuler sur le réseau de transport",
+      "language": "fr",
+      "buyer": {
+        "name": "COMUTITRES SAS",
+        "legalId": "91945182300026",
+        "country": "fr",
+        "city": "Paris"
+      },
+      "cpv": [
+        "72310000",
+        "30162000"
+      ],
+      "nature": "services",
+      "procedure": "neg-w-call",
+      "value": {
+        "amount": 5000000,
+        "currency": "EUR",
+        "estimated": true
+      },
+      "lots": [],
+      "publishedAt": "2026-10-26",
+      "documentsUrl": "https://marches.maximilien.fr/entreprise/consultation/949130?orgAcronyme=a5m",
+      "documentsAccess": "unknown",
+      "submissionUrl": "https://marches.maximilien.fr/?page=Entreprise.EntrepriseAdvancedSearch&AllCons&id=949130&orgAcronyme=a5m",
+      "places": [
+        "FR101",
+        "FRA"
+      ],
+      "criteria": [
+        {
+          "name": "Valeur technique",
+          "weight": "per-exa"
+        },
+        {
+          "name": "Valeur sécurité des données",
+          "weight": "per-exa"
+        },
+        {
+          "name": "Valeur RSE",
+          "weight": "per-exa"
+        }
+      ],
+      "awards": [],
+      "sourceUrl": "https://ted.europa.eu/en/notice/-/detail/737700-2026",
+      "coverage": "above-threshold",
+      "aliases": [
+        "737700-2026",
+        "f7796b8a-dc2b-4afa-b6cf-caf8dbede202",
+        "48a9b37e-5d57-4350-935e-66d8e6475d90"
+      ],
+      "national": {
+        "noticeType": "cn-standard",
+        "xml": "https://ted.europa.eu/en/notice/737700-2026/xml",
+        "noticeDocument": "https://ted.europa.eu/fr/notice/737700-2026/pdf"
+      }
+    },
+    {
+      "id": "eu-ted:737783-2026",
+      "connectorId": "eu-ted",
+      "noticeId": "737783-2026",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "France – Maintenance et réparation de matériel informatique – Service d'infogérance des systèmes informatiques de la Ville de Saint-Just Saint-Rambert",
+      "description": "Prestations d'audit, de maintenance et de suivi (conseils) informatiques des services municipaux de la Commune",
+      "language": "fr",
+      "buyer": {
+        "name": "VILLE DE SAINT-JUST SAINT-RAMBERT",
+        "country": "fr",
+        "city": "Saint-Just Saint-Rambert"
+      },
+      "cpv": [
+        "50312000",
+        "72500000",
+        "72600000"
+      ],
+      "nature": "services",
+      "procedure": "open",
+      "lots": [],
+      "publishedAt": "2026-10-26",
+      "deadline": "2026-11-23T12:00:00+01:00",
+      "documentsUrl": "https://loire.marches-publics.info//avis/index.cfm?fuseaction=dematEnt.login&type=DCE&IDM=62931",
+      "documentsAccess": "unknown",
+      "submissionUrl": "https://loire.marches-publics.info//avis/index.cfm?fuseaction=demat.termes&IDM=62931",
+      "places": [
+        "FRK25",
+        "FRA"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://ted.europa.eu/en/notice/-/detail/737783-2026",
+      "coverage": "above-threshold",
+      "aliases": [
+        "737783-2026",
+        "b0b7dd4a-dbf4-4b5d-ae31-8734fea821e5",
+        "4940a887-303b-4be7-9b19-408b3cbb5cc9"
+      ],
+      "national": {
+        "noticeType": "cn-standard",
+        "xml": "https://ted.europa.eu/en/notice/737783-2026/xml",
+        "noticeDocument": "https://ted.europa.eu/fr/notice/737783-2026/pdf"
+      }
+    },
+    {
+      "id": "eu-ted:737843-2026",
+      "connectorId": "eu-ted",
+      "noticeId": "737843-2026",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "France – Services informatiques – Prestations d'infogérance pour le Théâtre National de l'Odéon",
+      "description": "Prestations d'infogérance pour le Théâtre National de l'Odéon",
+      "language": "fr",
+      "buyer": {
+        "name": "Théâtre National de l'Odéon",
+        "legalId": "78427618000014",
+        "country": "fr",
+        "city": "Paris"
+      },
+      "cpv": [
+        "72500000"
+      ],
+      "nature": "services",
+      "procedure": "open",
+      "lots": [],
+      "publishedAt": "2026-10-26",
+      "deadline": "2026-11-25T14:00:00+01:00",
+      "documentsUrl": "https://www.economie.gouv.fr/dae/les-projets-achats-les-consultations/place-la-plateforme-des-achats-de-letat",
+      "documentsAccess": "unknown",
+      "submissionUrl": "https://www.economie.gouv.fr/dae/les-projets-achats-les-consultations/place-la-plateforme-des-achats-de-letat",
+      "places": [
+        "FR101",
+        "FRA"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://ted.europa.eu/en/notice/-/detail/737843-2026",
+      "coverage": "above-threshold",
+      "aliases": [
+        "737843-2026",
+        "ab70ea19-400a-4b01-b95a-e5799924f72f",
+        "1964e608-b7bb-4c68-b753-efd96efd8c52"
+      ],
+      "national": {
+        "noticeType": "cn-standard",
+        "xml": "https://ted.europa.eu/en/notice/737843-2026/xml",
+        "noticeDocument": "https://ted.europa.eu/fr/notice/737843-2026/pdf"
+      }
+    },
+    {
+      "id": "eu-ted:737998-2026",
+      "connectorId": "eu-ted",
+      "noticeId": "737998-2026",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "France – Services de gestion des installations informatiques – INFOGÉRANCE MUTUALISÉE",
+      "description": "La présente consultation a pour objet la conclusion d'un accord-cadre portant sur la réalisation de prestations d'infogérance des membres du groupement entre SITREVA et la CCPEIDF. L'accord-cadre sera exécuté par la conclusion de marchés subséquents et l'émission de bons de commande dans les conditions du cahier des charges. Les prestations sont réglées par des prix unitaires et forfaitaires. Les montants estimatifs sont indicatifs et comprennent la totalité des périodes de reconduction",
+      "language": "fr",
+      "buyer": {
+        "name": "SITREVA",
+        "legalId": "84171",
+        "country": "fr",
+        "city": "Rambouillet"
+      },
+      "cpv": [
+        "72514000"
+      ],
+      "nature": "services",
+      "procedure": "open",
+      "value": {
+        "amount": 950000,
+        "currency": "EUR",
+        "estimated": true
+      },
+      "lots": [],
+      "publishedAt": "2026-10-26",
+      "deadline": "2026-11-24T12:00:00+01:00",
+      "documentsUrl": "https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=dematEnt.login&type=DCE&IDM=1894100",
+      "documentsAccess": "unknown",
+      "submissionUrl": "https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=demat.termes&IDM=1894100",
+      "places": [
+        "FRB02",
+        "FRA",
+        "FR103"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://ted.europa.eu/en/notice/-/detail/737998-2026",
+      "coverage": "above-threshold",
+      "aliases": [
+        "737998-2026",
+        "d5e0a8d6-bf72-41dd-b44e-77fea0aeeb40",
+        "bed6c530-e34c-41ab-900e-605440498918"
+      ],
+      "national": {
+        "noticeType": "cn-standard",
+        "xml": "https://ted.europa.eu/en/notice/737998-2026/xml",
+        "noticeDocument": "https://ted.europa.eu/fr/notice/737998-2026/pdf"
+      }
+    },
+    {
+      "id": "eu-ted:738373-2026",
+      "connectorId": "eu-ted",
+      "noticeId": "738373-2026",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "France – Système de télécommunications sans fil – Location maintenance d'un système de conférence sans fil pour réunions - du 1er mars 2027 au 31 juillet 2030",
+      "description": "Consultation lancée par un groupement de commandes. Montant maximum pour la durée du marché : 500 000 euro(s) H.T. pour la Ville du Mans et pour Le Mans Métropole. Livraison, la location, l'installation, la configuration, la mise en service et la maintenance d'un système de conférence sans fil destiné aux Conseils municipaux, aux Conseils communautaires et aux réunions assimilées de la Ville du Mans et de Le Mans Métropole. Ces réunions peuvent impliquer un grand nombre de participants et nécessitent une qualité audio irréprochable, une parfaite intelligibilité des échanges et une garantie de continuité de service. Hôtel de Ville : 40 postes sur le point d'accès existant Espace culturel des jacobins : 85 postes avec le point d'accès complémentaire",
+      "language": "fr",
+      "buyer": {
+        "name": "Le Mans Métropole",
+        "legalId": "12236",
+        "country": "fr",
+        "city": "Le Mans"
+      },
+      "cpv": [
+        "32510000",
+        "32340000",
+        "72250000"
+      ],
+      "nature": "supplies",
+      "procedure": "open",
+      "lots": [],
+      "publishedAt": "2026-10-26",
+      "deadline": "2026-11-23T17:00:00+01:00",
+      "documentsUrl": "https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=dematEnt.login&type=DCE&IDM=1892071",
+      "documentsAccess": "unknown",
+      "submissionUrl": "https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=demat.termes&IDM=1892071",
+      "places": [
+        "FRG04",
+        "FRA"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://ted.europa.eu/en/notice/-/detail/738373-2026",
+      "coverage": "above-threshold",
+      "aliases": [
+        "738373-2026",
+        "f3ed1b73-9d17-43b1-8f2f-359a092a9e61",
+        "455357f9-70ee-44da-a2c5-c170ccde9fcf"
+      ],
+      "national": {
+        "noticeType": "cn-standard",
+        "xml": "https://ted.europa.eu/en/notice/738373-2026/xml",
+        "noticeDocument": "https://ted.europa.eu/fr/notice/738373-2026/pdf"
+      }
+    },
+    {
+      "id": "eu-ted:738468-2026",
+      "connectorId": "eu-ted",
+      "noticeId": "738468-2026",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "France – Services de mise à disposition de personnel, y compris de personnel temporaire – Prestations de mise à disposition de personnel intérimaire pour le compte du Centre Départemental Enfance Familles (CDEF)",
+      "description": "Services de mise à disposition de personnel infirmier et médical\n\nServices de mise à disposition de personnel éducatif et social",
+      "language": "fr",
+      "buyer": {
+        "name": "Conseil départemental Loire Atlantique",
+        "legalId": "65125",
+        "country": "fr",
+        "city": "Nantes"
+      },
+      "cpv": [
+        "79620000",
+        "79625000",
+        "72611000"
+      ],
+      "nature": "services",
+      "procedure": "open",
+      "value": {
+        "amount": 4500000,
+        "currency": "EUR",
+        "estimated": true
+      },
+      "lots": [
+        {
+          "id": "LOT-0001",
+          "title": "Services de mise à disposition de personnel infirmier et médical",
+          "value": {
+            "amount": 2000000,
+            "currency": "EUR",
+            "estimated": true
+          }
+        },
+        {
+          "id": "LOT-0002",
+          "title": "Services de mise à disposition de personnel éducatif et social",
+          "value": {
+            "amount": 2500000,
+            "currency": "EUR",
+            "estimated": true
+          }
+        }
+      ],
+      "publishedAt": "2026-10-26",
+      "deadline": "2026-11-27T12:00:00+01:00",
+      "documentsUrl": "http://marches.loire-atlantique.fr",
+      "documentsAccess": "unknown",
+      "submissionUrl": "https://marches.loire-atlantique.fr",
+      "places": [
+        "FRG01",
+        "FRA"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://ted.europa.eu/en/notice/-/detail/738468-2026",
+      "coverage": "above-threshold",
+      "aliases": [
+        "738468-2026",
+        "1e3831be-e007-4d43-a948-7b0af2f16eee",
+        "355f3968-342f-4064-bded-b1833acc8ddb"
+      ],
+      "national": {
+        "noticeType": "cn-standard",
+        "xml": "https://ted.europa.eu/en/notice/738468-2026/xml",
+        "noticeDocument": "https://ted.europa.eu/fr/notice/738468-2026/pdf"
+      }
+    },
+    {
+      "id": "eu-ted:738848-2026",
+      "connectorId": "eu-ted",
+      "noticeId": "738848-2026",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "France – Services d'assistance technique informatique – SERVICES DE SUPPORT TECHNIQUE A L’UTILISATION DE L’ENVIRONNEMENT DE TRAVAIL NUMERIQUE DE L’ATIH",
+      "description": "L’objet du présent marché est la fourniture d’un service de support technique bureautique de niveau 1 et de niveau 2 pour l’ensemble des utilisateurs internes de l’ATIH comprenant : • une assistance à distance pour l’ensemble des utilisateurs ; • une assistance de proximité dans les locaux du siège à Lyon pour les interventions nécessitant une présence physique ; • des prestations complémentaires. Le détail des prestations attendues figure dans le cahier des clauses techniques particulières (CCTP). Le marché prend une la forme d’un marché ordinaire. Les prestations sont déclenchées par l’émission d’ordres de service par l’ATIH. Le marché est conclu pour une durée de quatre (4) ans à compter de sa date de notification et n’est pas reconductible. La date prévisionnelle de notification est le 25 janvier 2027",
+      "language": "fr",
+      "buyer": {
+        "name": "ATIH",
+        "legalId": "18009229800033",
+        "country": "fr",
+        "city": "LYON"
+      },
+      "cpv": [
+        "72611000"
+      ],
+      "nature": "services",
+      "procedure": "open",
+      "lots": [],
+      "publishedAt": "2026-10-26",
+      "deadline": "2026-11-23T12:00:00+02:00",
+      "documentsUrl": "https://www.marches-publics.gouv.fr/",
+      "documentsAccess": "unknown",
+      "submissionUrl": "https://www.marches-publics.gouv.fr/?page=Entreprise.EntrepriseAdvancedSearch&AllCons&id=3075959&orgAcronyme=h8j",
+      "places": [],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://ted.europa.eu/en/notice/-/detail/738848-2026",
+      "coverage": "above-threshold",
+      "aliases": [
+        "738848-2026",
+        "2b0d05e9-7710-4c9f-876b-fa2c0123aeb3",
+        "eeb1b907-1322-4906-83be-980c1c415592"
+      ],
+      "national": {
+        "noticeType": "cn-standard",
+        "xml": "https://ted.europa.eu/en/notice/738848-2026/xml",
+        "noticeDocument": "https://ted.europa.eu/fr/notice/738848-2026/pdf"
+      }
+    },
+    {
+      "id": "eu-ted:739674-2026",
+      "connectorId": "eu-ted",
+      "noticeId": "739674-2026",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "France – Services d'assistance relative aux logiciels – Prestations de support de maintenance corrective et évolutive sur les produits SAP BO",
+      "description": "Prestations de support de maintenance corrective et évolutive sur les produits SAP BO - Lot unique",
+      "language": "fr",
+      "buyer": {
+        "name": "Conseil régional Auvergne-Rhône-Alpes",
+        "legalId": "20005376700014",
+        "country": "fr",
+        "city": "Lyon Cedex 2"
+      },
+      "cpv": [
+        "72261000"
+      ],
+      "nature": "services",
+      "procedure": "open",
+      "value": {
+        "amount": 600000,
+        "currency": "EUR",
+        "estimated": true
+      },
+      "lots": [],
+      "publishedAt": "2026-10-26",
+      "deadline": "2026-11-30T12:00:00+02:00",
+      "documentsUrl": "https://marchespublics.auvergnerhonealpes.eu",
+      "documentsAccess": "unknown",
+      "submissionUrl": "https://marchespublics.auvergnerhonealpes.eu",
+      "places": [
+        "FRK26",
+        "FRA"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://ted.europa.eu/en/notice/-/detail/739674-2026",
+      "coverage": "above-threshold",
+      "aliases": [
+        "739674-2026",
+        "1edd0540-c08a-4302-a308-185a7a3faa90",
+        "5b10d760-c6df-4f1c-860b-be26a19ec1bb"
+      ],
+      "national": {
+        "noticeType": "cn-standard",
+        "xml": "https://ted.europa.eu/en/notice/739674-2026/xml",
+        "noticeDocument": "https://ted.europa.eu/fr/notice/739674-2026/pdf"
+      }
+    },
+    {
+      "id": "eu-ted:739740-2026",
+      "connectorId": "eu-ted",
+      "noticeId": "739740-2026",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "France – Production de films et de vidéos à usage pédagogique – RÉALISATION DE DISPOSITIFS NUMÉRIQUES POUR L’EXPOSITION TEMPORAIRE – PACIFIQUE, DE NANTES AU GRAND OCÉAN",
+      "description": "Le marché a pour objet la réalisation du film cartographique qui sera diffusé dans la partie introductive de l’exposition Pacifique.\n\nLe marché a pour objet la réalisation d’un dispositif interactif ayant pour objectif d’informer le public sur le voyage de Louis-Antoine de Bougainville, explorateur et écrivain français, et de son équipage à bord des bateaux la Boudeuse et l’Etoile, de 1766 à 1769.\n\nLe marché a pour objet la réalisation d’un film pédagogique ayant pour sujet les mythes des figures de la va-hiné, du cannibale et du « bon sauvage ».\n\nLe marché a pour objet la réalisation d’un film relatif au commerce de la baleine (1820-1845) qui sera diffusé dans la partie 2 de l’exposition dédiée au commerce de la baleine.",
+      "language": "fr",
+      "buyer": {
+        "name": "Société publique locale Le Voyage à Nantes",
+        "legalId": "482414216",
+        "country": "fr",
+        "city": "Nantes"
+      },
+      "cpv": [
+        "92111100",
+        "72212520"
+      ],
+      "nature": "services",
+      "procedure": "oth-single",
+      "lots": [
+        {
+          "id": "LOT-0001",
+          "title": "LOT 1 : Réalisation d’un film « Cartographie du Pacifique »"
+        },
+        {
+          "id": "LOT-0002",
+          "title": "LOT 2 : Réalisation d’un dispositif interactif « Le Voyage de Bougainville »"
+        },
+        {
+          "id": "LOT-0003",
+          "title": "LOT 3 : Réalisation d’un film « Déconstruire les mythes : les figures de la vahiné, du cannibale et du bon sauvage »"
+        },
+        {
+          "id": "LOT-0004",
+          "title": "LOT 4 : Réalisation d’un film au sujet de l’expédition du baleinier « le Triton »"
+        }
+      ],
+      "publishedAt": "2026-10-26",
+      "deadline": "2026-11-26T14:00:00+01:00",
+      "documentsUrl": "http://marches-securises.fr",
+      "documentsAccess": "unknown",
+      "submissionUrl": "http://marches-securises.fr",
+      "places": [
+        "FRG01",
+        "FRA"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://ted.europa.eu/en/notice/-/detail/739740-2026",
+      "coverage": "above-threshold",
+      "aliases": [
+        "739740-2026",
+        "a1c34d91-00c6-4ffd-a89a-606266b3c424",
+        "f15b4148-c3d5-44a3-8663-edaf63ffb026"
+      ],
+      "national": {
+        "noticeType": "cn-standard",
+        "xml": "https://ted.europa.eu/en/notice/739740-2026/xml",
+        "noticeDocument": "https://ted.europa.eu/fr/notice/739740-2026/pdf"
+      }
+    },
+    {
+      "id": "eu-ted:739769-2026",
+      "connectorId": "eu-ted",
+      "noticeId": "739769-2026",
+      "country": "fr",
+      "kind": "call",
+      "status": "unknown",
+      "title": "France – Services de programmation et de conseil en logiciels – Mise en place d'un chatbot à destination client pour le site actionlogement.fr",
+      "description": "Le périmètre du marché comprend notamment : - L'analyse du besoin et des parcours utilisateurs ; - La conception de l'architecture fonctionnelle et technique ; - La mise à disposition et la configuration de la solution ; - L'intégration au site internet et aux extranets concernés ; - L'intégration et l'exploitation des sources de connaissances ; - La sécurisation et le contrôle des réponses ; - Les tests, la recette et la mise en production ; - La formation, l'accompagnement au démarrage et le transfert de compétences ; - La maintenance, le support et l'amélioration continue ; - Le suivi des performances, des usages et des consommations",
+      "language": "fr",
+      "buyer": {
+        "name": "ACTION LOGEMENT SERVICES",
+        "legalId": "44830",
+        "country": "fr",
+        "city": "Paris"
+      },
+      "cpv": [
+        "72200000"
+      ],
+      "nature": "services",
+      "procedure": "neg-w-call",
+      "value": {
+        "amount": 316000,
+        "currency": "EUR",
+        "estimated": true
+      },
+      "lots": [],
+      "publishedAt": "2026-10-26",
+      "documentsUrl": "https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=dematEnt.login&type=DCE&IDM=1891214",
+      "documentsAccess": "unknown",
+      "submissionUrl": "https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=demat.termes&IDM=1891214",
+      "places": [
+        "FR101",
+        "FRA"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://ted.europa.eu/en/notice/-/detail/739769-2026",
+      "coverage": "above-threshold",
+      "aliases": [
+        "739769-2026",
+        "4cf8927a-a1ea-462e-b601-03ac52de1ae3",
+        "1e6ef845-0f24-4d8c-b436-dc71efd0273a"
+      ],
+      "national": {
+        "noticeType": "cn-standard",
+        "xml": "https://ted.europa.eu/en/notice/739769-2026/xml",
+        "noticeDocument": "https://ted.europa.eu/fr/notice/739769-2026/pdf"
+      }
+    },
+    {
+      "id": "eu-ted:739835-2026",
+      "connectorId": "eu-ted",
+      "noticeId": "739835-2026",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "France – Services de développement de logiciels divers et systèmes informatiques – Evolutions applicatives et maintien en conditions opérationnelles du logiciel libre « Bien VU » pour la gestion des signalements avec son framework Lutèce",
+      "description": "Evolutions applicatives et maintien en conditions opérationnelles du logiciel libre « Bien VU » pour la gestion des signalements avec son framework Lutèce",
+      "language": "fr",
+      "buyer": {
+        "name": "Etablissement Public Territorial Plaine Commune",
+        "legalId": "20005786700018",
+        "country": "fr",
+        "city": "Saint-Denis"
+      },
+      "cpv": [
+        "72212900"
+      ],
+      "nature": "services",
+      "procedure": "open",
+      "lots": [],
+      "publishedAt": "2026-10-26",
+      "deadline": "2026-11-26T12:00:00+02:00",
+      "documentsUrl": "https://marches.maximilien.fr/entreprise/consultation/949384?orgAcronyme=p2q",
+      "documentsAccess": "unknown",
+      "submissionUrl": "https://marches.maximilien.fr/entreprise/consultation/949384?orgAcronyme=p2q",
+      "places": [
+        "FR106",
+        "FRA"
+      ],
+      "criteria": [
+        {
+          "name": "Prix des prestations - 40 %"
+        },
+        {
+          "name": "Valeur technique - 50 %"
+        },
+        {
+          "name": "Performance environnementale - 5 %"
+        },
+        {
+          "name": "Performance en matière d’insertion sociale - 5 %"
+        }
+      ],
+      "awards": [],
+      "sourceUrl": "https://ted.europa.eu/en/notice/-/detail/739835-2026",
+      "coverage": "above-threshold",
+      "aliases": [
+        "739835-2026",
+        "635c4126-b116-48fa-9af0-f25a6508b752",
+        "48675240-7187-4de3-9ae8-cd58a1bef821"
+      ],
+      "national": {
+        "noticeType": "cn-standard",
+        "xml": "https://ted.europa.eu/en/notice/739835-2026/xml",
+        "noticeDocument": "https://ted.europa.eu/fr/notice/739835-2026/pdf"
+      }
+    }
+  ],
+  "total": 71,
+  "truncated": true,
+  "reason": "TED reports 71 notices for this query; the lane stopped at --limit 12",
+  "notes": []
+}

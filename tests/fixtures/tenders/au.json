@@ -1,0 +1,210 @@
+{
+ "uri": "https://api.tenders.gov.au/ocds/findByDates/contractPublished/2026-10-01T00:00:00Z/2026-10-02T00:00:00Z",
+ "publisher": {
+  "name": "Department of Finance"
+ },
+ "publishedDate": "2026-10-01T23:51:13Z",
+ "license": "https://creativecommons.org/licenses/by/3.0/au/",
+ "version": "1.1",
+ "releases": [
+  {
+   "ocid": "prod-65f4a315a47a4a62aa475c59e1944949",
+   "id": "prod-65f4a315a47a4a62aa475c59e1944949-bc1c0941fc8d3de982e8632e1aaeb39a",
+   "date": "2026-10-01T23:51:13Z",
+   "initiationType": "tender",
+   "language": "EN",
+   "parties": [
+    {
+     "id": "532eee085b68427daee8bb1fccac86dc",
+     "name": "Munupi Aboriginal Corporation",
+     "additionalIdentifiers": [
+      {
+       "id": "65988953849",
+       "scheme": "AU-ABN"
+      }
+     ],
+     "address": {
+      "locality": "BERRIMAH",
+      "region": "NT",
+      "postalCode": "0828",
+      "countryName": "AUSTRALIA"
+     },
+     "contactPoint": {
+      "name": "Procurement and Contracts",
+      "email": "procurement@niaa.gov.au"
+     },
+     "roles": [
+      "supplier"
+     ]
+    },
+    {
+     "id": "c778ae1a72bb46888a614711b6ed5f21",
+     "name": "National Indigenous Australians Agency",
+     "roles": [
+      "procuringEntity"
+     ],
+     "additionalIdentifiers": [
+      {
+       "id": "30429895164",
+       "scheme": "AU-ABN"
+      }
+     ],
+     "address": {},
+     "contactPoint": {
+      "email": "tenders@finance.gov.au"
+     }
+    }
+   ],
+   "awards": [
+    {
+     "id": "CN4280221-da775ca26c734f5eb2c07b501f71fb5c",
+     "suppliers": [
+      {
+       "id": "532eee085b68427daee8bb1fccac86dc",
+       "name": "Munupi Aboriginal Corporation"
+      }
+     ],
+     "status": "active",
+     "date": "2026-10-01T23:51:13Z"
+    }
+   ],
+   "contracts": [
+    {
+     "id": "CN4280221",
+     "awardID": "CN4280221-da775ca26c734f5eb2c07b501f71fb5c",
+     "dateSigned": "2026-10-01T23:51:13Z",
+     "description": "Stakeholder Engagement and Consultation Services",
+     "title": "NCD11811",
+     "items": [
+      {
+       "id": "80101504-da775ca26c734f5eb2c07b501f71fb5c",
+       "classification": {
+        "scheme": "UNSPSC",
+        "id": "80101504"
+       }
+      }
+     ],
+     "period": {
+      "startDate": "2026-09-22T14:00:00Z",
+      "endDate": "2027-06-29T14:00:00Z"
+     },
+     "value": {
+      "currency": "AUD",
+      "amount": "44490.60"
+     },
+     "status": "active"
+    }
+   ],
+   "tag": [
+    "contract"
+   ],
+   "tender": {
+    "id": "prod-65f4a315a47a4a62aa475c59e1944949",
+    "procurementMethod": "limited",
+    "procurementMethodDetails": "Limited tender",
+    "limitedTenderExempt": "1"
+   }
+  },
+  {
+   "ocid": "prod-200a74142591492fadafce25d4e47d45",
+   "id": "prod-200a74142591492fadafce25d4e47d45-c4af0de0f9e839a99b7d26c30a25f2b6",
+   "date": "2026-10-01T23:44:22Z",
+   "initiationType": "tender",
+   "language": "EN",
+   "parties": [
+    {
+     "id": "29e91f4c0a68487fa7d5bae0e976eede",
+     "name": "The Trustee for Portamini Trust",
+     "additionalIdentifiers": [
+      {
+       "id": "40386268436",
+       "scheme": "AU-ABN"
+      }
+     ],
+     "address": {
+      "locality": "Darwin",
+      "region": "NT",
+      "postalCode": "0800",
+      "countryName": "AUSTRALIA"
+     },
+     "contactPoint": {
+      "name": "Procurement and Contracts",
+      "email": "procurement@niaa.gov.au"
+     },
+     "roles": [
+      "supplier"
+     ]
+    },
+    {
+     "id": "c778ae1a72bb46888a614711b6ed5f21",
+     "name": "National Indigenous Australians Agency",
+     "roles": [
+      "procuringEntity"
+     ],
+     "additionalIdentifiers": [
+      {
+       "id": "30429895164",
+       "scheme": "AU-ABN"
+      }
+     ],
+     "address": {},
+     "contactPoint": {
+      "email": "tenders@finance.gov.au"
+     }
+    }
+   ],
+   "awards": [
+    {
+     "id": "CN4280220-83fd53c67f5d4dda89b0e8a001e8505a",
+     "suppliers": [
+      {
+       "id": "29e91f4c0a68487fa7d5bae0e976eede",
+       "name": "The Trustee for Portamini Trust"
+      }
+     ],
+     "status": "active",
+     "date": "2026-10-01T23:44:22Z"
+    }
+   ],
+   "contracts": [
+    {
+     "id": "CN4280220",
+     "awardID": "CN4280220-83fd53c67f5d4dda89b0e8a001e8505a",
+     "dateSigned": "2026-10-01T23:44:22Z",
+     "description": "Stakeholder engagement and consultation services",
+     "title": "NCD11809",
+     "items": [
+      {
+       "id": "80101504-83fd53c67f5d4dda89b0e8a001e8505a",
+       "classification": {
+        "scheme": "UNSPSC",
+        "id": "80101504"
+       }
+      }
+     ],
+     "period": {
+      "startDate": "2026-09-22T14:00:00Z",
+      "endDate": "2027-06-29T14:00:00Z"
+     },
+     "value": {
+      "currency": "AUD",
+      "amount": "44490.60"
+     },
+     "status": "active"
+    }
+   ],
+   "tag": [
+    "contract"
+   ],
+   "tender": {
+    "id": "prod-200a74142591492fadafce25d4e47d45",
+    "procurementMethod": "limited",
+    "procurementMethodDetails": "Limited tender",
+    "limitedTenderExempt": "1"
+   }
+  }
+ ],
+ "extensions": [
+  "http://cdn.tenders.gov.au/ocds/schema/extension.json"
+ ]
+}

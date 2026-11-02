@@ -1,0 +1,322 @@
+{
+ "totalNoticeCount": 297,
+ "notices": [
+  {
+   "place-of-performance": [
+    "FRE11",
+    "FRA",
+    "FRE11",
+    "FRE11",
+    "FRA",
+    "FRA"
+   ],
+   "deadline-receipt-tender-date-lot": [
+    "2026-11-23+02:00",
+    "2026-11-23+02:00"
+   ],
+   "notice-type": "cn-standard",
+   "publication-number": "722908-2026",
+   "buyer-country": [
+    "FRA"
+   ],
+   "document-url-lot": [
+    "https://marchespublics596280.fr/entreprise/consultation/588234?orgAcronyme=5C371",
+    "https://marchespublics596280.fr/entreprise/consultation/588234?orgAcronyme=5C371"
+   ],
+   "description-lot": {
+    "fra": [
+     "Le marché est un accord-cadre à bons de commande et à marchés subséquents multi-attributaire sans montant minimum et d'un montant maximum de 600 000 € HT sur la durée totale du marché (4 ans)",
+     "Le marché est un accord-cadre à bons de commande et à marchés subséquents multi-attributaire sans montant minimum et d'un montant maximum de 350 000 € HT sur la durée totale du marché (4 ans)"
+    ]
+   },
+   "procedure-type": "open",
+   "classification-cpv": [
+    "72000000",
+    "72000000",
+    "72000000"
+   ],
+   "contract-nature": [
+    "services",
+    "services",
+    "services"
+   ],
+   "buyer-name": {
+    "fra": [
+     "Métropole européenne de Lille"
+    ]
+   },
+   "publication-date": "2026-10-20+02:00",
+   "links": {
+    "xml": {
+     "MUL": "https://ted.europa.eu/en/notice/722908-2026/xml"
+    },
+    "pdf": {
+     "BUL": "https://ted.europa.eu/bg/notice/722908-2026/pdf",
+     "SPA": "https://ted.europa.eu/es/notice/722908-2026/pdf",
+     "CES": "https://ted.europa.eu/cs/notice/722908-2026/pdf",
+     "DAN": "https://ted.europa.eu/da/notice/722908-2026/pdf",
+     "DEU": "https://ted.europa.eu/de/notice/722908-2026/pdf",
+     "EST": "https://ted.europa.eu/et/notice/722908-2026/pdf",
+     "ELL": "https://ted.europa.eu/el/notice/722908-2026/pdf",
+     "ENG": "https://ted.europa.eu/en/notice/722908-2026/pdf",
+     "FRA": "https://ted.europa.eu/fr/notice/722908-2026/pdf",
+     "GLE": "https://ted.europa.eu/ga/notice/722908-2026/pdf",
+     "HRV": "https://ted.europa.eu/hr/notice/722908-2026/pdf",
+     "ITA": "https://ted.europa.eu/it/notice/722908-2026/pdf",
+     "LAV": "https://ted.europa.eu/lv/notice/722908-2026/pdf",
+     "LIT": "https://ted.europa.eu/lt/notice/722908-2026/pdf",
+     "HUN": "https://ted.europa.eu/hu/notice/722908-2026/pdf",
+     "MLT": "https://ted.europa.eu/mt/notice/722908-2026/pdf",
+     "NLD": "https://ted.europa.eu/nl/notice/722908-2026/pdf",
+     "POL": "https://ted.europa.eu/pl/notice/722908-2026/pdf",
+     "POR": "https://ted.europa.eu/pt/notice/722908-2026/pdf",
+     "RON": "https://ted.europa.eu/ro/notice/722908-2026/pdf",
+     "SLK": "https://ted.europa.eu/sk/notice/722908-2026/pdf",
+     "SLV": "https://ted.europa.eu/sl/notice/722908-2026/pdf",
+     "FIN": "https://ted.europa.eu/fi/notice/722908-2026/pdf",
+     "SWE": "https://ted.europa.eu/sv/notice/722908-2026/pdf"
+    },
+    "pdfs": {
+     "FRA": "https://ted.europa.eu/fr/notice/722908-2026/pdfs"
+    },
+    "html": {
+     "BUL": "https://ted.europa.eu/bg/notice/-/detail/722908-2026",
+     "SPA": "https://ted.europa.eu/es/notice/-/detail/722908-2026",
+     "CES": "https://ted.europa.eu/cs/notice/-/detail/722908-2026",
+     "DAN": "https://ted.europa.eu/da/notice/-/detail/722908-2026",
+     "DEU": "https://ted.europa.eu/de/notice/-/detail/722908-2026",
+     "EST": "https://ted.europa.eu/et/notice/-/detail/722908-2026",
+     "ELL": "https://ted.europa.eu/el/notice/-/detail/722908-2026",
+     "ENG": "https://ted.europa.eu/en/notice/-/detail/722908-2026",
+     "FRA": "https://ted.europa.eu/fr/notice/-/detail/722908-2026",
+     "GLE": "https://ted.europa.eu/ga/notice/-/detail/722908-2026",
+     "HRV": "https://ted.europa.eu/hr/notice/-/detail/722908-2026",
+     "ITA": "https://ted.europa.eu/it/notice/-/detail/722908-2026",
+     "LAV": "https://ted.europa.eu/lv/notice/-/detail/722908-2026",
+     "LIT": "https://ted.europa.eu/lt/notice/-/detail/722908-2026",
+     "HUN": "https://ted.europa.eu/hu/notice/-/detail/722908-2026",
+     "MLT": "https://ted.europa.eu/mt/notice/-/detail/722908-2026",
+     "NLD": "https://ted.europa.eu/nl/notice/-/detail/722908-2026",
+     "POL": "https://ted.europa.eu/pl/notice/-/detail/722908-2026",
+     "POR": "https://ted.europa.eu/pt/notice/-/detail/722908-2026",
+     "RON": "https://ted.europa.eu/ro/notice/-/detail/722908-2026",
+     "SLK": "https://ted.europa.eu/sk/notice/-/detail/722908-2026",
+     "SLV": "https://ted.europa.eu/sl/notice/-/detail/722908-2026",
+     "FIN": "https://ted.europa.eu/fi/notice/-/detail/722908-2026",
+     "SWE": "https://ted.europa.eu/sv/notice/-/detail/722908-2026"
+    },
+    "htmlDirect": {
+     "BUL": "https://ted.europa.eu/bg/notice/722908-2026/html",
+     "SPA": "https://ted.europa.eu/es/notice/722908-2026/html",
+     "CES": "https://ted.europa.eu/cs/notice/722908-2026/html",
+     "DAN": "https://ted.europa.eu/da/notice/722908-2026/html",
+     "DEU": "https://ted.europa.eu/de/notice/722908-2026/html",
+     "EST": "https://ted.europa.eu/et/notice/722908-2026/html",
+     "ELL": "https://ted.europa.eu/el/notice/722908-2026/html",
+     "ENG": "https://ted.europa.eu/en/notice/722908-2026/html",
+     "FRA": "https://ted.europa.eu/fr/notice/722908-2026/html",
+     "GLE": "https://ted.europa.eu/ga/notice/722908-2026/html",
+     "HRV": "https://ted.europa.eu/hr/notice/722908-2026/html",
+     "ITA": "https://ted.europa.eu/it/notice/722908-2026/html",
+     "LAV": "https://ted.europa.eu/lv/notice/722908-2026/html",
+     "LIT": "https://ted.europa.eu/lt/notice/722908-2026/html",
+     "HUN": "https://ted.europa.eu/hu/notice/722908-2026/html",
+     "MLT": "https://ted.europa.eu/mt/notice/722908-2026/html",
+     "NLD": "https://ted.europa.eu/nl/notice/722908-2026/html",
+     "POL": "https://ted.europa.eu/pl/notice/722908-2026/html",
+     "POR": "https://ted.europa.eu/pt/notice/722908-2026/html",
+     "RON": "https://ted.europa.eu/ro/notice/722908-2026/html",
+     "SLK": "https://ted.europa.eu/sk/notice/722908-2026/html",
+     "SLV": "https://ted.europa.eu/sl/notice/722908-2026/html",
+     "FIN": "https://ted.europa.eu/fi/notice/722908-2026/html",
+     "SWE": "https://ted.europa.eu/sv/notice/722908-2026/html"
+    }
+   },
+   "notice-title": {
+    "hun": "Franciaország – IT-szolgáltatások: tanácsadás, szoftverfejlesztés, internet és támogatás – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "lav": "Francija – IT pakalpojumi konsultēšana, programmatūras izstrāde, internets un atbalsts – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "swe": "Frankrike – IT-tjänster: konsultverksamhet, programvaruutveckling, Internet och stöd – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "gle": "An Fhrainc – IT services: consulting, software development, Internet and support – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "ell": "Γαλλία – Υπηρεσίες τεχνολογίας των πληροφοριών: παροχή συμβουλών, ανάπτυξη λογισμικού, Διαδίκτυο και υποστήριξη – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "spa": "Francia – Servicios TI: consultoría, desarrollo de software, Internet y apoyo – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "est": "Prantsusmaa – IT-teenused: nõuande-, tarkvaraarendus-, Interneti- ja tugiteenused – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "nld": "Frankrijk – IT-diensten: adviezen, softwareontwikkeling, internet en ondersteuning – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "fin": "Ranska – Tietotekniset palvelut: neuvonta, ohjelmistojen kehittäminen, Internet ja tuki – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "pol": "Francja – Usługi informatyczne: konsultacyjne, opracowywania oprogramowania, internetowe i wsparcia – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "hrv": "Francuska – Usluge informacijske tehnologije: savjetovanje, razvoj programske podrške, internet i podrška – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "ces": "Francie – Informační technologie: poradenství, vývoj programového vybavení, internet a podpora – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "dan": "Frankrig – It-tjenester: rådgivning, programmeludvikling, internet og support – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "ron": "Franţa – Servicii IT: consultanţă, dezvoltare de software, internet şi asistenţă – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "por": "França – Serviços de TI: consultoria, desenvolvimento de software, Internet e apoio – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "slk": "Francúzsko – Služby informačných technológií: konzultácie, vývoj softvéru, internet a podpora – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "fra": "France – Services de technologies de l'information, conseil, développement de logiciels, internet et appui – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "mlt": "Franza – Servizzi ta' IT: konsulenza, żvilupp ta' softwer, Internet u appoġġ – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "deu": "Frankreich – IT-Dienste: Beratung, Software-Entwicklung, Internet und Hilfestellung – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "lit": "Prancūzija – IT paslaugos: konsultavimas, programinės įrangos kūrimas, internetas ir aptarnavimo paslaugos – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "ita": "Francia – Servizi informatici: consulenza, sviluppo di software, Internet e supporto – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "bul": "Фpaнция – ИТ услуги: консултации, разработване на софтуер, Интернет и поддръжка – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "slv": "Francija – Storitve informacijske tehnologije: svetovanje, razvoj programske opreme, internet in podpora – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille",
+    "eng": "France – IT services: consulting, software development, Internet and support – Prestations de développement numérique, d'information et d'accompagnement aux usages sur dataMEL - plateforme métropolitaine de données open source de la Métropole Européenne de Lille"
+   },
+   "organisation-identifier-buyer": [
+    "20009320100081"
+   ]
+  },
+  {
+   "place-of-performance": [
+    "DE715",
+    "DEU",
+    "DE715",
+    "DEU"
+   ],
+   "deadline-receipt-tender-date-lot": [
+    "2026-10-29+01:00"
+   ],
+   "notice-type": "cn-standard",
+   "publication-number": "722921-2026",
+   "buyer-country": [
+    "DEU"
+   ],
+   "document-url-lot": [
+    "https://www.had.de/NetServer/TenderingProcedureDetails?function=_Details&TenderOID=54321-Tender-1a0ec85b0be-37b2bd47ba254728"
+   ],
+   "description-lot": {
+    "deu": [
+     "Gegenstand der Leistung ist die Bereitstellung und der Betrieb einer KI-Kompetenzplattform sowie die Durchführung darauf aufsetzender Qualifizierungsangebote über einen Betriebszeitraum von 6,5 Monaten. Die Leistung umfasst die folgenden drei aufeinander abgestimmten Komponenten: 1.KI-Kompetenzplattfor: Bereitstellung einer mandantenfähigen SaaS-Lernplattform als technische Grundlage der Qualifizierungsangebote 2. KI-Grundlagenqualifizierung: On-Demand-Lernprogramm zum Aufbau breiter KI-Grundkompetenzen einschließlich Pflichtteil gemäß Art. 4 EU-KI-VO 3. KI-Aufbauqualifizierung: Moderierte Online-Workshops zur vertieften Kompetenzentwicklung mit Wissensdatenbank und Community-Ansatz Die drei Komponenten sind als Gesamtleistung (\"aus einer Hand\") zu erbringen. Die KI-Kompetenzplattform stellt die technische Grundlage dar, auf der sowohl die Grundlagen- als auch die Aufbauqualifizierung bereitgestellt, genutzt und administriert werden."
+    ]
+   },
+   "procedure-type": "open",
+   "classification-cpv": [
+    "80522000",
+    "72268000",
+    "80522000",
+    "72268000"
+   ],
+   "contract-nature": [
+    "services",
+    "services"
+   ],
+   "buyer-name": {
+    "deu": [
+     "Neue Wege Kreis Bergstraße - Kommunales Jobcenter -"
+    ]
+   },
+   "publication-date": "2026-10-20+02:00",
+   "links": {
+    "xml": {
+     "MUL": "https://ted.europa.eu/en/notice/722921-2026/xml"
+    },
+    "pdf": {
+     "BUL": "https://ted.europa.eu/bg/notice/722921-2026/pdf",
+     "SPA": "https://ted.europa.eu/es/notice/722921-2026/pdf",
+     "CES": "https://ted.europa.eu/cs/notice/722921-2026/pdf",
+     "DAN": "https://ted.europa.eu/da/notice/722921-2026/pdf",
+     "DEU": "https://ted.europa.eu/de/notice/722921-2026/pdf",
+     "EST": "https://ted.europa.eu/et/notice/722921-2026/pdf",
+     "ELL": "https://ted.europa.eu/el/notice/722921-2026/pdf",
+     "ENG": "https://ted.europa.eu/en/notice/722921-2026/pdf",
+     "FRA": "https://ted.europa.eu/fr/notice/722921-2026/pdf",
+     "GLE": "https://ted.europa.eu/ga/notice/722921-2026/pdf",
+     "HRV": "https://ted.europa.eu/hr/notice/722921-2026/pdf",
+     "ITA": "https://ted.europa.eu/it/notice/722921-2026/pdf",
+     "LAV": "https://ted.europa.eu/lv/notice/722921-2026/pdf",
+     "LIT": "https://ted.europa.eu/lt/notice/722921-2026/pdf",
+     "HUN": "https://ted.europa.eu/hu/notice/722921-2026/pdf",
+     "MLT": "https://ted.europa.eu/mt/notice/722921-2026/pdf",
+     "NLD": "https://ted.europa.eu/nl/notice/722921-2026/pdf",
+     "POL": "https://ted.europa.eu/pl/notice/722921-2026/pdf",
+     "POR": "https://ted.europa.eu/pt/notice/722921-2026/pdf",
+     "RON": "https://ted.europa.eu/ro/notice/722921-2026/pdf",
+     "SLK": "https://ted.europa.eu/sk/notice/722921-2026/pdf",
+     "SLV": "https://ted.europa.eu/sl/notice/722921-2026/pdf",
+     "FIN": "https://ted.europa.eu/fi/notice/722921-2026/pdf",
+     "SWE": "https://ted.europa.eu/sv/notice/722921-2026/pdf"
+    },
+    "pdfs": {
+     "DEU": "https://ted.europa.eu/de/notice/722921-2026/pdfs"
+    },
+    "html": {
+     "BUL": "https://ted.europa.eu/bg/notice/-/detail/722921-2026",
+     "SPA": "https://ted.europa.eu/es/notice/-/detail/722921-2026",
+     "CES": "https://ted.europa.eu/cs/notice/-/detail/722921-2026",
+     "DAN": "https://ted.europa.eu/da/notice/-/detail/722921-2026",
+     "DEU": "https://ted.europa.eu/de/notice/-/detail/722921-2026",
+     "EST": "https://ted.europa.eu/et/notice/-/detail/722921-2026",
+     "ELL": "https://ted.europa.eu/el/notice/-/detail/722921-2026",
+     "ENG": "https://ted.europa.eu/en/notice/-/detail/722921-2026",
+     "FRA": "https://ted.europa.eu/fr/notice/-/detail/722921-2026",
+     "GLE": "https://ted.europa.eu/ga/notice/-/detail/722921-2026",
+     "HRV": "https://ted.europa.eu/hr/notice/-/detail/722921-2026",
+     "ITA": "https://ted.europa.eu/it/notice/-/detail/722921-2026",
+     "LAV": "https://ted.europa.eu/lv/notice/-/detail/722921-2026",
+     "LIT": "https://ted.europa.eu/lt/notice/-/detail/722921-2026",
+     "HUN": "https://ted.europa.eu/hu/notice/-/detail/722921-2026",
+     "MLT": "https://ted.europa.eu/mt/notice/-/detail/722921-2026",
+     "NLD": "https://ted.europa.eu/nl/notice/-/detail/722921-2026",
+     "POL": "https://ted.europa.eu/pl/notice/-/detail/722921-2026",
+     "POR": "https://ted.europa.eu/pt/notice/-/detail/722921-2026",
+     "RON": "https://ted.europa.eu/ro/notice/-/detail/722921-2026",
+     "SLK": "https://ted.europa.eu/sk/notice/-/detail/722921-2026",
+     "SLV": "https://ted.europa.eu/sl/notice/-/detail/722921-2026",
+     "FIN": "https://ted.europa.eu/fi/notice/-/detail/722921-2026",
+     "SWE": "https://ted.europa.eu/sv/notice/-/detail/722921-2026"
+    },
+    "htmlDirect": {
+     "BUL": "https://ted.europa.eu/bg/notice/722921-2026/html",
+     "SPA": "https://ted.europa.eu/es/notice/722921-2026/html",
+     "CES": "https://ted.europa.eu/cs/notice/722921-2026/html",
+     "DAN": "https://ted.europa.eu/da/notice/722921-2026/html",
+     "DEU": "https://ted.europa.eu/de/notice/722921-2026/html",
+     "EST": "https://ted.europa.eu/et/notice/722921-2026/html",
+     "ELL": "https://ted.europa.eu/el/notice/722921-2026/html",
+     "ENG": "https://ted.europa.eu/en/notice/722921-2026/html",
+     "FRA": "https://ted.europa.eu/fr/notice/722921-2026/html",
+     "GLE": "https://ted.europa.eu/ga/notice/722921-2026/html",
+     "HRV": "https://ted.europa.eu/hr/notice/722921-2026/html",
+     "ITA": "https://ted.europa.eu/it/notice/722921-2026/html",
+     "LAV": "https://ted.europa.eu/lv/notice/722921-2026/html",
+     "LIT": "https://ted.europa.eu/lt/notice/722921-2026/html",
+     "HUN": "https://ted.europa.eu/hu/notice/722921-2026/html",
+     "MLT": "https://ted.europa.eu/mt/notice/722921-2026/html",
+     "NLD": "https://ted.europa.eu/nl/notice/722921-2026/html",
+     "POL": "https://ted.europa.eu/pl/notice/722921-2026/html",
+     "POR": "https://ted.europa.eu/pt/notice/722921-2026/html",
+     "RON": "https://ted.europa.eu/ro/notice/722921-2026/html",
+     "SLK": "https://ted.europa.eu/sk/notice/722921-2026/html",
+     "SLV": "https://ted.europa.eu/sl/notice/722921-2026/html",
+     "FIN": "https://ted.europa.eu/fi/notice/722921-2026/html",
+     "SWE": "https://ted.europa.eu/sv/notice/722921-2026/html"
+    }
+   },
+   "notice-title": {
+    "hun": "Németország – Képzési szeminárium – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "lav": "Vācija – Mācību semināri – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "swe": "Tyskland – Utbildningsseminarier – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "gle": "An Ghearmáin – Training seminars – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "ell": "Γερμανία – Σεμινάρια κατάρτισης – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "spa": "Alemania – Seminarios de formación – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "est": "Saksamaa – Koolitusseminarid – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "nld": "Duitsland – Opleidingsseminars – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "fin": "Saksa – Koulutusseminaarit – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "pol": "Niemcy – Seminaria szkoleniowe – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "hrv": "Njemačka – Obrazovni seminari – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "ces": "Německo – Vzdělávací semináře – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "dan": "Tyskland – Uddannelsesseminarer – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "ron": "Germania – Seminarii de formare – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "por": "Alemanha – Seminários de formação – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "slk": "Nemecko – Školiace semináre – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "fra": "Allemagne – Séminaires de formation – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "mlt": "Il-Ġermanja – Seminars tat-taħriġ – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "deu": "Deutschland – Schulungsseminare – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "lit": "Vokietija – Mokomieji seminarai – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "ita": "Germania – Seminari di formazione – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "bul": "Гepмaния – Семинари за обучение – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "slv": "Nemčija – Izobraževalni seminarji – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung",
+    "eng": "Germany – Training seminars – Bereitstellung einer KI-Kompetenzplattform sowie Durchführung von KI-Grundlagen- und KI-Aufbauqualifizierung"
+   },
+   "organisation-identifier-buyer": [
+    "T496252156000"
+   ]
+  }
+ ]
+}

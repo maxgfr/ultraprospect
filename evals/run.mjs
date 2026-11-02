@@ -141,6 +141,35 @@ async function offline() {
   const second = JSON.parse(run(["scan", "--fixture", fixture, "--out", out, "--json"]));
   const placesAgain = JSON.parse(readFileSync(join(second.run, "places.json"), "utf8"));
   check("a replayed sweep is deterministic", JSON.stringify(places.map((p) => p.id)) === JSON.stringify(placesAgain.map((p) => p.id)));
+
+  await offlineTenders(out);
+}
+
+async function offlineTenders(out) {
+  // A recorded French tenders run — TED and BOAMP — replayed through the
+  // whole tenders pipeline: search, worklist, gate, render.
+  const fixture = join(root, "assets", "fixtures", "tenders-fr");
+  const args = ["tenders", "--country", "fr", "--cpv", "72", "--keywords", "logiciel,informatique", "--fixture", fixture, "--out", out, "--json"];
+  const first = JSON.parse(run(args));
+  const runDir = first.run;
+  const manifest = JSON.parse(readFileSync(join(runDir, "manifest.json"), "utf8"));
+  const tenders = JSON.parse(readFileSync(join(runDir, "tenders.json"), "utf8"));
+  const todo = JSON.parse(readFileSync(join(runDir, "TENDERS.todo.json"), "utf8"));
+  check("tenders: the manifest is a tenders run", manifest.kind === "tenders");
+  check("tenders: one lane per source that answered", manifest.lanes.some((l) => l.connectorId === "eu-ted") && manifest.lanes.some((l) => l.connectorId === "fr-boamp"));
+  check("tenders: a partial source makes the run truncated", !manifest.lanes.some((l) => l.truncated) || manifest.truncated === true);
+  check("tenders: TED's attribution travels with the run", manifest.licences.some((l) => l.includes("TED")));
+  check("tenders: notice ids are unique", new Set(tenders.map((t) => t.id)).size === tenders.length);
+  check("tenders: every notice declares its coverage", tenders.every((t) => typeof t.coverage === "string"));
+  check("tenders: no deadline is invented — every one is a published string or absent", tenders.every((t) => t.deadline === undefined || typeof t.deadline === "string"));
+  check("tenders: the worklist holds only calls", todo.items.every((i) => i.kind === "call"));
+  const gate = JSON.parse(run(["check", "--run", runDir, "--json"]));
+  check("tenders: check passes a run with no bids yet", gate.ok === true, `${gate.errors?.length} error(s)`);
+  const rendered = JSON.parse(run(["render", "--run", runDir, "--json"]));
+  check("tenders: render writes the CSV, the report and the page", ["TENDERS.csv", "REPORT.md", "index.html"].every((f) => rendered.files.some((p) => p.endsWith(f))));
+  const second = JSON.parse(run(args));
+  const again = JSON.parse(readFileSync(join(second.run, "tenders.json"), "utf8"));
+  check("tenders: a replayed search is deterministic", JSON.stringify(tenders.map((t) => t.id)) === JSON.stringify(again.map((t) => t.id)));
 }
 
 async function network() {
@@ -206,6 +235,28 @@ async function network() {
         continue;
       }
       check(`${connector.id}: ${result.name}`, result.ok, result.detail);
+    }
+  }
+
+  // The tender sources, from their own table, by the same rule: one canary per
+  // source, inconclusive never red. A source that changes its answer's shape
+  // breaks a mapper silently — this is what notices first.
+  const tenderSources = bundle.TENDER_CONNECTORS ?? [];
+  if (tenderSources.length === 0) check("the tender source table reached the eval", false, "the bundle exported no TENDER_CONNECTORS");
+  for (const source of tenderSources) {
+    let results;
+    try {
+      results = await source.canary();
+    } catch (e) {
+      check(`tenders:${source.id} canary ran`, false, `threw: ${e?.message ?? e}`);
+      continue;
+    }
+    for (const result of results) {
+      if (result.inconclusive) {
+        console.log(`  --    tenders:${source.id}: ${result.name}${result.detail ? ` — ${result.detail}` : ""}`);
+        continue;
+      }
+      check(`tenders:${source.id}: ${result.name}`, result.ok, result.detail);
     }
   }
 

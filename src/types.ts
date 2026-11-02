@@ -16,7 +16,7 @@ import type { RegistryMode, RegistryRecord } from "./registry/types.js";
  * downstream consumer read as if France were the only place with companies.
  * Which connector answered is on the record and on the lane, not in the enum.
  */
-export type Lane = "osm" | "registry" | "web" | "agent";
+export type Lane = "osm" | "registry" | "web" | "agent" | "tenders";
 
 /** A resolved geographic target: what `where` returns and `scan` searches. */
 export interface GeoTarget {
@@ -126,7 +126,21 @@ export interface PageRecord {
   extract: string;
 }
 
-export type PageRole = "home" | "about" | "services" | "products" | "pricing" | "careers" | "team" | "contact" | "news" | "cases" | "legal" | "other";
+export type PageRole =
+  | "home"
+  | "about"
+  | "services"
+  | "products"
+  | "pricing"
+  | "careers"
+  | "team"
+  | "contact"
+  | "news"
+  | "cases"
+  | "legal"
+  | "other"
+  | "notice"
+  | "document";
 
 /** A job opening, from an ATS API or a careers page. */
 export interface JobPosting {

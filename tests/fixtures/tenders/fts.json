@@ -1,0 +1,223 @@
+{
+ "uri": "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?limit=3&stages=tender&updatedTo=2026-11-02T09:39:14",
+ "version": "1.1",
+ "extensions": [
+  "https://standard.open-contracting.org/profiles/eu/latest/en/extension.json",
+  "https://raw.githubusercontent.com/open-contracting-extensions/ocds_amendment_rationale_classifications_extension/master/extension.json",
+  "https://raw.githubusercontent.com/open-contracting-extensions/ocds_budget_breakdown_extension/master/extension.json",
+  "https://raw.githubusercontent.com/open-contracting-extensions/ocds_contract_completion_extension/master/extension.json",
+  "https://raw.githubusercontent.com/open-contracting-extensions/ocds_documentation_extension/master/extension.json",
+  "https://raw.githubusercontent.com/open-contracting-extensions/ocds_pagination_extension/master/extension.json",
+  "https://raw.githubusercontent.com/open-contracting-extensions/ocds_suitability_extension/master/extension.json",
+  "https://raw.githubusercontent.com/portaledcahn/ocds_Links_extension/main/extension.json",
+  "https://raw.githubusercontent.com/cabinetoffice/ocds_uk_extension/main/extension.json"
+ ],
+ "publishedDate": "2026-10-30T14:01:06Z",
+ "publisher": {
+  "name": "Cabinet Office",
+  "scheme": "GB-GOR",
+  "uid": "D2",
+  "uri": "https://www.gov.uk/government/organisations/cabinet-office"
+ },
+ "license": "http://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+ "publicationPolicy": "https://www.gov.uk/government/publications/open-contracting",
+ "releases": [
+  {
+   "ocid": "ocds-h6vhtk-0794b8",
+   "id": "103248-2026",
+   "date": "2026-10-30T14:01:06Z",
+   "tag": [
+    "tender"
+   ],
+   "description": "Once the deadline has passed submissions can neither be created nor submitted. It is not advisable for Suppliers to wait until the last\nmoment before creating and dispatching a response in case of any last minute problems. Please note large files should be uploaded as early\nas possible to ensure transfer before deadline. If a Supplier is having problems uploading to the PCS site, then the University must be\ninformed well in advance and depending upon the merit of the case, the University may arrange for the tender to remain open on the PCS\nsystem for a short period after the deadline time stated. System problems do not fall under the University’s remit and should be referred to\nPCS.\nPostbox Security: Postbox submissions cannot be accessed by anyone, including Millstream, (the provider of the Public Contracts Scotland\nsystem) until the deadline.\nFreedom of Information\nThe Freedom of Information (Scotland) Act 2002 (FOISA), which came into force on 1 January 2005, designates University of Glasgow as\na Scottish public authority and therefore subject to the provisions and obligations in that Act. This means that any person who makes a\nvalid request for information held by University of Glasgow will be entitled to receive it, unless all or part of that information can be\nwithheld by virtue of the exemptions in that Act.\nunder the Act, University of Glasgow may be required to disclose any information held relating to your response to anyone who makes a\nrequest under that Act. Such information may only be withheld if it meets one or more of the exemptions or conditions in that Act. Even if\nan exemption is available University of Glasgow may nevertheless disclose requested information. Information held cannot simply be\nclassified as “confidential\" or \"commercial in confidence\" to enable it to be protected from disclosure.\nUniversity of Glasgow may publish the names and contact details of companies who have been issued with a Questionnaire on its website.\nInformation may also be requested under the UK General Data Protection Regulation (UK GDPR) tailored by the Data Protection Act 2018\nand the Environmental Information (Scotland) Regulations 2004.\nNOTE: To register your interest in this notice and obtain any additional information please visit the Public Contracts Scotland Web Site at https://www.publiccontractsscotland.gov.uk/Search/Search_Switch.aspx?ID=847106.\nThe buyer has indicated that it will accept electronic responses to this notice via the Postbox facility. A user guide is available at https://www.publiccontractsscotland.gov.uk/sitehelp/help_guides.aspx.\nSuppliers are advised to allow adequate time for uploading documents and to dispatch the electronic response well in advance of the closing time to avoid any last minute problems.\nCommunity benefits are included in this requirement. For more information see: https://www.gov.scot/policies/public-sector-procurement/community-benefits-in-procurement/\nA summary of the expected community benefits has been provided as follows:\nThe University has a strong commitment to Community Benefits and seeks to engage with Bidders who have likeminded policies.\nCommunity Benefits include, but are not limited to:\n- employment and training opportunities for priority groups\n- vocational training\n- up-skilling of the existing workforce\n- equality and diversity initiatives\n- making sub-contracting opportunities available to SMEs, the third sector and supported businesses\n- supply-chain development activity\n- building capacity in community organisations\n- educational support initiatives\n- work with schools, colleges and universities to offer work experience\nPlease advise what community benefits you commit to delivering as a result of this Contract?\n(SC Ref:847106)",
+   "initiationType": "tender",
+   "tender": {
+    "id": "PURCH3077",
+    "legalBasis": {
+     "id": "32014L0024",
+     "scheme": "CELEX"
+    },
+    "title": "PURCH3077 Provision of Narrow Linewidth Continuous-Wave Tunable Laser",
+    "status": "active",
+    "classification": {
+     "scheme": "CPV",
+     "id": "38000000",
+     "description": "Laboratory, optical and precision equipments (excl. glasses)"
+    },
+    "mainProcurementCategory": "goods",
+    "description": "PURCH3077 Provision of Narrow Linewidth Continuous-Wave Tunable Laser\nTender documents available from Public Contracts Scotland.\nTender returns should be submitted via Public Contracts Scotland, no paper copies will be accepted. Should paper tenders be submitted, they will be rejected. Further to this any questions or communications regarding individual tender exercises must be sent via the Public Contracts Scotland Portal. Tender queries received through any other channel will not be answered. Should users of Public Contracts Scotland have any problems with the web site they should contact website Support Desk, contact details can be found by following the ‘Contact Us’ option on the left hand menu at http://www.publiccontractsscotland.gov.uk/default.aspx",
+    "lots": [
+     {
+      "id": "1",
+      "description": "PURCH3077 Provision of Contract Agreement for Narrow Linewidth Continuous-Wave Tunable Laser for a Period of 24 Months with the Option to Extend for 2 Further Periods of 12 Months.\nThe University of Glasgow requires the supply, delivery, installation, commissioning and support of a high-performance narrow linewidth continuous-wave tunable laser system.\nPlease refer to the 'PURCH3077 - Schedule 1A - Invitation to Tender' for further details and specification.\nThis procurement process is being conducted using the Competitive Procedure with Negotiation (CPN) in accordance with the requirements of Regulation 30 of the PC(S)R 2015. Although this procurement is being conducted under the Competitive Procedure with Negotiation (CPN), it is structured differently from a typical CPN process. This approach has been adopted to enhance the efficiency of evaluating supplier responses across both stages (SPD and ITT).",
+      "awardCriteria": {
+       "criteria": [
+        {
+         "name": "Section 1 - Technical Specification",
+         "type": "quality",
+         "description": "29%"
+        },
+        {
+         "name": "Section 2 - Technical Service Support",
+         "type": "quality",
+         "description": "10%"
+        },
+        {
+         "name": "Section 3 - Environmental/Sustainable Factors",
+         "type": "quality",
+         "description": "4%"
+        },
+        {
+         "name": "Section 4 - Delivery, Installation & Acceptance Testing",
+         "type": "quality",
+         "description": "17%"
+        },
+        {
+         "type": "price",
+         "description": "40%"
+        }
+       ]
+      },
+      "contractPeriod": {
+       "durationInDays": 720
+      },
+      "hasRenewal": true,
+      "renewal": {
+       "description": "Initial term of 24 months with the option to extend by 2 x 12 months"
+      },
+      "secondStage": {
+       "minimumCandidates": 3
+      },
+      "submissionTerms": {
+       "variantPolicy": "notAllowed"
+      },
+      "hasOptions": false,
+      "status": "active"
+     }
+    ],
+    "items": [
+     {
+      "id": "1",
+      "deliveryAddresses": [
+       {
+        "region": "UKM82"
+       }
+      ],
+      "relatedLot": "1"
+     }
+    ],
+    "submissionMethod": [
+     "electronicSubmission"
+    ],
+    "submissionMethodDetails": "https://www.publiccontractsscotland.gov.uk/",
+    "selectionCriteria": {
+     "criteria": [
+      {
+       "minimum": "- Product liability insurance with a limit of indemnity of not less than one million pounds sterling (1,000,000 GBP) in relation to any one claim or series of claims;\n-Public liability insurance with a limit of indemnity of not less than five million pounds sterling (5,000,000 GBP) in relation to any one claim or series of claims;\n-Employer's liability insurance with a limit of indemnity of not less than five million pounds sterling (5,000,000 GBP);\n-Professional indemnity insurance with a limit of indemnity of not less than one million pounds sterling (1,000,000 GBP) in relation to any one claim or series of claims\nThe supplier is required to provide a minimum of 1 number of years accounts clearly showing a minimum yearly turnover of two hundred thousand pounds sterling (200,000 GBP) equating to approximately (1) Estimated value of the Contract advertised."
+      }
+     ]
+    },
+    "documents": [
+     {
+      "documentType": "technicalSelectionCriteria",
+      "id": "technical"
+     }
+    ],
+    "procurementMethod": "selective",
+    "procurementMethodDetails": "Competitive procedure with negotiation",
+    "secondStage": {
+     "successiveReduction": true,
+     "noNegotiationNecessary": true,
+     "invitationDate": "2026-11-30T00:00:00Z"
+    },
+    "coveredBy": [
+     "GPA"
+    ],
+    "tenderPeriod": {
+     "endDate": "2026-11-30T12:00:00Z"
+    },
+    "submissionTerms": {
+     "languages": [
+      "en"
+     ]
+    },
+    "hasRecurrence": false,
+    "contractTerms": {
+     "hasElectronicOrdering": true,
+     "electronicInvoicingPolicy": "allowed",
+     "hasElectronicPayment": true
+    }
+   },
+   "parties": [
+    {
+     "name": "University of Glasgow",
+     "id": "GB-FTS-1836",
+     "identifier": {
+      "legalName": "University of Glasgow"
+     },
+     "address": {
+      "streetAddress": "Procurement Office, Tay House",
+      "locality": "Glasgow",
+      "region": "UKM82",
+      "postalCode": "G12 8QQ",
+      "countryName": "United Kingdom"
+     },
+     "contactPoint": {
+      "name": "Hannah Dobby",
+      "email": "Hannah.Dobby@glasgow.ac.uk",
+      "url": "https://www.publiccontractsscotland.gov.uk/"
+     },
+     "roles": [
+      "buyer"
+     ],
+     "details": {
+      "url": "http://www.gla.ac.uk/",
+      "buyerProfile": "https://www.publiccontractsscotland.gov.uk/search/Search_AuthProfile.aspx?ID=AA00108",
+      "classifications": [
+       {
+        "scheme": "TED_CA_TYPE",
+        "id": "BODY_PUBLIC",
+        "description": "Body governed by public law"
+       },
+       {
+        "scheme": "COFOG",
+        "id": "09",
+        "description": "Education"
+       }
+      ]
+     }
+    },
+    {
+     "name": "Glasgow Sheriff Court & Justice of the Peace Court",
+     "id": "GB-FTS-1837",
+     "identifier": {
+      "legalName": "Glasgow Sheriff Court & Justice of the Peace Court"
+     },
+     "address": {
+      "streetAddress": "1 Carlton Place",
+      "locality": "Glasgow",
+      "postalCode": "G5 9TW",
+      "countryName": "United Kingdom"
+     },
+     "roles": [
+      "reviewBody"
+     ]
+    }
+   ],
+   "buyer": {
+    "id": "GB-FTS-1836",
+    "name": "University of Glasgow"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "href": "https://api.publiccontractsscotland.gov.uk/v1/Notice?id=ocds-r6ebe6-0000847106"
+    }
+   ],
+   "language": "en"
+  }
+ ],
+ "links": {
+  "next": "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?limit=3&stages=tender&updatedTo=2026-11-02T09:39:14&cursor=dXBkYXRlZFRvPTIwMjYtMTEtMDJUMDk6Mzk6MTR8bmV4dEN1cnNvcj03NTUzMDI="
+ }
+}

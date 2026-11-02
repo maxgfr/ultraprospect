@@ -62,6 +62,9 @@ import { buildAll } from "./render.js";
 import { buildDelta, diffRuns } from "./watch.js";
 import { createAdapter } from "./mcp/adapter.js";
 import { emitOrchestration } from "./orchestrate.js";
+import { cmdAwards, cmdBid, cmdTender, cmdTenders, tenderCheckCmd, tenderOrchestrateCmd, tenderRenderCmd, tenderWatchCmd } from "./tenders/cli.js";
+import { isTenderManifest } from "./tenders/run.js";
+import { readManifest } from "./engine.js";
 import { runStdioServer, startHttpServer } from "./engine.js";
 import type { FitVerdict, PageRole } from "./types.js";
 import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, shortLabel, writeJson, writePlaces, writeRunManifest } from "./run.js";
@@ -83,6 +86,7 @@ import { VERSION } from "./version.js";
  * than the one in production is not probing production.
  */
 export { CONNECTORS } from "./registry/index.js";
+export { TENDER_CONNECTORS } from "./tenders/index.js";
 export { politeUa } from "./net.js";
 /**
  * Exported because a connector reached through `CONNECTORS` cannot find the
@@ -116,6 +120,10 @@ export const COMMANDS = [
   "render",
   "watch",
   "orchestrate",
+  "tenders",
+  "tender",
+  "bid",
+  "awards",
   "mcp",
   "doctor",
   "version",
@@ -169,6 +177,15 @@ export const VALUE_FLAGS = [
   "port",
   "bind",
   "phase",
+  "cpv",
+  "keywords",
+  "profile",
+  "status",
+  "min-value",
+  "source",
+  "match",
+  "buyer",
+  "horizon",
 ] as const;
 
 export const BOOL_FLAGS = [
@@ -184,6 +201,8 @@ export const BOOL_FLAGS = [
   "forget",
   "check",
   "stdout",
+  "documents",
+  "template",
   "help",
   "version",
 ] as const;
@@ -208,7 +227,11 @@ COMMANDS
   render                 CSV, JSON, report and a self-contained HTML page.
   watch --since <run>    Diff this run against an earlier one: who opened, closed, started hiring.
   orchestrate            Emit the fan-out: one search phase and two judgement phases.
-  mcp                    Serve the run over MCP: where, ingest, scan, places, confirm, enrich, score, dossier, check, render, watch, doctor.
+  tenders                Find public calls for tenders across every source a country has. A run.
+  tender --id <id>       Read one notice in full, and its documents (the DCE) with --documents.
+  bid --id <id>          Print the grounding packet to draft a response to one notice.
+  awards                 Who wins what, at what price, and when contracts come back to market.
+  mcp                    Serve the run over MCP: where, ingest, scan, places, confirm, enrich, score, dossier, check, render, watch, doctor, tenders, tender, bid, awards.
   doctor                 Check node, network and every upstream. --country narrows the registers.
   version                Print the version.
 
@@ -319,8 +342,34 @@ DELIVERABLES (render)
 CHANGE (watch)
   --since <dir>          The earlier run to compare against.
 
+PUBLIC TENDERS (tenders, tender, bid, awards)
+  --country <list>       ISO codes, comma-separated: fr,de,gb. "eu" is the 27 member states.
+  --cpv <list>           CPV prefixes: 72 (IT services), 7222, 48000000. The EU's own vocabulary.
+  --keywords <list>      Terms in the MARKET'S OWN LANGUAGE: logiciel,Software,software. The engine
+                         translates nothing; with --cpv too, a notice matching either is kept.
+  --match <any|all>      How --cpv and --keywords combine. Default any.
+  --profile <file>       The bidder: offer, CPV, keywords per language, references (R1…),
+                         certifications (C1…). The only thing a bid may claim about you.
+  --template             Print a blank profile.json and stop.
+  --status <s>           open (default: calls still accepting bids), awarded, or all.
+  --since <when>         Published since: 30d (default), 6m, 2y, or an ISO date.
+  --source <ids>         Only these sources, e.g. eu-ted,fr-boamp. doctor lists them.
+  --min-value <n>        Drop notices whose published value is below n.
+  --limit <n>            Per source (default 200; awards 500).
+  --queries              (with --run) The web lane: queries for countries no API reaches, and stop.
+  --web-results <file>   (with --run) Hits from your own search: [{url,title,snippet,country,query}].
+  --engine-search        (with --run) Run the web lane's queries on the keyless engines instead.
+  --apply <file>         (with --run) Qualification verdicts: [{id, decision, fit, why, blockers, cites}],
+                         or {pair:[a,b], same} for a look-alike pair. "-" reads stdin.
+  --documents            (tender) Also fetch the DCE: PDFs, office files, every member of a ZIP.
+  --max-pages <n>        (tender) Ceiling on documents read per notice (default 12).
+  --buyer <text>         (awards) Only awards whose buyer name contains this.
+  --horizon <months>     (awards) How far ahead to list re-tender windows (default 24).
+  --no-registry          (awards) Skip confirming the top winners against their register.
+  ULTRAPROSPECT_SAM_API_KEY    SAM.gov key (free) for US opportunities. USAspending awards need none.
+
 FAN-OUT (orchestrate)
-  --phase <name>         Emit just one phase: resolve, match or dossier.
+  --phase <name>         Emit just one phase: resolve, match or dossier — on a tenders run: web, qualify or bid.
   --eco                  Emit only the RUNBOOK and the contracts — the sequential path.
   --list                 Report which phases are ready, as JSON, and emit nothing.
 
@@ -357,6 +406,13 @@ function say(message: string): void {
 
 function out(message: string): void {
   process.stdout.write(`${message}\n`);
+}
+
+const IO = { out, say };
+
+/** A tenders run is answered by its own check, render, watch and fan-out. */
+function isTenderRun(runDir: string): boolean {
+  return isTenderManifest(readManifest(runDir) as never);
 }
 
 /**
@@ -1061,6 +1117,7 @@ async function cmdDossier(values: Record<string, string>, bools: ReadonlySet<str
 async function cmdCheck(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
   if (!values.run) throw new UsageError("check needs --run <dir>");
   const runDir = resolveRun(values.run);
+  if (isTenderRun(runDir)) return tenderCheckCmd(runDir, bools, IO);
   const report = runCheck({ runDir, places: readPlaces(runDir), manifest: requireManifest(runDir) });
 
   if (bools.has("json")) out(jsonLine(report));
@@ -1079,6 +1136,7 @@ async function cmdCheck(values: Record<string, string>, bools: ReadonlySet<strin
 async function cmdRender(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
   if (!values.run) throw new UsageError("render needs --run <dir>");
   const runDir = resolveRun(values.run);
+  if (isTenderRun(runDir)) return tenderRenderCmd(runDir, bools, IO);
   const places = readPlaces(runDir);
   const manifest = requireManifest(runDir);
 
@@ -1131,6 +1189,8 @@ async function cmdWatch(values: Record<string, string>, bools: ReadonlySet<strin
   const afterDir = resolveRun(values.run);
   const beforeDir = resolveRun(values.since);
   if (afterDir === beforeDir) throw new UsageError("--run and --since resolve to the same run; there is nothing to compare");
+  if (isTenderRun(afterDir) !== isTenderRun(beforeDir)) throw new UsageError("--run and --since must both be tenders runs, or both territory runs");
+  if (isTenderRun(afterDir)) return tenderWatchCmd(afterDir, beforeDir, bools, IO);
 
   const delta = diffRuns(readPlaces(beforeDir), readPlaces(afterDir));
   const markdown = buildDelta(delta, requireManifest(beforeDir), requireManifest(afterDir));
@@ -1185,6 +1245,7 @@ async function cmdOrchestrate(values: Record<string, string>, bools: ReadonlySet
   // runs far from the user's project, and a subagent handed a relative path
   // resolves it against its own cwd.
   const engineAbs = fileURLToPath(new URL(import.meta.url));
+  if (isTenderRun(runDir)) return tenderOrchestrateCmd(runDir, engineAbs, values, bools, IO);
 
   const result = emitOrchestration(runDir, engineAbs, {
     phase: values.phase,
@@ -1262,6 +1323,14 @@ export async function main(argv: readonly string[]): Promise<number> {
       return cmdWatch(values, bools);
     case "orchestrate":
       return cmdOrchestrate(values, bools);
+    case "tenders":
+      return cmdTenders(values, bools, IO, DEFAULT_OUT);
+    case "tender":
+      return cmdTender(values, bools, IO);
+    case "bid":
+      return cmdBid(values, bools, IO);
+    case "awards":
+      return cmdAwards(values, bools, IO, DEFAULT_OUT);
     case "mcp":
       return cmdMcp(values);
     case "doctor":

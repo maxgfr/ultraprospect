@@ -1,0 +1,723 @@
+{
+  "tenders": [
+    {
+      "id": "fr-boamp:26-105857",
+      "connectorId": "fr-boamp",
+      "noticeId": "26-105857",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "Fourniture d'équipements informatiques, de solutions logicielles, d'abonnements Cloud et prestations de services associées",
+      "language": "fr",
+      "buyer": {
+        "name": "COEUR ESSONNE AGGLOMERATION",
+        "country": "fr"
+      },
+      "cpv": [
+        "30200000",
+        "32424000",
+        "30230000",
+        "48900000"
+      ],
+      "nature": "supplies",
+      "procedure": "Procédure Ouverte",
+      "value": {
+        "amount": 2800000,
+        "currency": "EUR",
+        "estimated": true
+      },
+      "lots": [],
+      "publishedAt": "2026-11-01",
+      "deadline": "2026-11-30T11:00:00+00:00",
+      "documentsUrl": "https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=dematEnt.login&amp;type=DCE&amp;IDM=1889117",
+      "documentsAccess": "unknown",
+      "places": [
+        "FR-91"
+      ],
+      "criteria": [
+        {
+          "name": "Valeur technique décomposée en sous-critères précisés dans le règlement de la consultation",
+          "weight": "70"
+        },
+        {
+          "name": "Valeur environnementale",
+          "weight": "10"
+        },
+        {
+          "name": "Prix des prestations",
+          "weight": "20"
+        },
+        {
+          "name": "Valeur technique décomposée en sous-critères précisés dans le règlement de la consultation",
+          "weight": "60"
+        },
+        {
+          "name": "Valeur environnementale",
+          "weight": "10"
+        },
+        {
+          "name": "Prix des prestations",
+          "weight": "30"
+        },
+        {
+          "name": "Valeur technique décomposée en sous-critères précisés dans le règlement de la consultation",
+          "weight": "60"
+        },
+        {
+          "name": "Valeur environnementale",
+          "weight": "10"
+        },
+        {
+          "name": "Prix des prestations",
+          "weight": "30"
+        }
+      ],
+      "awards": [],
+      "sourceUrl": "https://www.boamp.fr/pages/avis/?q=idweb:26-105857",
+      "coverage": "all",
+      "aliases": [
+        "26-105857",
+        "c17886c5-ed34-4cca-926d-504e3580c389"
+      ],
+      "national": {
+        "famille": "JOUE",
+        "famille_libelle": "Marchés européens",
+        "european": true,
+        "descripteurs": [
+          "Informatique (prestations de services)"
+        ],
+        "contractfolderid": "c17886c5-ed34-4cca-926d-504e3580c389",
+        "code_departement": [
+          "91"
+        ],
+        "durationMonths": 5
+      }
+    },
+    {
+      "id": "fr-boamp:26-105786",
+      "connectorId": "fr-boamp",
+      "noticeId": "26-105786",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "Système de gestion informatique centralisée des données issues d’une chaine de post production d’images et de sons et réalisations des prestations associées.",
+      "language": "fr",
+      "buyer": {
+        "name": "Centre nationale du cinéma",
+        "country": "fr"
+      },
+      "cpv": [
+        "30200000",
+        "72500000",
+        "30230000"
+      ],
+      "nature": "supplies",
+      "procedure": "Procédure Ouverte",
+      "lots": [],
+      "publishedAt": "2026-11-01",
+      "deadline": "2026-12-08T13:00:00+00:00",
+      "documentsUrl": "https://www.marches-publics.gouv.fr/?page=Entreprise.EntrepriseAdvancedSearch&AllCons&id=3096667&orgAcronyme=f5j",
+      "documentsAccess": "unknown",
+      "places": [
+        "FR-78"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://www.boamp.fr/pages/avis/?q=idweb:26-105786",
+      "coverage": "all",
+      "aliases": [
+        "26-105786",
+        "b6a70563-28d9-46f5-a69b-16cfce0d2d4b"
+      ],
+      "national": {
+        "famille": "JOUE",
+        "famille_libelle": "Marchés européens",
+        "european": true,
+        "descripteurs": [
+          "Informatique (matériel)",
+          "Informatique (prestations de services)",
+          "Logiciel"
+        ],
+        "contractfolderid": "b6a70563-28d9-46f5-a69b-16cfce0d2d4b",
+        "code_departement": [
+          "78"
+        ],
+        "durationMonths": 6
+      }
+    },
+    {
+      "id": "fr-boamp:26-105228",
+      "connectorId": "fr-boamp",
+      "noticeId": "26-105228",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "Formation en informatique, bureautique et aux métiers de l'animation pour la ville d'Asnières-sur-Seine",
+      "language": "fr",
+      "buyer": {
+        "name": "Mairie d'Asnières sur Seine",
+        "country": "fr"
+      },
+      "cpv": [
+        "79632000",
+        "80310000"
+      ],
+      "nature": "services",
+      "procedure": "Procédure Ouverte",
+      "lots": [],
+      "publishedAt": "2026-10-30",
+      "deadline": "2026-12-11T10:00:00+00:00",
+      "documentsUrl": "https://www.achatpublic.com/sdm/ent/gen/ent_detail.do?PCSLID=CSL_2026_6RV0HoOMfB",
+      "documentsAccess": "unknown",
+      "places": [
+        "FR-92",
+        "FR-75"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://www.boamp.fr/pages/avis/?q=idweb:26-105228",
+      "coverage": "all",
+      "aliases": [
+        "26-105228",
+        "5e0daf85-fb06-47ba-afad-e07d63e31411"
+      ],
+      "national": {
+        "famille": "JOUE",
+        "famille_libelle": "Marchés européens",
+        "european": true,
+        "descripteurs": [
+          "Formation"
+        ],
+        "contractfolderid": "5e0daf85-fb06-47ba-afad-e07d63e31411",
+        "code_departement": [
+          "92",
+          "75"
+        ],
+        "durationMonths": 6
+      }
+    },
+    {
+      "id": "fr-boamp:26-105386",
+      "connectorId": "fr-boamp",
+      "noticeId": "26-105386",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "INFOGERANCE DES SYSTÈMES D'INFORMATION",
+      "language": "fr",
+      "buyer": {
+        "name": "ETBT du Château de Versailles",
+        "country": "fr"
+      },
+      "cpv": [
+        "72510000"
+      ],
+      "nature": "services",
+      "procedure": "Procédure Ouverte",
+      "value": {
+        "amount": 4600000,
+        "currency": "EUR",
+        "estimated": true
+      },
+      "lots": [],
+      "publishedAt": "2026-10-30",
+      "deadline": "2026-12-18T09:00:00+00:00",
+      "documentsUrl": "https://www.achatpublic.com/sdm/ent/gen/ent_detail.do?PCSLID=CSL_2026_GUAcqPJlNS",
+      "documentsAccess": "unknown",
+      "places": [
+        "FR-78",
+        "FR-75"
+      ],
+      "criteria": [
+        {
+          "name": "Critère prix ; Cf. Règlement de la consultation pour plus de détails",
+          "weight": "30"
+        },
+        {
+          "name": "Performance en matière de protection de l'environnement ; Cf. Règlement de la Consultation",
+          "weight": "5"
+        },
+        {
+          "name": "Valeur technique  ; Cf. Règlement de la consultation pour plus de détails",
+          "weight": "65"
+        }
+      ],
+      "awards": [],
+      "sourceUrl": "https://www.boamp.fr/pages/avis/?q=idweb:26-105386",
+      "coverage": "all",
+      "aliases": [
+        "26-105386",
+        "89579e5a-24d3-4607-b3d8-cdfb21cb3d65"
+      ],
+      "national": {
+        "famille": "JOUE",
+        "famille_libelle": "Marchés européens",
+        "european": true,
+        "descripteurs": [
+          "Informatique (prestations de services)"
+        ],
+        "contractfolderid": "89579e5a-24d3-4607-b3d8-cdfb21cb3d65",
+        "code_departement": [
+          "78",
+          "75"
+        ],
+        "durationMonths": 5
+      }
+    },
+    {
+      "id": "fr-boamp:26-104786",
+      "connectorId": "fr-boamp",
+      "noticeId": "26-104786",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "PRESTATIONS DE MODERNISATION DE L’EQUIPEMENT INFORMATIQUE DES AGENTS DES LYCEES",
+      "language": "fr",
+      "buyer": {
+        "name": "Région Nouvelle-Aquitaine",
+        "country": "fr"
+      },
+      "cpv": [
+        "72610000",
+        "72220000"
+      ],
+      "nature": "services",
+      "procedure": "Procédure Ouverte",
+      "lots": [],
+      "publishedAt": "2026-10-29",
+      "deadline": "2026-11-12T11:00:00+00:00",
+      "documentsUrl": "https://demat-ampa.fr/entreprise/consultation/610956?orgAcronyme=cr-aquitaine",
+      "documentsAccess": "unknown",
+      "places": [
+        "FR-33",
+        "FR-40",
+        "FR-47",
+        "FR-64",
+        "FR-19",
+        "FR-23",
+        "FR-87",
+        "FR-16",
+        "FR-17"
+      ],
+      "criteria": [
+        {
+          "name": "évalué sur la base du DQE",
+          "weight": "40"
+        },
+        {
+          "name": "évaluée sur la base du mémoire technique",
+          "weight": "60"
+        }
+      ],
+      "awards": [],
+      "sourceUrl": "https://www.boamp.fr/pages/avis/?q=idweb:26-104786",
+      "coverage": "all",
+      "aliases": [
+        "26-104786",
+        "89b4d662-31f7-4823-a890-a50359a955d5"
+      ],
+      "national": {
+        "famille": "JOUE",
+        "famille_libelle": "Marchés européens",
+        "european": true,
+        "descripteurs": [
+          "Informatique (assistance)",
+          "Informatique (prestations de services)"
+        ],
+        "annonce_lie": [
+          "26-95511"
+        ],
+        "contractfolderid": "89b4d662-31f7-4823-a890-a50359a955d5",
+        "code_departement": [
+          "33",
+          "40",
+          "47",
+          "64",
+          "19",
+          "23",
+          "87",
+          "16",
+          "17"
+        ],
+        "durationMonths": 4
+      }
+    },
+    {
+      "id": "fr-boamp:26-105156",
+      "connectorId": "fr-boamp",
+      "noticeId": "26-105156",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "Acquisition de matériels informatiques pour le SMPRR",
+      "language": "fr",
+      "buyer": {
+        "name": "Syndicat Mixte Parc Routier de la Réunion",
+        "country": "fr"
+      },
+      "cpv": [],
+      "nature": "supplies",
+      "procedure": "Procédure Ouverte",
+      "lots": [],
+      "publishedAt": "2026-10-29",
+      "deadline": "2026-11-19T12:00:00+00:00",
+      "documentsAccess": "unknown",
+      "places": [
+        "FR-974"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://www.boamp.fr/pages/avis/?q=idweb:26-105156",
+      "coverage": "all",
+      "aliases": [
+        "26-105156"
+      ],
+      "national": {
+        "famille": "FNS",
+        "famille_libelle": "Marchés entre 90 k€ et seuils européens",
+        "european": false,
+        "descripteurs": [
+          "Informatique (matériel)"
+        ],
+        "code_departement": [
+          "974"
+        ],
+        "noCpvScheme": true
+      }
+    },
+    {
+      "id": "fr-boamp:26-105346",
+      "connectorId": "fr-boamp",
+      "noticeId": "26-105346",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "Prestations informatiques de maintenance évolutive et d'hébergement sécurisé du site visitvar.fr",
+      "language": "fr",
+      "buyer": {
+        "name": "Adt Var Tourisme",
+        "country": "fr"
+      },
+      "cpv": [],
+      "nature": "services",
+      "procedure": "Procédure Restreinte",
+      "lots": [],
+      "publishedAt": "2026-10-29",
+      "deadline": "2026-11-18T12:00:00+00:00",
+      "documentsAccess": "unknown",
+      "places": [
+        "FR-83"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://www.boamp.fr/pages/avis/?q=idweb:26-105346",
+      "coverage": "all",
+      "aliases": [
+        "26-105346"
+      ],
+      "national": {
+        "famille": "FNS",
+        "famille_libelle": "Marchés entre 90 k€ et seuils européens",
+        "european": false,
+        "descripteurs": [
+          "Informatique (prestations de services)"
+        ],
+        "code_departement": [
+          "83"
+        ],
+        "noCpvScheme": true
+      }
+    },
+    {
+      "id": "fr-boamp:26-104750",
+      "connectorId": "fr-boamp",
+      "noticeId": "26-104750",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "Maintenance de la solution de sauvegarde informatique",
+      "language": "fr",
+      "buyer": {
+        "name": "Sénat",
+        "country": "fr"
+      },
+      "cpv": [
+        "72250000",
+        "72267000",
+        "72260000",
+        "72268000"
+      ],
+      "nature": "services",
+      "procedure": "Procédure Ouverte",
+      "value": {
+        "amount": 379000,
+        "currency": "EUR",
+        "estimated": true
+      },
+      "lots": [],
+      "publishedAt": "2026-10-29",
+      "deadline": "2026-11-30T11:00:00+00:00",
+      "documentsUrl": "https://www.marches-publics.gouv.fr",
+      "documentsAccess": "unknown",
+      "places": [
+        "FR-75"
+      ],
+      "criteria": [
+        {
+          "name": "Le prix : 60 %, apprécié au regard d’un devis quantitatif estimatif (DQE), comprenant le montant de la décomposition du prix global et forfaitaire (DPGF) et une estimation réalisée sur la base des tar"
+        },
+        {
+          "name": "Valeur technique : 40 %, appréciée en fonction des sous-critères suivants notamment au regard des réponses apportées au cahier des réponses attendues : -\tQualité de la prestation de maintenance et de "
+        }
+      ],
+      "awards": [],
+      "sourceUrl": "https://www.boamp.fr/pages/avis/?q=idweb:26-104750",
+      "coverage": "all",
+      "aliases": [
+        "26-104750",
+        "e3fe11de-d6dc-42dc-9b3a-73442a08e30d"
+      ],
+      "national": {
+        "famille": "JOUE",
+        "famille_libelle": "Marchés européens",
+        "european": true,
+        "descripteurs": [
+          "Informatique (prestations de services)",
+          "Logiciel",
+          "Maintenance"
+        ],
+        "contractfolderid": "e3fe11de-d6dc-42dc-9b3a-73442a08e30d",
+        "code_departement": [
+          "75"
+        ],
+        "durationMonths": 4
+      }
+    },
+    {
+      "id": "fr-boamp:26-104936",
+      "connectorId": "fr-boamp",
+      "noticeId": "26-104936",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "Services d’hébergement et d’infogérance de type « cloud public » (IaaS et PaaS) pour les applications du système d'information de l’EPIDE",
+      "language": "fr",
+      "buyer": {
+        "name": "EPIDE",
+        "country": "fr"
+      },
+      "cpv": [
+        "72400000",
+        "72415000"
+      ],
+      "nature": "services",
+      "procedure": "Procédure Ouverte",
+      "value": {
+        "amount": 800000,
+        "currency": "EUR",
+        "estimated": true
+      },
+      "lots": [],
+      "publishedAt": "2026-10-29",
+      "deadline": "2026-11-26T11:00:00+00:00",
+      "documentsUrl": "https://marches.achats-epide.fr/entreprise/consultation/237?orgAcronyme=a1a",
+      "documentsAccess": "unknown",
+      "places": [
+        "FR-67",
+        "FR-33",
+        "FR-61",
+        "FR-71",
+        "FR-89",
+        "FR-18",
+        "FR-90",
+        "FR-27",
+        "FR-52"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://www.boamp.fr/pages/avis/?q=idweb:26-104936",
+      "coverage": "all",
+      "aliases": [
+        "26-104936",
+        "fc49d2df-5a38-4e15-b204-c5cdade685a0"
+      ],
+      "national": {
+        "famille": "JOUE",
+        "famille_libelle": "Marchés européens",
+        "european": true,
+        "descripteurs": [
+          "Informatique (prestations de services)",
+          "Site internet"
+        ],
+        "annonce_lie": [
+          "26-103998"
+        ],
+        "contractfolderid": "fc49d2df-5a38-4e15-b204-c5cdade685a0",
+        "code_departement": [
+          "67",
+          "33",
+          "61",
+          "71",
+          "89",
+          "18",
+          "90",
+          "27",
+          "52"
+        ],
+        "durationMonths": 6
+      }
+    },
+    {
+      "id": "fr-boamp:26-105020",
+      "connectorId": "fr-boamp",
+      "noticeId": "26-105020",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "Conception, développement et maintenance d'une plateforme informatique dans le cadre de l'étude PRE-VISIT.",
+      "language": "fr",
+      "buyer": {
+        "name": "Assistance Publique des Hôpitaux de Paris, GHU Université Paris Cité Hôpital Hôtel-Dieu",
+        "country": "fr"
+      },
+      "cpv": [],
+      "nature": "services",
+      "procedure": "Procédure Adaptée",
+      "lots": [],
+      "publishedAt": "2026-10-28",
+      "deadline": "2026-12-02T15:00:00+00:00",
+      "documentsAccess": "unknown",
+      "places": [
+        "FR-75"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://www.boamp.fr/pages/avis/?q=idweb:26-105020",
+      "coverage": "all",
+      "aliases": [
+        "26-105020"
+      ],
+      "national": {
+        "famille": "MAPA",
+        "famille_libelle": "Marchés <90 k€ (MAPA)",
+        "european": false,
+        "descripteurs": [
+          "Logiciel"
+        ],
+        "code_departement": [
+          "75"
+        ],
+        "noCpvScheme": true
+      }
+    },
+    {
+      "id": "fr-boamp:26-104246",
+      "connectorId": "fr-boamp",
+      "noticeId": "26-104246",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "PRESTATION D’ASSURANCES - DOMMAGES AUX BIENS AVEC VOLET BRIS DE MACHINES ET BIENS INFORMATIQUES",
+      "language": "fr",
+      "buyer": {
+        "name": "Ville de Pointe à Pitre (971)",
+        "country": "fr"
+      },
+      "cpv": [
+        "66510000"
+      ],
+      "nature": "services",
+      "procedure": "Procédure Ouverte",
+      "lots": [],
+      "publishedAt": "2026-10-28",
+      "deadline": "2026-11-30T16:00:00+00:00",
+      "documentsUrl": "https://www.marches-securises.fr",
+      "documentsAccess": "unknown",
+      "places": [
+        "FR-971"
+      ],
+      "criteria": [
+        {
+          "name": "Cf. RC"
+        }
+      ],
+      "awards": [],
+      "sourceUrl": "https://www.boamp.fr/pages/avis/?q=idweb:26-104246",
+      "coverage": "all",
+      "aliases": [
+        "26-104246",
+        "0369de06-b0e0-49ce-842c-f0bbe523aafa"
+      ],
+      "national": {
+        "famille": "JOUE",
+        "famille_libelle": "Marchés européens",
+        "european": true,
+        "descripteurs": [
+          "Assurance"
+        ],
+        "contractfolderid": "0369de06-b0e0-49ce-842c-f0bbe523aafa",
+        "code_departement": [
+          "971"
+        ],
+        "durationMonths": 4
+      }
+    },
+    {
+      "id": "fr-boamp:26-104059",
+      "connectorId": "fr-boamp",
+      "noticeId": "26-104059",
+      "country": "fr",
+      "kind": "call",
+      "status": "open",
+      "title": "PRESTATIONS DE CONSEIL, D’EXPERTISE, DE DEVELOPPEMENT ET DE FORMATION SPECIFIQUE SUR LE LOGICIEL LIBRE CATALA",
+      "language": "fr",
+      "buyer": {
+        "name": "CNAF Etablissement Public",
+        "country": "fr"
+      },
+      "cpv": [
+        "72200000"
+      ],
+      "nature": "services",
+      "procedure": "Procédure Ouverte",
+      "value": {
+        "amount": 1341667,
+        "currency": "EUR",
+        "estimated": true
+      },
+      "lots": [],
+      "publishedAt": "2026-10-28",
+      "deadline": "2026-12-02T12:00:00+00:00",
+      "documentsUrl": "https://www.marches-publics.gouv.fr/",
+      "documentsAccess": "unknown",
+      "places": [
+        "FR-75"
+      ],
+      "criteria": [],
+      "awards": [],
+      "sourceUrl": "https://www.boamp.fr/pages/avis/?q=idweb:26-104059",
+      "coverage": "all",
+      "aliases": [
+        "26-104059",
+        "b40d282a-58ec-4e14-82cc-ecbcb3d4e762"
+      ],
+      "national": {
+        "famille": "JOUE",
+        "famille_libelle": "Marchés européens",
+        "european": true,
+        "descripteurs": [
+          "Informatique (prestations de services)"
+        ],
+        "contractfolderid": "b40d282a-58ec-4e14-82cc-ecbcb3d4e762",
+        "code_departement": [
+          "75"
+        ],
+        "durationMonths": 6
+      }
+    }
+  ],
+  "total": 27,
+  "truncated": true,
+  "reason": "BOAMP holds 27 notices for this query; 24 were read",
+  "notes": []
+}

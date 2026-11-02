@@ -51,6 +51,14 @@ import { ranked, scoreAll } from "../score.js";
 import { factSheet } from "../dossier.js";
 import { clampInt, parseDistanceM } from "../util.js";
 import { VERSION } from "../version.js";
+import { readFileSync } from "node:fs";
+import { readManifest } from "../engine.js";
+import { checkTenderRun, renderTenderRun, watchTenderRuns } from "../tenders/commands.js";
+import { callTenderTool, TENDER_CAP_ADVICE, TENDER_TOOLS } from "../tenders/mcp.js";
+import { isTenderManifest } from "../tenders/run.js";
+
+/** A tenders run answers check, render and watch with its own rules. */
+const isTenderRun = (runDir: string): boolean => isTenderManifest(readManifest(runDir) as never);
 
 /**
  * Credentials from the environment, read off each connector's own declaration.
@@ -237,7 +245,7 @@ const TOOLS: ToolDecl[] = [
 export function createAdapter(): McpAdapter {
   return {
     version: VERSION,
-    listTools: () => TOOLS,
+    listTools: () => [...TOOLS, ...TENDER_TOOLS],
     // Only `scan` can produce a large response, and only because a dense town
     // holds thousands of companies. The advice names the argument that shrinks
     // it rather than telling the caller to try again.
@@ -249,6 +257,7 @@ export function createAdapter(): McpAdapter {
       // `watch` has no narrowing argument — the delta is as large as the change —
       // so the advice names where the whole thing already is instead.
       ultraprospect_watch: "the full diff was written to `DELTA.md` in the run directory; read it from there.",
+      ...TENDER_CAP_ADVICE,
     },
 
     async callTool(name: string, args: Record<string, unknown>): Promise<ToolOutcome> {
@@ -337,6 +346,10 @@ export function createAdapter(): McpAdapter {
 
         case "ultraprospect_check": {
           const runDir = resolveRun(str(args.run, "run"));
+          if (isTenderRun(runDir)) {
+            const r = checkTenderRun(runDir);
+            return { text: `${formatReport(r)}\n\n${JSON.stringify({ ok: r.ok, errors: r.errors, warnings: r.warnings }, null, 2)}` };
+          }
           const report = runCheck({ runDir, places: readPlaces(runDir), manifest: requireManifest(runDir) });
           return { text: `${formatReport(report)}\n\n${JSON.stringify({ ok: report.ok, errors: report.errors, warnings: report.warnings }, null, 2)}` };
         }
@@ -460,6 +473,7 @@ export function createAdapter(): McpAdapter {
 
         case "ultraprospect_render": {
           const runDir = resolveRun(str(args.run, "run"));
+          if (isTenderRun(runDir)) return { text: JSON.stringify({ run: runDir, files: renderTenderRun(runDir) }, null, 2), artifact: runDir };
           const manifest = requireManifest(runDir);
           const outcome = buildAll(readPlaces(runDir), manifest, {
             runDir,
@@ -486,6 +500,10 @@ export function createAdapter(): McpAdapter {
         case "ultraprospect_watch": {
           const after = resolveRun(str(args.run, "run"));
           const before = resolveRun(str(args.since, "since"));
+          if (isTenderRun(after) && isTenderRun(before)) {
+            const w = watchTenderRuns(after, before);
+            return { text: readFileSync(w.path, "utf8"), artifact: after };
+          }
           const delta = diffRuns(readPlaces(before), readPlaces(after));
           const markdown = buildDelta(delta, requireManifest(before), requireManifest(after));
           writeArtifact(join(after, "DELTA.md"), markdown);
@@ -497,8 +515,11 @@ export function createAdapter(): McpAdapter {
           return { text: JSON.stringify({ version: VERSION, cacheDir: cacheDir(), probes }, null, 2) };
         }
 
-        default:
+        default: {
+          const tender = await callTenderTool(name, args);
+          if (tender) return tender;
           throw new ToolError(`unknown tool "${name}"`);
+        }
       }
     },
   };
