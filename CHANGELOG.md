@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [3.17.0](https://github.com/maxgfr/ultraprospect/compare/v3.16.5...v3.17.0) (2026-11-02)
+
+
+### Bug Fixes
+
+* **tenders:** name the qualifier's allowed decision and fit words in its contract ([08f4b2d](https://github.com/maxgfr/ultraprospect/commit/08f4b2d1c61eb3aca1b6f723841b88cadc14e240))
+* **tenders:** what live runs across ten markets showed ([6e054d4](https://github.com/maxgfr/ultraprospect/commit/6e054d4555f09affcca92608103415e4853ea799))
+
+
+### Features
+
+* **tenders:** find, qualify and answer public calls for tenders across countries ([944bbec](https://github.com/maxgfr/ultraprospect/commit/944bbec9664366732f7066f4acdd53011eb6596e))
+
 ## [3.16.5](https://github.com/maxgfr/ultraprospect/compare/v3.16.4...v3.16.5) (2026-10-30)
 
 
