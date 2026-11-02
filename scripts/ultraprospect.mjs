@@ -16458,7 +16458,12 @@ function tedQuery(q) {
   if (types.length) parts.push(`notice-type IN (${types.join(" ")})`);
   if (q.publishedFrom) parts.push(`publication-date>=${q.publishedFrom.replace(/-/g, "")}`);
   if (q.publishedTo) parts.push(`publication-date<=${q.publishedTo.replace(/-/g, "")}`);
-  return parts.join(" AND ") || "publication-date>=20000101";
+  return `${parts.join(" AND ") || "publication-date>=20000101"} SORT BY publication-date DESC`;
+}
+function isRegistrationId(raw) {
+  const v = (raw ?? "").trim();
+  if (!v || !/\d{5,}/.test(v.replace(/\s/g, ""))) return false;
+  return !/^\d+(-\d+){2,}$/.test(v);
 }
 function firstArr(v) {
   const s = Array.isArray(v) ? v.find((x) => typeof x === "string") : typeof v === "string" ? v : void 0;
@@ -16494,7 +16499,7 @@ function toTender(n, now = /* @__PURE__ */ new Date()) {
   const conclusion = firstArr(n["contract-conclusion-date"]);
   const months = durationMonths(firstArr(n["duration-period-value-lot"]), firstArr(n["duration-period-unit-lot"]));
   const awards = winners.map((name, i) => ({
-    supplier: { name, legalId: winnerIds[i]?.trim() || void 0, country: iso2(winnerCountries[i]) },
+    supplier: { name, legalId: isRegistrationId(winnerIds[i]) ? winnerIds[i].trim() : void 0, country: iso2(winnerCountries[i]) },
     date: dayOf(Array.isArray(n["contract-conclusion-date"]) ? n["contract-conclusion-date"][i] : conclusion),
     durationMonths: months,
     size: sizes[i]
@@ -16611,9 +16616,9 @@ var euTed = {
   },
   async canary() {
     const res = await post({
-      query: "classification-cpv IN (72000000) AND notice-type IN (can-standard) AND buyer-country IN (FRA)",
+      query: `classification-cpv IN (72000000) AND notice-type IN (can-standard) AND buyer-country IN (FRA) AND publication-date>=${new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10).replace(/-/g, "")} SORT BY publication-date DESC`,
       fields: TED_FIELDS,
-      limit: 3,
+      limit: 10,
       paginationMode: "ITERATION"
     });
     const notices = res.data?.notices ?? [];
@@ -16622,6 +16627,11 @@ var euTed = {
       { name: "TED v3 still answers an anonymous expert query", ok: res.ok && notices.length > 0, detail: res.error },
       { name: "TED still reports totalNoticeCount", ok: typeof res.data?.totalNoticeCount === "number" },
       { name: "TED still pages by iterationNextToken", ok: typeof res.data?.iterationNextToken === "string" },
+      {
+        name: "TED still honours SORT BY publication-date DESC",
+        ok: notices.length > 1 && String(notices[0]?.["publication-date"]) >= String(notices.at(-1)?.["publication-date"]),
+        detail: "without it, a capped window reads its OLDEST notices"
+      },
       {
         name: "TED award notices still name winners with identifiers",
         ok: t.some((x) => x.awards.some((a) => a.supplier.name && a.supplier.legalId)),
@@ -17244,6 +17254,7 @@ var base2 = (t) => ({
   ...t
 });
 var CA_CSV = "https://canadabuys.canada.ca/opendata/pub/openTenderNotice-ouvertAvisAppelOffres.csv";
+var caGet = (opts) => httpGet(CA_CSV, opts);
 function caRowToTender(row2) {
   const ref = row2["referenceNumber-numeroReference"] || row2["solicitationNumber-numeroSollicitation"];
   if (!ref) return void 0;
@@ -17305,7 +17316,7 @@ var caCanadabuys = {
     if (!q.kinds.includes("call"))
       return { tenders: [], truncated: false, notes: ["CanadaBuys: only the open-tender file is read; award history is a separate file not wired here."] };
     await awaitHostSlot(CA_CSV, 500);
-    const res = await httpGet(CA_CSV, { timeoutMs: 9e4, retries: 1, userAgent: politeUa(), maxBytes: 64 * 1024 * 1024 });
+    const res = await caGet({ timeoutMs: 9e4, retries: 1, maxBytes: 64 * 1024 * 1024 });
     if (!res.ok) return { tenders: [], truncated: true, reason: `CanadaBuys CSV unreachable: ${res.error ?? `HTTP ${res.status}`}` };
     const all = await parseCanadaCsv(res.body);
     const kept = all.filter((t) => keepByQuery(t, q));
@@ -17319,7 +17330,7 @@ var caCanadabuys = {
   },
   async canary() {
     await awaitHostSlot(CA_CSV, 500);
-    const res = await httpGet(CA_CSV, { timeoutMs: 9e4, retries: 0, userAgent: politeUa(), maxBytes: 64 * 1024 * 1024 });
+    const res = await caGet({ timeoutMs: 9e4, retries: 0, maxBytes: 64 * 1024 * 1024 });
     const all = res.ok ? await parseCanadaCsv(res.body) : [];
     return [
       { name: "CanadaBuys open-tender CSV still downloads keyless", ok: res.ok && all.length > 0, detail: res.error },
@@ -17328,7 +17339,7 @@ var caCanadabuys = {
     ];
   },
   async probe() {
-    const res = await httpGet(CA_CSV, { timeoutMs: 3e4, retries: 0, userAgent: politeUa(), maxBytes: 4096 });
+    const res = await caGet({ timeoutMs: 3e4, retries: 0, maxBytes: 4096 });
     return { ok: res.ok || res.truncated === true, detail: res.ok || res.truncated ? "CanadaBuys CSV reachable" : res.error ?? `HTTP ${res.status}` };
   }
 };
@@ -17742,15 +17753,11 @@ var uaProzorro = {
         const one = await getJson2(`${PROZORRO}/${id}`);
         const t = one.ok ? prozorroToTender(one.data?.data) : void 0;
         if (t && keepByQuery(t, q)) out2.push(t);
-        if (t && q.publishedFrom && t.publishedAt && t.publishedAt < q.publishedFrom) {
-          url = void 0;
-          break;
-        }
       }
-      url = url ? res.data?.next_page?.uri : void 0;
+      url = res.data?.next_page?.uri;
       if (!ids.length) url = void 0;
     }
-    const truncated = Boolean(url) && read2 >= budget;
+    const truncated = Boolean(url);
     return {
       tenders: out2,
       truncated,
@@ -17937,29 +17944,43 @@ var wwWorldBank = {
   kinds: ["call", "award", "prior"],
   availability: () => ({ available: true }),
   async search(q) {
+    const countries = q.countries.filter((c) => c !== "*");
+    const passes = countries.length ? countries : [void 0];
     const out2 = [];
-    let offset = 0;
-    let total;
-    const budget = Math.min(2e3, q.limit * 10);
-    while (offset < budget && out2.length < q.limit) {
-      const p = new URLSearchParams({ format: "json", rows: "100", os: String(offset), srt: "noticedate", order: "desc" });
-      if (q.keywords.length) p.set("qterm", q.keywords.join(" "));
-      const res = await getJson2(`${WB}?${p}`);
-      if (!res.ok) return { tenders: out2, total, truncated: true, reason: `World Bank refused: ${res.error ?? `HTTP ${res.status}`}` };
-      total = Number(res.data?.total) || total;
-      const rows = res.data?.procnotices ?? [];
-      offset += rows.length;
+    let total = 0;
+    let read2 = 0;
+    let partial = false;
+    for (const cc of passes) {
+      let offset = 0;
+      let passTotal;
+      const budget = Math.min(1e3, q.limit * 5);
       let older = false;
-      for (const n of rows) {
-        const t = worldBankToTender(n);
-        if (!t) continue;
-        if (q.publishedFrom && t.publishedAt && t.publishedAt < q.publishedFrom) older = true;
-        if (keepByQuery(t, { ...q, countries: q.countries.filter((c) => c !== "*") })) out2.push(t);
+      while (offset < budget && out2.length < q.limit && !older) {
+        const p = new URLSearchParams({ format: "json", rows: "100", os: String(offset), srt: "noticedate", order: "desc" });
+        if (q.keywords.length) p.set("qterm", q.keywords.join(" "));
+        if (cc) p.set("project_ctry_code", cc.toUpperCase());
+        const res = await getJson2(`${WB}?${p}`);
+        if (!res.ok) return { tenders: out2, total, truncated: true, reason: `World Bank refused: ${res.error ?? `HTTP ${res.status}`}` };
+        passTotal = Number(res.data?.total) || 0;
+        const rows = res.data?.procnotices ?? [];
+        offset += rows.length;
+        for (const n of rows) {
+          const t = worldBankToTender(n);
+          if (!t) continue;
+          if (cc) t.country = cc;
+          if (q.publishedFrom && t.publishedAt && t.publishedAt < q.publishedFrom) {
+            older = true;
+            continue;
+          }
+          if (keepByQuery(t, { ...q, countries: [] }) && out2.length < q.limit) out2.push(t);
+        }
+        if (rows.length === 0) break;
       }
-      if (rows.length === 0 || older) break;
+      total += passTotal ?? 0;
+      read2 += offset;
+      if (!older && passTotal !== void 0 && offset < passTotal) partial = true;
     }
-    const truncated = total !== void 0 && offset < total && out2.length >= q.limit;
-    return { tenders: out2.slice(0, q.limit), total, truncated, reason: truncated ? `World Bank holds ${total}; read ${offset}` : void 0 };
+    return { tenders: out2, total, truncated: partial, reason: partial ? `World Bank holds ${total} for this query; read ${read2}, newest first` : void 0 };
   },
   async canary() {
     const res = await getJson2(`${WB}?format=json&rows=3`);

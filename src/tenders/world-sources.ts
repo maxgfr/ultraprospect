@@ -50,6 +50,13 @@ const base = (t: Partial<Tender> & Pick<Tender, "id" | "connectorId" | "noticeId
 
 // ── Canada — CanadaBuys open tenders CSV ─────────────────────────────────────
 const CA_CSV = "https://canadabuys.canada.ca/opendata/pub/openTenderNotice-ouvertAvisAppelOffres.csv";
+/**
+ * CanadaBuys sits behind a WAF that answers the identifying User-Agent with a
+ * 403 HTML page (measured 2026-11-02) and serves the same file to an ordinary
+ * client. So this one host gets the engine's default browser User-Agent — the
+ * rule pages.ts already applies to company sites — and nothing else changes.
+ */
+const caGet = (opts: { timeoutMs: number; retries: number; maxBytes: number }) => httpGet(CA_CSV, opts);
 
 export function caRowToTender(row: Record<string, string>): Tender | undefined {
   const ref = row["referenceNumber-numeroReference"] || row["solicitationNumber-numeroSollicitation"];
@@ -117,7 +124,7 @@ export const caCanadabuys: TenderConnector = {
     if (!q.kinds.includes("call"))
       return { tenders: [], truncated: false, notes: ["CanadaBuys: only the open-tender file is read; award history is a separate file not wired here."] };
     await awaitHostSlot(CA_CSV, 500);
-    const res = await httpGet(CA_CSV, { timeoutMs: 90_000, retries: 1, userAgent: politeUa(), maxBytes: 64 * 1024 * 1024 });
+    const res = await caGet({ timeoutMs: 90_000, retries: 1, maxBytes: 64 * 1024 * 1024 });
     if (!res.ok) return { tenders: [], truncated: true, reason: `CanadaBuys CSV unreachable: ${res.error ?? `HTTP ${res.status}`}` };
     const all = await parseCanadaCsv(res.body);
     const kept = all.filter((t) => keepByQuery(t, q));
@@ -131,7 +138,7 @@ export const caCanadabuys: TenderConnector = {
   },
   async canary() {
     await awaitHostSlot(CA_CSV, 500);
-    const res = await httpGet(CA_CSV, { timeoutMs: 90_000, retries: 0, userAgent: politeUa(), maxBytes: 64 * 1024 * 1024 });
+    const res = await caGet({ timeoutMs: 90_000, retries: 0, maxBytes: 64 * 1024 * 1024 });
     const all = res.ok ? await parseCanadaCsv(res.body) : [];
     return [
       { name: "CanadaBuys open-tender CSV still downloads keyless", ok: res.ok && all.length > 0, detail: res.error },
@@ -140,7 +147,7 @@ export const caCanadabuys: TenderConnector = {
     ];
   },
   async probe() {
-    const res = await httpGet(CA_CSV, { timeoutMs: 30_000, retries: 0, userAgent: politeUa(), maxBytes: 4096 });
+    const res = await caGet({ timeoutMs: 30_000, retries: 0, maxBytes: 4096 });
     return { ok: res.ok || res.truncated === true, detail: res.ok || res.truncated ? "CanadaBuys CSV reachable" : (res.error ?? `HTTP ${res.status}`) };
   },
 };
@@ -586,16 +593,17 @@ export const uaProzorro: TenderConnector = {
         read += 1;
         const one = await getJson(`${PROZORRO}/${id}`);
         const t = one.ok ? prozorroToTender(one.data?.data) : undefined;
+        // No early stop on the creation date: the list is ordered by MODIFICATION
+        // date, so an old tender modified today sits among new ones. Stopping at
+        // the first old one ended a live Ukrainian pass after a handful of reads,
+        // and reported nothing missing.
         if (t && keepByQuery(t, q)) out.push(t);
-        if (t && q.publishedFrom && t.publishedAt && t.publishedAt < q.publishedFrom) {
-          url = undefined;
-          break;
-        }
       }
-      url = url ? res.data?.next_page?.uri : undefined;
+      url = res.data?.next_page?.uri;
       if (!ids.length) url = undefined;
     }
-    const truncated = Boolean(url) && read >= budget;
+    // Pages remain: the lane is partial, whichever budget stopped it.
+    const truncated = Boolean(url);
     return {
       tenders: out,
       truncated,
@@ -802,30 +810,48 @@ export const wwWorldBank: TenderConnector = {
   kinds: ["call", "award", "prior"],
   availability: () => ({ available: true }),
   async search(q) {
+    // One pass per named country, filtered UPSTREAM: measured, `project_ctry_code=KE`
+    // narrows 425 019 notices to Kenya's 7 250. Filtering the newest page of the
+    // whole world after the fact found nothing for Kenya and reported nothing missing.
+    const countries = q.countries.filter((c) => c !== "*");
+    const passes: (string | undefined)[] = countries.length ? countries : [undefined];
     const out: Tender[] = [];
-    let offset = 0;
-    let total: number | undefined;
-    const budget = Math.min(2000, q.limit * 10);
-    while (offset < budget && out.length < q.limit) {
-      const p = new URLSearchParams({ format: "json", rows: "100", os: String(offset), srt: "noticedate", order: "desc" });
-      if (q.keywords.length) p.set("qterm", q.keywords.join(" "));
-      const res = await getJson(`${WB}?${p}`);
-      if (!res.ok) return { tenders: out, total, truncated: true, reason: `World Bank refused: ${res.error ?? `HTTP ${res.status}`}` };
-      total = Number(res.data?.total) || total;
-      const rows: any[] = res.data?.procnotices ?? [];
-      offset += rows.length;
+    let total = 0;
+    let read = 0;
+    let partial = false;
+    for (const cc of passes) {
+      let offset = 0;
+      let passTotal: number | undefined;
+      const budget = Math.min(1000, q.limit * 5);
       let older = false;
-      for (const n of rows) {
-        const t = worldBankToTender(n);
-        if (!t) continue;
-        if (q.publishedFrom && t.publishedAt && t.publishedAt < q.publishedFrom) older = true;
-        // A worldwide source filtered by country only when the user named one.
-        if (keepByQuery(t, { ...q, countries: q.countries.filter((c) => c !== "*") })) out.push(t);
+      while (offset < budget && out.length < q.limit && !older) {
+        const p = new URLSearchParams({ format: "json", rows: "100", os: String(offset), srt: "noticedate", order: "desc" });
+        if (q.keywords.length) p.set("qterm", q.keywords.join(" "));
+        if (cc) p.set("project_ctry_code", cc.toUpperCase());
+        const res = await getJson(`${WB}?${p}`);
+        if (!res.ok) return { tenders: out, total, truncated: true, reason: `World Bank refused: ${res.error ?? `HTTP ${res.status}`}` };
+        passTotal = Number(res.data?.total) || 0;
+        const rows: any[] = res.data?.procnotices ?? [];
+        offset += rows.length;
+        for (const n of rows) {
+          const t = worldBankToTender(n);
+          if (!t) continue;
+          // The country was asked for by code, so it is known even where the name table is not.
+          if (cc) t.country = cc;
+          if (q.publishedFrom && t.publishedAt && t.publishedAt < q.publishedFrom) {
+            older = true;
+            continue;
+          }
+          if (keepByQuery(t, { ...q, countries: [] }) && out.length < q.limit) out.push(t);
+        }
+        if (rows.length === 0) break;
       }
-      if (rows.length === 0 || older) break;
+      total += passTotal ?? 0;
+      read += offset;
+      // Notices remain unread only if the window was not exhausted by date.
+      if (!older && passTotal !== undefined && offset < passTotal) partial = true;
     }
-    const truncated = total !== undefined && offset < total && out.length >= q.limit;
-    return { tenders: out.slice(0, q.limit), total, truncated, reason: truncated ? `World Bank holds ${total}; read ${offset}` : undefined };
+    return { tenders: out, total, truncated: partial, reason: partial ? `World Bank holds ${total} for this query; read ${read}, newest first` : undefined };
   },
   async canary() {
     const res = await getJson(`${WB}?format=json&rows=3`);

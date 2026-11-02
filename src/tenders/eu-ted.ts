@@ -114,7 +114,22 @@ export function tedQuery(q: TenderQuery): string {
   if (types.length) parts.push(`notice-type IN (${types.join(" ")})`);
   if (q.publishedFrom) parts.push(`publication-date>=${q.publishedFrom.replace(/-/g, "")}`);
   if (q.publishedTo) parts.push(`publication-date<=${q.publishedTo.replace(/-/g, "")}`);
-  return parts.join(" AND ") || "publication-date>=20000101";
+  // Newest first. Measured: TED's default order is OLDEST first, so a two-year
+  // awards window capped at --limit read the oldest notices of the window —
+  // and an unbounded query read 2016, before eForms, where no winner carries an
+  // identifier at all.
+  return `${parts.join(" AND ") || "publication-date>=20000101"} SORT BY publication-date DESC`;
+}
+
+/**
+ * A winner identifier that is a registration number, not a platform's internal
+ * reference. Measured on TED: "1819914-1-0-1", "1896386-1-2-1" — lot/tender
+ * bookkeeping that would otherwise pass for a company identity.
+ */
+export function isRegistrationId(raw: string | undefined): boolean {
+  const v = (raw ?? "").trim();
+  if (!v || !/\d{5,}/.test(v.replace(/\s/g, ""))) return false;
+  return !/^\d+(-\d+){2,}$/.test(v);
 }
 
 function firstArr(v: unknown): string | undefined {
@@ -162,7 +177,7 @@ export function toTender(n: any, now = new Date()): Tender | undefined {
   const conclusion = firstArr(n["contract-conclusion-date"]);
   const months = durationMonths(firstArr(n["duration-period-value-lot"]), firstArr(n["duration-period-unit-lot"]));
   const awards: TenderAward[] = winners.map((name, i) => ({
-    supplier: { name, legalId: winnerIds[i]?.trim() || undefined, country: iso2(winnerCountries[i]) },
+    supplier: { name, legalId: isRegistrationId(winnerIds[i]) ? winnerIds[i]!.trim() : undefined, country: iso2(winnerCountries[i]) },
     date: dayOf(Array.isArray(n["contract-conclusion-date"]) ? n["contract-conclusion-date"][i] : conclusion),
     durationMonths: months,
     size: sizes[i],
@@ -287,9 +302,9 @@ export const euTed: TenderConnector = {
 
   async canary() {
     const res = await post({
-      query: "classification-cpv IN (72000000) AND notice-type IN (can-standard) AND buyer-country IN (FRA)",
+      query: `classification-cpv IN (72000000) AND notice-type IN (can-standard) AND buyer-country IN (FRA) AND publication-date>=${new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10).replace(/-/g, "")} SORT BY publication-date DESC`,
       fields: TED_FIELDS,
-      limit: 3,
+      limit: 10,
       paginationMode: "ITERATION",
     });
     const notices: any[] = res.data?.notices ?? [];
@@ -298,6 +313,11 @@ export const euTed: TenderConnector = {
       { name: "TED v3 still answers an anonymous expert query", ok: res.ok && notices.length > 0, detail: res.error },
       { name: "TED still reports totalNoticeCount", ok: typeof res.data?.totalNoticeCount === "number" },
       { name: "TED still pages by iterationNextToken", ok: typeof res.data?.iterationNextToken === "string" },
+      {
+        name: "TED still honours SORT BY publication-date DESC",
+        ok: notices.length > 1 && String(notices[0]?.["publication-date"]) >= String(notices.at(-1)?.["publication-date"]),
+        detail: "without it, a capped window reads its OLDEST notices",
+      },
       {
         name: "TED award notices still name winners with identifiers",
         ok: t.some((x) => x.awards.some((a) => a.supplier.name && a.supplier.legalId)),

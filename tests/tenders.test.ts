@@ -10,7 +10,7 @@ import { runTenderCheck } from "../src/tenders/check.js";
 import { checklistFor } from "../src/tenders/checklists.js";
 import { expandCountries, legalIdOf } from "../src/tenders/commands.js";
 import { dedupeTenders } from "../src/tenders/dedupe.js";
-import { kindOfNoticeType, tedQuery, toTender as tedToTender } from "../src/tenders/eu-ted.js";
+import { isRegistrationId, kindOfNoticeType, tedQuery, toTender as tedToTender } from "../src/tenders/eu-ted.js";
 import { boampWhere, kindOfNature, toTender as boampToTender } from "../src/tenders/fr-boamp.js";
 import { tenderConnectorsFor, TENDER_CONNECTORS } from "../src/tenders/index.js";
 import { packageToTenders, releaseToTender } from "../src/tenders/ocds.js";
@@ -87,6 +87,17 @@ describe("TED", () => {
     expect(q).toContain("notice-type IN (cn-standard");
     expect(q).toContain("publication-date>=20261001");
     expect(tedQuery(query({ cpv: ["72"], keywords: ["x"], match: "all" }))).toContain('classification-cpv IN (72000000) AND FT~("x")');
+  });
+
+  it("asks newest first — TED's default order is oldest first", () => {
+    expect(tedQuery(query({ cpv: ["72"] }))).toMatch(/ SORT BY publication-date DESC$/);
+  });
+
+  it("keeps registration numbers as winner identities, not a platform's lot references", () => {
+    expect(isRegistrationId("938 703 626 00011")).toBe(true);
+    expect(isRegistrationId("609801535")).toBe(true);
+    expect(isRegistrationId("1819914-1-0-1")).toBe(false);
+    expect(isRegistrationId("France")).toBe(false);
   });
 
   it("reads eForms notice types as kinds", () => {

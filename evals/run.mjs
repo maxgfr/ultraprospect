@@ -321,16 +321,23 @@ async function network() {
   // nesting, every German opening would ship titled after a description block.
   const personio = await get("https://personio-sog.jobs.personio.de/xml");
   const positions = [...(personio.body || "").matchAll(/<position>([\s\S]*?)<\/position>/gi)];
-  check(
-    "personio still serves <position> blocks with <name> and <createdAt>",
-    positions.length > 0 && /<name>/.test(positions[0][1]) && /<createdAt>/.test(positions[0][1]),
-    "if this drifts, every company on Personio reads as not hiring — that is most of German SME hiring",
-  );
-  check(
-    "personio still nests a second <name> inside <jobDescriptions>",
-    /<jobDescriptions>[\s\S]*?<name>/i.test(positions[0]?.[1] ?? ""),
-    "the parser strips <jobDescriptions> before reading the title BECAUSE of this nesting; if it is gone the strip is dead code, not a bug",
-  );
+  // A well-formed, EMPTY feed is a company with no openings today, not a format
+  // change: measured on 2026-11-02, this board answered `<workzag-jobs>` with no
+  // position at all. Nothing can be asserted about a shape that is not there.
+  if (positions.length === 0 && /<workzag-jobs>/.test(personio.body || "")) {
+    console.log("  --    personio: the probe company has no open position today — shape not checkable, inconclusive");
+  } else {
+    check(
+      "personio still serves <position> blocks with <name> and <createdAt>",
+      positions.length > 0 && /<name>/.test(positions[0][1]) && /<createdAt>/.test(positions[0][1]),
+      "if this drifts, every company on Personio reads as not hiring — that is most of German SME hiring",
+    );
+    check(
+      "personio still nests a second <name> inside <jobDescriptions>",
+      /<jobDescriptions>[\s\S]*?<name>/i.test(positions[0]?.[1] ?? ""),
+      "the parser strips <jobDescriptions> before reading the title BECAUSE of this nesting; if it is gone the strip is dead code, not a bug",
+    );
+  }
 
   const smart = await get("https://api.smartrecruiters.com/v1/companies/smartrecruiters/postings?limit=1");
   const smartJson = JSON.parse(smart.body || "{}");
