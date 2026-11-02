@@ -25,7 +25,7 @@ import { Readable } from "node:stream";
 import { awaitHostSlot, httpGet, httpJson } from "../engine.js";
 import { politeUa } from "../net.js";
 import { csvRecords } from "../snapshot.js";
-import type { SearchOutcome, Tender, TenderConnector, TenderQuery } from "./types.js";
+import type { Tender, TenderConnector } from "./types.js";
 import { dayFromDmy, dayOf, iso2, keepByQuery, money, natureOf, statusFromDeadline, plainText, today } from "./util.js";
 
 async function getJson(url: string, headers?: Record<string, string>): Promise<{ ok: boolean; data?: any; error?: string; status?: number }> {

@@ -23,7 +23,7 @@
 import { awaitHostSlot, httpJson } from "../engine.js";
 import { politeUa } from "../net.js";
 import type { NoticeKind, SearchOutcome, Tender, TenderConnector, TenderQuery } from "./types.js";
-import { dayOf, keepByQuery, money, natureOf, readEforms, statusFromDeadline } from "./util.js";
+import { dayOf, keepByQuery, natureOf, readEforms, statusFromDeadline } from "./util.js";
 
 const BASE = "https://boamp-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/boamp/records";
 const CONNECTOR_ID = "fr-boamp";
