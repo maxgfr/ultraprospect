@@ -19160,12 +19160,13 @@ function applyVerdicts(places, verdicts) {
     const key = verdictKey(v, known);
     const osmPlace = byOsm.get(v.osmId);
     const recPlace = key ? byRecord.get(key) : void 0;
-    if (!osmPlace || !recPlace || osmPlace === recPlace) {
+    if (!osmPlace || !recPlace || osmPlace === recPlace || recPlace.id === "" || recPlace.osm || osmPlace.registry) {
       unknown.push(`${v.osmId} <-> ${key ?? v.registryId ?? "?"}`);
       continue;
     }
     osmPlace.registry = recPlace.registry;
-    osmPlace.registryEvidence = recPlace.registryEvidence ?? { mode: "sweep", how: "agent-adjudicated" };
+    osmPlace.registryEvidence = { ...recPlace.registryEvidence ?? { mode: "sweep" }, how: "agent-adjudicated" };
+    osmPlace.matchedBy = "agent";
     osmPlace.sources = [.../* @__PURE__ */ new Set([...osmPlace.sources, "registry"])];
     osmPlace.matchConfidence = 1;
     osmPlace.address = { ...recPlace.address, ...osmPlace.address };
@@ -22278,6 +22279,7 @@ var EVIDENCE_LABELS = {
   "verified-id": "by a published registration number",
   "name-lookup": "by a name lookup",
   "sweep-match": "by enumerating the territory",
+  "agent-adjudicated": "by the agent's adjudication of an undecided pair",
   "osm-identifier": "by an identifier declared in OSM"
 };
 function briefOf(places) {
@@ -27261,7 +27263,7 @@ async function cmdMatch(values, bools) {
   const manifest = requireManifest(runDir);
   manifest.counts.places = places.length;
   manifest.counts.merged += result.merged;
-  manifest.counts.undecided = Math.max(0, manifest.counts.undecided - verdicts.length);
+  manifest.counts.undecided = Math.max(0, manifest.counts.undecided - result.merged - result.skipped);
   manifest.notes.push(`match: folded ${verdicts.length} adjudication(s) \u2014 ${result.merged} merged, ${result.skipped} kept apart`);
   writeRunManifest(runDir, manifest);
   if (bools.has("json")) out(jsonLine({ run: runDir, ...result, places: places.length }));

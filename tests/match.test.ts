@@ -268,6 +268,61 @@ describe("applyVerdicts", () => {
     expect(list[0]!.address.commune).toBe("VINCENNES");
   });
 
+  it("says an adjudicated merge was adjudicated, not matched by the scorer", () => {
+    const list = places();
+    list[1]!.registryEvidence = { mode: "sweep", how: "sweep-match" };
+    applyVerdicts(list, [{ osmId: "n1", registryId: "A", connectorId: "fr-sirene", merge: true }]);
+    expect(list[0]!.registryEvidence?.how).toBe("agent-adjudicated");
+    expect(list[0]!.matchedBy).toBe("agent");
+  });
+
+  it("attaches one register record to one place, however many verdicts name it", () => {
+    const list = places();
+    list.push({ ...places()[0]!, id: "osm:n2", name: "Naturalia Bio", osm: { ...poi(), id: "n2", osmId: 2 } });
+    const result = applyVerdicts(list, [
+      { osmId: "n1", registryId: "A", connectorId: "fr-sirene", merge: true },
+      { osmId: "n2", registryId: "A", connectorId: "fr-sirene", merge: true },
+    ]);
+    expect(result.merged).toBe(1);
+    expect(result.unknown).toHaveLength(1);
+    expect(list.filter((p) => p.registry?.establishmentId === "A")).toHaveLength(1);
+    expect(list.map((p) => p.id).sort()).toEqual(["osm:n1", "osm:n2"]);
+  });
+
+  it("does not overwrite a register identity a place already has", () => {
+    const list = places();
+    list.push({ ...places()[1]!, id: "fr-sirene:B", name: "AUTRE SOCIETE", registry: rec({ establishmentId: "B" }) });
+    const result = applyVerdicts(list, [
+      { osmId: "n1", registryId: "A", connectorId: "fr-sirene", merge: true },
+      { osmId: "n1", registryId: "B", connectorId: "fr-sirene", merge: true },
+    ]);
+    expect(result.merged).toBe(1);
+    expect(result.unknown).toHaveLength(1);
+    expect(list[0]!.registry?.establishmentId).toBe("A");
+    // Record B is still in the run, as the register-only place it was.
+    expect(list.some((p) => p.id === "fr-sirene:B")).toBe(true);
+  });
+
+  it("never deletes an OSM place because a verdict named the record it already carries", () => {
+    const list = places();
+    // The scorer already fused record A into shopfront n5: website, contacts and all.
+    list[1] = { ...list[1]!, id: "osm:n5", sources: ["osm", "registry"], osm: { ...poi(), id: "n5", osmId: 5 } };
+    const result = applyVerdicts(list, [{ osmId: "n1", registryId: "A", connectorId: "fr-sirene", merge: true }]);
+    expect(result.merged).toBe(0);
+    expect(result.unknown).toHaveLength(1);
+    expect(list.map((p) => p.id)).toEqual(["osm:n1", "osm:n5"]);
+  });
+
+  it("is idempotent: the same file applied twice changes nothing the second time", () => {
+    const list = places();
+    const verdicts = [{ osmId: "n1", registryId: "A", connectorId: "fr-sirene", merge: true }];
+    applyVerdicts(list, verdicts);
+    const snapshot = JSON.stringify(list);
+    const again = applyVerdicts(list, verdicts);
+    expect(again.merged).toBe(0);
+    expect(JSON.stringify(list)).toBe(snapshot);
+  });
+
   it("changes nothing for a keep-apart verdict", () => {
     // Recording a "no" as a change would make the run non-idempotent.
     const list = places();

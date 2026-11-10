@@ -437,14 +437,30 @@ export function applyVerdicts(places: Place[], verdicts: readonly MatchVerdict[]
     const key = verdictKey(v, known);
     const osmPlace = byOsm.get(v.osmId);
     const recPlace = key ? byRecord.get(key) : undefined;
-    if (!osmPlace || !recPlace || osmPlace === recPlace) {
+    // A verdict joins ONE unmatched shopfront to ONE unmatched register record.
+    // Each of the three refusals below was a way to lose a company without a
+    // line of output:
+    //   - a record already folded into a place by this very file would be
+    //     attached a second time (two verdicts naming the same record);
+    //   - an OSM place that already carries a register identity would have it
+    //     overwritten, and the record it replaced would vanish from the run;
+    //   - a "register" side that is itself an OSM place, merged by the scorer,
+    //     would be deleted with its website and contacts.
+    // The same verdict applied twice lands in the last case, which is also what
+    // makes re-applying a file safe.
+    if (!osmPlace || !recPlace || osmPlace === recPlace || recPlace.id === "" || recPlace.osm || osmPlace.registry) {
       unknown.push(`${v.osmId} <-> ${key ?? v.registryId ?? "?"}`);
       continue;
     }
     // Keep the OSM entity as the survivor: it carries the physical identity
     // (name on the door, coordinates, category) the rest of the run keys on.
     osmPlace.registry = recPlace.registry;
-    osmPlace.registryEvidence = recPlace.registryEvidence ?? { mode: "sweep", how: "agent-adjudicated" };
+    // Said to be what it is. A register-only place always carries the evidence
+    // of how its RECORD was found ("sweep-match"), so falling back to
+    // "agent-adjudicated" only when that was absent never fired, and every
+    // adjudicated merge was reported as one the scorer had made on its own.
+    osmPlace.registryEvidence = { ...(recPlace.registryEvidence ?? { mode: "sweep" as const }), how: "agent-adjudicated" };
+    osmPlace.matchedBy = "agent";
     osmPlace.sources = [...new Set([...osmPlace.sources, "registry" as const])];
     osmPlace.matchConfidence = 1;
     osmPlace.address = { ...recPlace.address, ...osmPlace.address };

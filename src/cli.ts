@@ -839,7 +839,10 @@ async function cmdMatch(values: Record<string, string>, bools: ReadonlySet<strin
   const manifest = requireManifest(runDir);
   manifest.counts.places = places.length;
   manifest.counts.merged += result.merged;
-  manifest.counts.undecided = Math.max(0, manifest.counts.undecided - verdicts.length);
+  // Only the verdicts that named a pair this run has. Subtracting the whole
+  // file let one stray entry — or the same file applied twice — report pairs as
+  // settled that nobody had looked at.
+  manifest.counts.undecided = Math.max(0, manifest.counts.undecided - result.merged - result.skipped);
   manifest.notes.push(`match: folded ${verdicts.length} adjudication(s) — ${result.merged} merged, ${result.skipped} kept apart`);
   writeRunManifest(runDir, manifest);
 

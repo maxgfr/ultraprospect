@@ -135,6 +135,7 @@ const EVIDENCE_LABELS: Record<string, string> = {
   "verified-id": "by a published registration number",
   "name-lookup": "by a name lookup",
   "sweep-match": "by enumerating the territory",
+  "agent-adjudicated": "by the agent's adjudication of an undecided pair",
   "osm-identifier": "by an identifier declared in OSM",
 };
 

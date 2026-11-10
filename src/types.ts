@@ -254,7 +254,7 @@ export interface Place {
   /** How the register record got attached, and what backs it. */
   registryEvidence?: {
     mode: RegistryMode;
-    /** "verified-id" | "name-lookup" | "sweep-match" | "osm-identifier". */
+    /** "verified-id" | "name-lookup" | "sweep-match" | "osm-identifier" | "agent-adjudicated". */
     how: string;
     /** Page id the legal identifier was read from, when there was one. */
     from?: string;
