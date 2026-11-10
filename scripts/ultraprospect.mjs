@@ -19926,6 +19926,7 @@ async function runConfirm(runDir, places, opts = {}) {
     opts.onProgress?.(done, targets.length, place.name);
     let attached;
     const found = [];
+    const contradicted = /* @__PURE__ */ new Set();
     let anyAnswer = false;
     for (const pageId of place.pages) {
       if (attached) break;
@@ -19949,6 +19950,7 @@ async function runConfirm(runDir, places, opts = {}) {
         const { score } = scoreLookup(place, rec);
         if (score < 0.3 && !sharesToken(place, rec)) {
           note(`confirm: ${place.name} published ${id.value}, but the register returned "${rec.names[0]}" \u2014 not attached`);
+          contradicted.add(`${id.kind}:${id.value}`);
           found.push({
             kind: id.kind,
             value: id.value,
@@ -19972,7 +19974,7 @@ async function runConfirm(runDir, places, opts = {}) {
         if (!existing || existing.status === "unverified" && f.status !== "unverified") byValue.set(key, f);
       }
       place.legalIds = [...byValue.values()];
-      outcome.attested += place.legalIds.filter((f) => f.status !== "verified").length;
+      outcome.attested += place.legalIds.filter((f) => f.status !== "verified" && !contradicted.has(`${f.kind}:${f.value}`)).length;
     }
     if (!attached) {
       const query = {

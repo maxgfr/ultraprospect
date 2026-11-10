@@ -136,6 +136,31 @@ describe("runConfirm — the published-identifier route", () => {
     expect(p.legalIds?.every((id) => id.status !== "verified")).toBe(true);
   });
 
+  it("does not count as attested an identifier whose authority named somebody else", async () => {
+    // "Number read, holder not named" is the line this count is printed under.
+    // Here a holder WAS named, and it was another company: that is a refusal,
+    // and adding it to the count reported a contradiction as a confirmation.
+    selection.confirm = [
+      fake({
+        id: "gleif",
+        canVerify: (id) => id.kind !== "vat",
+        verifyId: async () =>
+          rec({ connectorId: "gleif", legalName: "UGE Klein Dammerow Eins GmbH & Co. KG", names: ["UGE Klein Dammerow Eins GmbH & Co. KG"] }),
+      }),
+      fake({ id: "eu-vies", canVerify: (id) => id.kind === "vat", verifyId: async () => undefined }),
+    ];
+
+    const p = place({ pages: ["P1"] });
+    const dir = runWithPage(p.id, "P1", IMPRESSUM);
+    const outcome = await runConfirm(dir, [p], { countryCode: "de" });
+
+    // Both identifiers are on the record, neither as an identity…
+    expect(p.legalIds?.map((id) => `${id.value}:${id.status}`).sort()).toEqual(["DE811907980:unverified", "HRB 158855:unverified"]);
+    expect(p.legalIds?.find((id) => id.kind === "hrb")?.note).toContain("which is not this company");
+    // …and only the VAT number, which nobody contradicted, is attested.
+    expect(outcome.attested).toBe(1);
+  });
+
   it("records an identifier no authority could attribute, and does not invent one", async () => {
     // Germany and Spain answer VIES with a valid number and no name. That is a
     // real finding and it is not an identity.

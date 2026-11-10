@@ -295,6 +295,10 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
     // ---- Route 1: an identifier the company published on its own site -------
     let attached: { rec: RegistryRecord; how: string; from?: string; legalId?: string } | undefined;
     const found: NonNullable<Place["legalIds"]> = [];
+    // Identifiers an authority answered about by naming a DIFFERENT company.
+    // They stay on the record, sourced and unverified, and are kept out of the
+    // attested count below.
+    const contradicted = new Set<string>();
     // Did ANY authority actually reply about this place, on either route? A
     // place nobody could be asked about is not a place with no register record.
     let anyAnswer = false;
@@ -336,6 +340,7 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
           // Not "attested": the authority named SOMEBODY, and it was not this
           // company. In Germany that is usually the register number's fault
           // rather than the page's — HRA/HRB numbers repeat across courts.
+          contradicted.add(`${id.kind}:${id.value}`);
           found.push({
             kind: id.kind,
             value: id.value,
@@ -363,7 +368,11 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
         if (!existing || (existing.status === "unverified" && f.status !== "unverified")) byValue.set(key, f);
       }
       place.legalIds = [...byValue.values()];
-      outcome.attested += place.legalIds.filter((f) => f.status !== "verified").length;
+      // Only the identifiers no authority contradicted. This used to count every
+      // row that was not verified, the refused ones included, so a German number
+      // GLEIF resolved to a company in another Land was reported as "number
+      // read, holder not named" — when a holder had been named, and was wrong.
+      outcome.attested += place.legalIds.filter((f) => f.status !== "verified" && !contradicted.has(`${f.kind}:${f.value}`)).length;
     }
 
     // ---- Route 2: ask the register for the name in the town -----------------
