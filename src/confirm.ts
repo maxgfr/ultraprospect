@@ -42,8 +42,10 @@ export interface ConfirmOptions {
   countryCode?: string;
   /** The run's territory, used when a place carries no locality of its own. */
   town?: string;
-  /** Only work on this many places. */
+  /** Only work on this many places. Applied AFTER `only`, the order `enrich` and `resolve` use. */
   limit?: number;
+  /** Place ids to confirm. Empty or absent means every place that still needs a record. */
+  only?: readonly string[];
   /** Restrict to these connector ids. */
   registryIds?: string[];
   /** Credentials, by connector id. */
@@ -240,7 +242,19 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
   const coverage = legalIdCoverage(opts.countryCode);
   note(`confirm: ${coverage.note}`);
 
-  const targets = needsConfirming(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
+  // `only` exists because `limit` is a prefix, not a choice. The strongest-first
+  // order decides WHICH places a limit keeps, never which ones the caller cares
+  // about: on a live Hamburg run of 2 584 offices the sixty-two worth confirming
+  // could not be named, and the command without a limit set off on 2 535 name
+  // lookups against GLEIF before it was stopped. Narrowing only ever removes
+  // work — a place already carrying a record is not asked about again because
+  // it was named — and the limit applies after it, as in `enrich` and `resolve`.
+  let targets = needsConfirming(places);
+  if (opts.only?.length) {
+    const wanted = new Set(opts.only);
+    targets = targets.filter((p) => wanted.has(p.id));
+  }
+  if (opts.limit) targets = targets.slice(0, opts.limit);
   outcome.coverage.requested = targets.length;
 
   // Say what this is going to cost before spending it. A name lookup is one

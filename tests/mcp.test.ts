@@ -184,6 +184,16 @@ describe("the surface matches what the CLI does", () => {
     for (const key of ["roles", "terms", "termsOn"]) expect(props).toHaveProperty(key);
   });
 
+  it("lets confirm be aimed at a list of place ids, as resolve and enrich can", async () => {
+    expect(await schemaOf("ultraprospect_confirm")).toHaveProperty("only");
+    // The selection is applied before the pre-flight: an id that is not a place
+    // waiting for a record is an answer, not the "no fetched page" refusal the
+    // whole run would have earned.
+    const res = await call("ultraprospect_confirm", { run: emptyRun(), only: "osm:not-in-this-run" });
+    expect(res.isError).toBe(false);
+    expect(JSON.parse(res.text).note).toMatch(/none of the ids in `only`/);
+  });
+
   it("refuses a radius that is not a distance instead of sweeping the whole town", async () => {
     const res = await call("ultraprospect_scan", { query: "48.85,2.35", radius: "2 miles" });
     expect(res.isError).toBe(true);

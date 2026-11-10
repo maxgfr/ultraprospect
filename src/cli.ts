@@ -333,7 +333,9 @@ BULK OPEN DATA (ingest)
   --limit <n>            Stop after this many rows. For a first look at a new source.
 
 REGISTER CONFIRMATION (confirm)
-  --limit <n>            Only confirm this many places.
+  --only <ids>           Confirm just these place ids, comma-separated. --limit takes a
+                         prefix; this takes the ones you actually care about.
+  --limit <n>            Only confirm this many places, after --only.
   --companies-house-key <key>   UK Companies House key. Free, email only. Or set the env var.
 
 DELIVERABLES (render)
@@ -580,9 +582,18 @@ async function cmdConfirm(values: Record<string, string>, bools: ReadonlySet<str
   const places = readPlaces(runDir);
   const country = manifest.target.countryCode;
 
-  const targets = needsConfirming(places);
+  // The pre-flight below is about the places this invocation was aimed at, so
+  // the selection is applied before it: `--only` naming three places without a
+  // page must be refused, even when a thousand others in the run have one.
+  const only = list(values.only);
+  const wanted = only ? new Set(only) : undefined;
+  const targets = needsConfirming(places).filter((p) => !wanted || wanted.has(p.id));
   if (targets.length === 0) {
-    say("confirm: every place already carries a register record — nothing to do");
+    say(
+      only
+        ? `confirm: none of the ${only.length} id(s) given to --only is a place still waiting for a register record — nothing to do`
+        : "confirm: every place already carries a register record — nothing to do",
+    );
     if (bools.has("json")) out(jsonLine({ run: runDir, verified: 0, matched: 0, undecided: 0, notFound: 0 }));
     return EXIT_OK;
   }
@@ -603,6 +614,7 @@ async function cmdConfirm(values: Record<string, string>, bools: ReadonlySet<str
     countryCode: country,
     town: manifest.target.label,
     limit: values.limit ? flagInt("limit", values.limit, 1, 100_000, 200) : undefined,
+    only,
     registryIds: list(values.registry),
     keys: connectorKeys(values),
     onNote: (n) => say(`  ${n}`),

@@ -19894,7 +19894,12 @@ async function runConfirm(runDir, places, opts = {}) {
   }
   const coverage2 = legalIdCoverage(opts.countryCode);
   note(`confirm: ${coverage2.note}`);
-  const targets = needsConfirming(places).slice(0, opts.limit ?? Number.POSITIVE_INFINITY);
+  let targets = needsConfirming(places);
+  if (opts.only?.length) {
+    const wanted = new Set(opts.only);
+    targets = targets.filter((p) => wanted.has(p.id));
+  }
+  if (opts.limit) targets = targets.slice(0, opts.limit);
   outcome.coverage.requested = targets.length;
   const withPages = targets.filter((p) => p.pages.length > 0).length;
   const speculative = targets.length - withPages;
@@ -25760,7 +25765,11 @@ var TOOLS = [
       type: "object",
       properties: {
         run: { type: "string" },
-        limit: { type: "number", description: "Only confirm this many places. The strongest route runs first, so a limit cuts the speculative half." },
+        only: { type: "string", description: "Restrict to these place ids, comma-separated. A limit is a prefix; this aims the pass." },
+        limit: {
+          type: "number",
+          description: "Only confirm this many places, after `only`. The strongest route runs first, so a limit cuts the speculative half."
+        },
         registry: { type: "string", description: "Restrict to these connector ids, comma-separated." }
       },
       required: ["run"]
@@ -25969,9 +25978,13 @@ ${JSON.stringify({ ok: report2.ok, errors: report2.errors, warnings: report2.war
           const runDir = resolveRun(str3(args.run, "run"));
           const manifest = requireManifest(runDir);
           const places = readPlaces(runDir);
-          const targets = needsConfirming(places);
-          if (targets.length === 0)
-            return { text: JSON.stringify({ run: runDir, verified: 0, matched: 0, note: "every place already carries a register record" }, null, 2) };
+          const only = csvArg(args.only);
+          const wanted = only ? new Set(only) : void 0;
+          const targets = needsConfirming(places).filter((p) => !wanted || wanted.has(p.id));
+          if (targets.length === 0) {
+            const note = only ? "none of the ids in `only` is a place still waiting for a register record" : "every place already carries a register record";
+            return { text: JSON.stringify({ run: runDir, verified: 0, matched: 0, note }, null, 2) };
+          }
           if (targets.filter((p) => p.pages.length > 0).length === 0) {
             throw new ToolError(
               `none of the ${targets.length} place(s) has a fetched page, so no legal notice can be read. Run ultraprospect_enrich with tier 1 first (which needs resolve's corroborated websites).`
@@ -25982,6 +25995,7 @@ ${JSON.stringify({ ok: report2.ok, errors: report2.errors, warnings: report2.war
             countryCode: manifest.target.countryCode,
             town: manifest.target.label,
             limit: typeof args.limit === "number" ? clampInt(args.limit, 1, 1e5, 200) : void 0,
+            only,
             registryIds: typeof args.registry === "string" ? args.registry.split(",").map((s) => s.trim()) : void 0,
             keys: envKeys(),
             onNote: (n) => notes.push(n)
@@ -27150,7 +27164,9 @@ BULK OPEN DATA (ingest)
   --limit <n>            Stop after this many rows. For a first look at a new source.
 
 REGISTER CONFIRMATION (confirm)
-  --limit <n>            Only confirm this many places.
+  --only <ids>           Confirm just these place ids, comma-separated. --limit takes a
+                         prefix; this takes the ones you actually care about.
+  --limit <n>            Only confirm this many places, after --only.
   --companies-house-key <key>   UK Companies House key. Free, email only. Or set the env var.
 
 DELIVERABLES (render)
@@ -27334,9 +27350,13 @@ async function cmdConfirm(values, bools) {
   const manifest = requireManifest(runDir);
   const places = readPlaces(runDir);
   const country = manifest.target.countryCode;
-  const targets = needsConfirming(places);
+  const only = list2(values.only);
+  const wanted = only ? new Set(only) : void 0;
+  const targets = needsConfirming(places).filter((p) => !wanted || wanted.has(p.id));
   if (targets.length === 0) {
-    say("confirm: every place already carries a register record \u2014 nothing to do");
+    say(
+      only ? `confirm: none of the ${only.length} id(s) given to --only is a place still waiting for a register record \u2014 nothing to do` : "confirm: every place already carries a register record \u2014 nothing to do"
+    );
     if (bools.has("json")) out(jsonLine({ run: runDir, verified: 0, matched: 0, undecided: 0, notFound: 0 }));
     return EXIT_OK;
   }
@@ -27352,6 +27372,7 @@ async function cmdConfirm(values, bools) {
     countryCode: country,
     town: manifest.target.label,
     limit: values.limit ? flagInt("limit", values.limit, 1, 1e5, 200) : void 0,
+    only,
     registryIds: list2(values.registry),
     keys: connectorKeys(values),
     onNote: (n) => say(`  ${n}`),

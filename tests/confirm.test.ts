@@ -262,6 +262,45 @@ describe("runConfirm — coverage honesty", () => {
     expect(outcome.coverage.requested).toBe(2);
   });
 
+  it("honours --only, and applies --limit after it", async () => {
+    // A limit is a prefix of the strongest-first order; it cannot be aimed. On a
+    // live Hamburg run the sixty-two offices worth confirming could not be
+    // named, and the unlimited command set off on 2 535 name lookups.
+    const asked: string[] = [];
+    selection.confirm = [
+      fake({
+        lookup: async (query) => {
+          asked.push(query.names[0]!);
+          return [];
+        },
+      }),
+    ];
+    const places = [
+      place({ id: "a", name: "Alpha" }),
+      place({ id: "b", name: "Bravo" }),
+      place({ id: "c", name: "Charlie" }),
+      place({ id: "d", name: "Delta" }),
+    ];
+    const dir = mkdtempSync(join(tmpdir(), "up-"));
+
+    const aimed = await runConfirm(dir, places, { countryCode: "de", only: ["d", "b", "not-a-place"] });
+    expect(aimed.coverage.requested).toBe(2);
+    expect(asked.sort()).toEqual(["Bravo", "Delta"]);
+
+    asked.length = 0;
+    const capped = await runConfirm(dir, places, { countryCode: "de", only: ["d", "b"], limit: 1 });
+    expect(capped.coverage.requested).toBe(1);
+    expect(asked).toEqual(["Bravo"]);
+  });
+
+  it("does not ask again about a place that already carries a record because --only named it", async () => {
+    const lookup = vi.fn(async () => []);
+    selection.confirm = [fake({ lookup })];
+    const outcome = await runConfirm(mkdtempSync(join(tmpdir(), "up-")), [place({ id: "a", registry: rec() })], { countryCode: "de", only: ["a"] });
+    expect(outcome.coverage.requested).toBe(0);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
   // "The register said no" and "the register never answered" were the same
   // number. Companies House allows 600 requests per five minutes and a confirm
   // run is one request per company, so a throttled run reported real businesses

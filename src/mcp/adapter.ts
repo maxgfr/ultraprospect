@@ -176,7 +176,11 @@ const TOOLS: ToolDecl[] = [
       type: "object",
       properties: {
         run: { type: "string" },
-        limit: { type: "number", description: "Only confirm this many places. The strongest route runs first, so a limit cuts the speculative half." },
+        only: { type: "string", description: "Restrict to these place ids, comma-separated. A limit is a prefix; this aims the pass." },
+        limit: {
+          type: "number",
+          description: "Only confirm this many places, after `only`. The strongest route runs first, so a limit cuts the speculative half.",
+        },
         registry: { type: "string", description: "Restrict to these connector ids, comma-separated." },
       },
       required: ["run"],
@@ -407,9 +411,15 @@ export function createAdapter(): McpAdapter {
           const runDir = resolveRun(str(args.run, "run"));
           const manifest = requireManifest(runDir);
           const places = readPlaces(runDir);
-          const targets = needsConfirming(places);
-          if (targets.length === 0)
-            return { text: JSON.stringify({ run: runDir, verified: 0, matched: 0, note: "every place already carries a register record" }, null, 2) };
+          // Applied before the pre-flight, as the CLI does: the refusals below are
+          // about the places this call was aimed at, not about the whole run.
+          const only = csvArg(args.only);
+          const wanted = only ? new Set(only) : undefined;
+          const targets = needsConfirming(places).filter((p) => !wanted || wanted.has(p.id));
+          if (targets.length === 0) {
+            const note = only ? "none of the ids in `only` is a place still waiting for a register record" : "every place already carries a register record";
+            return { text: JSON.stringify({ run: runDir, verified: 0, matched: 0, note }, null, 2) };
+          }
           // The same refusal the CLI makes, and for the same reason: without pages
           // the only route left is a name lookup, and a run that quietly fell back
           // to it would fill the same field with weaker evidence.
@@ -423,6 +433,7 @@ export function createAdapter(): McpAdapter {
             countryCode: manifest.target.countryCode,
             town: manifest.target.label,
             limit: typeof args.limit === "number" ? clampInt(args.limit, 1, 100_000, 200) : undefined,
+            only,
             registryIds: typeof args.registry === "string" ? args.registry.split(",").map((s) => s.trim()) : undefined,
             keys: envKeys(),
             onNote: (n) => notes.push(n),
