@@ -20063,7 +20063,7 @@ function persistConfirm(runDir, places, manifest, outcome) {
 function mergeRegistryRecords(runDir, fresh) {
   const existing = readJsonSafe(join15(runDir, "registry.json")) ?? [];
   const byKey = /* @__PURE__ */ new Map();
-  for (const rec of [...existing, ...fresh]) byKey.set(`${rec.connectorId}:${rec.establishmentId ?? rec.id}`, rec);
+  for (const rec of [...existing, ...fresh]) byKey.set(recordKey(rec), rec);
   return [...byKey.values()];
 }
 

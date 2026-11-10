@@ -26,6 +26,7 @@
 // read exactly like a Vincennes run.
 import { connectorsFor, noSweepReason, unknownConnectorIds } from "./registry/index.js";
 import type { ConnectorContext, LegalId, RegistryConnector, RegistryRecord } from "./registry/types.js";
+import { recordKey } from "./registry/types.js";
 import { MERGE_HIGH, MERGE_LOW } from "./match.js";
 import { extractLegalIds, legalIdCoverage } from "./legal-notice.js";
 import { join } from "node:path";
@@ -496,6 +497,6 @@ export function persistConfirm(runDir: string, places: Place[], manifest: RunMan
 function mergeRegistryRecords(runDir: string, fresh: readonly RegistryRecord[]): RegistryRecord[] {
   const existing = (readJsonSafe(join(runDir, "registry.json")) as RegistryRecord[] | undefined) ?? [];
   const byKey = new Map<string, RegistryRecord>();
-  for (const rec of [...existing, ...fresh]) byKey.set(`${rec.connectorId}:${rec.establishmentId ?? rec.id}`, rec);
+  for (const rec of [...existing, ...fresh]) byKey.set(recordKey(rec), rec);
   return [...byKey.values()];
 }
