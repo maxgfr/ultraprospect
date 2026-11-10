@@ -13710,6 +13710,7 @@ import { createReadStream as createReadStream2, createWriteStream } from "fs";
 import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync6, readdirSync as readdirSync4, rmSync as rmSync3, statSync as statSync6, writeFileSync as writeFileSync6 } from "fs";
 import { createInterface as createInterface2 } from "readline";
 import { Readable } from "stream";
+import { StringDecoder } from "string_decoder";
 import { pipeline } from "stream/promises";
 import { join as join5 } from "path";
 
@@ -14124,9 +14125,12 @@ async function* csvRecords(stream, delimiter = ",") {
   let quoted = false;
   let pending = false;
   let atStart = true;
+  const decoder = new StringDecoder("utf8");
+  let held = "";
   for await (const chunk of stream) {
-    let text3 = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-    if (atStart) {
+    let text3 = held + (typeof chunk === "string" ? chunk : decoder.write(chunk));
+    held = "";
+    if (atStart && text3.length > 0) {
       text3 = text3.replace(/^\uFEFF/, "");
       atStart = false;
     }
@@ -14136,6 +14140,10 @@ async function* csvRecords(stream, delimiter = ",") {
         if (c !== '"') {
           field += c;
           continue;
+        }
+        if (i === text3.length - 1) {
+          held = c;
+          break;
         }
         if (text3[i + 1] === '"') {
           field += '"';
@@ -14168,31 +14176,28 @@ async function* csvRecords(stream, delimiter = ",") {
       pending = true;
     }
   }
-  if (field.length || row2.length) {
+  if (field.length || row2.length || held) {
     row2.push(field);
     yield row2;
   }
 }
+function* decodedLines(chunks) {
+  const decoder = new StringDecoder("utf8");
+  let tail = "";
+  for (const chunk of chunks) {
+    const parts = (tail + decoder.write(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength))).split("\n");
+    tail = parts.pop() ?? "";
+    for (const line of parts) if (line) yield line;
+  }
+  tail += decoder.end();
+  if (tail.trim()) yield tail;
+}
 async function* rowsOf(source2, path) {
   if (source2.format === "jsonl.bz2") {
     const compressed = readFileSync6(path);
-    let tail = "";
-    for (const block2 of bunzip2Blocks(compressed)) {
-      const text3 = tail + Buffer.from(block2).toString("utf8");
-      const parts = text3.split("\n");
-      tail = parts.pop() ?? "";
-      for (const line of parts) {
-        if (!line) continue;
-        try {
-          yield JSON.parse(line);
-        } catch {
-          yield void 0;
-        }
-      }
-    }
-    if (tail.trim()) {
+    for (const line of decodedLines(bunzip2Blocks(compressed))) {
       try {
-        yield JSON.parse(tail);
+        yield JSON.parse(line);
       } catch {
         yield void 0;
       }

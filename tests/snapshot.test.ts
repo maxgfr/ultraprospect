@@ -19,14 +19,17 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { companiesHouseSnapshot, gbCompaniesHouse } from "../src/registry/gb-companies-house.js";
 import { deOffeneRegister, offeneRegisterSnapshot, parseGermanAddress, splitNativeNumber } from "../src/registry/de-offeneregister.js";
 import { ariregisterSnapshot, eeAriregister, estonianLocalities } from "../src/registry/ee-ariregister.js";
 import {
+  csvRecords,
   forgetSnapshot,
   hasSnapshot,
   ingestSnapshot,
+  decodedLines,
   listSnapshots,
   snapshotById,
   snapshotByLocality,
@@ -438,5 +441,55 @@ describe("ee-ariregister — the freshest register, and the fussiest file", () =
     expect(swept.coverage.mode).toBe("sweep");
     expect(swept.coverage.reason).toContain("ADMINISTRATIVE UNIT");
     expect(swept.coverage.reason).toContain("not a bounding box");
+  });
+});
+
+// A chunk ends on a byte, not on a character.
+//
+// The fixtures above are smaller than one inflate chunk, so none of them can
+// show this: an inflate stream hands over about 16 KB at a time and a bzip2
+// block about 900 KB, and wherever one ends inside a two-byte character the
+// name was indexed with two U+FFFD in it. Still valid text, so nothing said so.
+describe("decoding a register export that arrives in pieces", () => {
+  /** Every way of cutting `bytes` in two. */
+  const splits = (bytes: Buffer) => Array.from({ length: bytes.length - 1 }, (_, i) => [bytes.subarray(0, i + 1), bytes.subarray(i + 1)]);
+
+  async function rows(chunks: (Buffer | string)[], delimiter = ";"): Promise<string[][]> {
+    const out: string[][] = [];
+    for await (const row of csvRecords(Readable.from(chunks, { objectMode: true }), delimiter)) out.push(row);
+    return out;
+  }
+
+  it("keeps a multi-byte character whole wherever the chunk boundary falls", async () => {
+    const bytes = Buffer.from("nimi;linn\nJõgeva Äri OÜ;Jõgeva\nKöln Süd;Düsseldorf\n", "utf8");
+    const whole = await rows([bytes]);
+    expect(whole).toEqual([
+      ["nimi", "linn"],
+      ["Jõgeva Äri OÜ", "Jõgeva"],
+      ["Köln Süd", "Düsseldorf"],
+    ]);
+    for (const pair of splits(bytes)) expect(await rows(pair), `split at byte ${pair[0]!.length}`).toEqual(whole);
+  });
+
+  it("reads a doubled quote that straddles two chunks as one literal quote", async () => {
+    const bytes = Buffer.from('name,town\n"The ""Old"" Bakery, Ltd",Leeds\n"Plain",York\n', "utf8");
+    const whole = await rows([bytes], ",");
+    expect(whole[1]).toEqual(['The "Old" Bakery, Ltd', "Leeds"]);
+    for (const pair of splits(bytes)) expect(await rows(pair, ","), `split at byte ${pair[0]!.length}`).toEqual(whole);
+  });
+
+  it("still strips the BOM when the first chunk is only part of it", async () => {
+    const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("nimi;linn\nA;B\n", "utf8")]);
+    expect(await rows([bytes.subarray(0, 1), bytes.subarray(1)])).toEqual([
+      ["nimi", "linn"],
+      ["A", "B"],
+    ]);
+  });
+
+  it("keeps a character whole across two bzip2 blocks", () => {
+    const bytes = Buffer.from('{"name":"Müller & Söhne GmbH"}\n{"name":"Überseehafen KG"}\n', "utf8");
+    const whole = [...decodedLines([bytes])];
+    expect(whole).toEqual(['{"name":"Müller & Söhne GmbH"}', '{"name":"Überseehafen KG"}']);
+    for (const pair of splits(bytes)) expect([...decodedLines(pair)], `split at byte ${pair[0]!.length}`).toEqual(whole);
   });
 });

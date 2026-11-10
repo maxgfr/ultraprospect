@@ -48,6 +48,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 import { pipeline } from "node:stream/promises";
 import { join } from "node:path";
 import { cacheDir, fnv1a64, slugify } from "./engine.js";
@@ -248,11 +249,23 @@ export async function* csvRecords(stream: Readable, delimiter = ","): AsyncGener
   let pending = false;
   let atStart = true;
 
+  // A chunk boundary falls on an arbitrary BYTE, and decoding each chunk on its
+  // own turns a character split across one into two U+FFFD. An inflate stream
+  // hands over about 16 KB at a time, so that is one corrupted name every few
+  // hundred rows of an Estonian or German export ("Jõgeva", "Düsseldorf") —
+  // still valid text, so nothing downstream could tell. The decoder carries the
+  // partial character over instead.
+  const decoder = new StringDecoder("utf8");
+  // Likewise a `"` that ends a chunk: whether it closes the field or opens a
+  // doubled quote depends on a character that has not arrived yet.
+  let held = "";
+
   for await (const chunk of stream) {
-    let text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    let text = held + (typeof chunk === "string" ? chunk : decoder.write(chunk));
+    held = "";
     // A UTF-8 BOM would otherwise become part of the first column's NAME, so every
     // lookup of that column silently returns undefined. Estonia's export has one.
-    if (atStart) {
+    if (atStart && text.length > 0) {
       text = text.replace(/^\uFEFF/, "");
       atStart = false;
     }
@@ -262,6 +275,10 @@ export async function* csvRecords(stream: Readable, delimiter = ","): AsyncGener
         if (c !== '"') {
           field += c;
           continue;
+        }
+        if (i === text.length - 1) {
+          held = c;
+          break;
         }
         // A doubled quote is one literal quote; a lone one closes the field.
         if (text[i + 1] === '"') {
@@ -295,10 +312,30 @@ export async function* csvRecords(stream: Readable, delimiter = ","): AsyncGener
       pending = true;
     }
   }
-  if (field.length || row.length) {
+  // A quote held back at the very end closed its field; nothing came after it.
+  if (field.length || row.length || held) {
     row.push(field);
     yield row;
   }
+}
+
+/**
+ * The non-empty lines of a byte stream that arrives in arbitrary pieces.
+ *
+ * One decoder across every piece, for the reason given in `csvRecords`: a bzip2
+ * block ends on a byte, not on a character, and a name split across two blocks
+ * would otherwise be indexed with two U+FFFD in the middle of it.
+ */
+export function* decodedLines(chunks: Iterable<Uint8Array>): Generator<string> {
+  const decoder = new StringDecoder("utf8");
+  let tail = "";
+  for (const chunk of chunks) {
+    const parts = (tail + decoder.write(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength))).split("\n");
+    tail = parts.pop() ?? "";
+    for (const line of parts) if (line) yield line;
+  }
+  tail += decoder.end();
+  if (tail.trim()) yield tail;
 }
 
 /** Rows of the source, whatever it is packed in. */
@@ -307,26 +344,12 @@ async function* rowsOf(source: SnapshotSource, path: string): AsyncGenerator<any
     // Read the compressed file whole (260 MB) and yield decompressed blocks: the
     // OUTPUT is the part that does not fit in memory, not the input.
     const compressed = readFileSync(path);
-    let tail = "";
-    for (const block of bunzip2Blocks(compressed)) {
-      const text = tail + Buffer.from(block).toString("utf8");
-      const parts = text.split("\n");
-      tail = parts.pop() ?? "";
-      for (const line of parts) {
-        if (!line) continue;
-        try {
-          yield JSON.parse(line);
-        } catch {
-          // A single unparseable line is counted as skipped by the caller's
-          // mapper, never allowed to end the ingest.
-          yield undefined;
-        }
-      }
-    }
-    if (tail.trim()) {
+    for (const line of decodedLines(bunzip2Blocks(compressed))) {
       try {
-        yield JSON.parse(tail);
+        yield JSON.parse(line);
       } catch {
+        // A single unparseable line is counted as skipped by the caller's
+        // mapper, never allowed to end the ingest.
         yield undefined;
       }
     }
