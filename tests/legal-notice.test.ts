@@ -38,6 +38,15 @@ describe("extractVatNumbers", () => {
     expect(extractLegalIds("ΑΦΜ EL030440244", "gr", "P1")).toContainEqual({ kind: "vat", value: "EL030440244", countryCode: "gr", from: "P1" });
   });
 
+  it("does not read an ordinary lowercase word as a VAT prefix", () => {
+    expect(extractVatNumbers("El teléfono es 912 345 678")).toEqual([]);
+    expect(extractVatNumbers("Llámenos en el 912345678")).toEqual([]);
+    expect(extractVatNumbers("Rufen Sie uns an, es 912 345 678 ist kostenlos")).toEqual([]);
+    // The real thing, in capitals, still reads.
+    expect(extractVatNumbers("NIF-IVA: ES B12345678")).toContainEqual({ countryCode: "es", value: "ESB12345678" });
+    expect(extractVatNumbers("USt-IdNr. DE 811 907 980")).toContainEqual({ countryCode: "de", value: "DE811907980" });
+  });
+
   it("does not read a number glued to a word as a VAT number", () => {
     expect(extractVatNumbers("ordersDE123456789 shipped")).toEqual([]);
   });

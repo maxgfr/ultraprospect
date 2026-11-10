@@ -18220,6 +18220,7 @@ function extractVatNumbers(text3) {
     for (const m of compact.matchAll(new RegExp(re.source, "gi"))) {
       const before = text3[(origin[m.index ?? 0] ?? 0) - 1];
       if (before && /[A-Za-z]/.test(before)) continue;
+      if (!/^[A-Z]{2}/.test(m[0])) continue;
       const value = m[0].toUpperCase();
       if (seen.has(value)) continue;
       seen.add(value);

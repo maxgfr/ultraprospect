@@ -98,6 +98,12 @@ export function extractVatNumbers(text: string): Array<{ countryCode: string; va
     for (const m of compact.matchAll(new RegExp(re.source, "gi"))) {
       const before = text[(origin[m.index ?? 0] ?? 0) - 1];
       if (before && /[A-Za-z]/.test(before)) continue;
+      // A VAT prefix is written in capitals. Matching is case-insensitive and
+      // runs on text with its spaces removed, so ordinary words did duty as
+      // prefixes: "El teléfono es 912 345 678" compacts to "…es912345678" and
+      // was read as the Spanish number ES912345678, "en el 912345678" as a
+      // Greek one. The same trap as "Tel", through a lowercase word.
+      if (!/^[A-Z]{2}/.test(m[0])) continue;
       const value = m[0].toUpperCase();
       if (seen.has(value)) continue;
       seen.add(value);
