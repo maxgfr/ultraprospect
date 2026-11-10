@@ -32,6 +32,12 @@ describe("extractVatNumbers", () => {
     expect(extractVatNumbers("ΑΦΜ EL030440244")).toContainEqual({ countryCode: "el", value: "EL030440244" });
   });
 
+  it("files a Greek VAT number under Greece's ISO code, which is what picks the authority", () => {
+    // The PREFIX is EL; the country is gr. `extractVatNumbers` reports the
+    // prefix it read, `extractLegalIds` the country a connector is keyed on.
+    expect(extractLegalIds("ΑΦΜ EL030440244", "gr", "P1")).toContainEqual({ kind: "vat", value: "EL030440244", countryCode: "gr", from: "P1" });
+  });
+
   it("does not read a number glued to a word as a VAT number", () => {
     expect(extractVatNumbers("ordersDE123456789 shipped")).toEqual([]);
   });

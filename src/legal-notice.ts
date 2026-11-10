@@ -199,7 +199,11 @@ export function extractLegalIds(text: string, countryCode: string | undefined, p
   }
 
   for (const vat of extractVatNumbers(text)) {
-    push({ kind: "vat", value: vat.value, countryCode: vat.countryCode, from: pageId });
+    // A VAT prefix is not always the country's ISO code, and `LegalId.countryCode`
+    // is the ISO code — it is what decides which authority is asked. Greece files
+    // VAT under EL and is `gr` everywhere else; carried through as "el", a Greek
+    // number matched no connector's country list and was never sent to VIES.
+    push({ kind: "vat", value: vat.value, countryCode: vat.countryCode === "el" ? "gr" : vat.countryCode, from: pageId });
   }
   return out;
 }

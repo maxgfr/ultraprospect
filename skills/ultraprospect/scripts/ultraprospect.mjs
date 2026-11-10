@@ -18222,7 +18222,7 @@ function extractLegalIds(text3, countryCode, pageId) {
     if (es) push({ kind: "nif", value: es, countryCode: "es", from: pageId });
   }
   for (const vat of extractVatNumbers(text3)) {
-    push({ kind: "vat", value: vat.value, countryCode: vat.countryCode, from: pageId });
+    push({ kind: "vat", value: vat.value, countryCode: vat.countryCode === "el" ? "gr" : vat.countryCode, from: pageId });
   }
   return out2;
 }

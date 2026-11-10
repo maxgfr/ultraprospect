@@ -294,3 +294,25 @@ describe("runConfirm — coverage honesty", () => {
     expect(outcome.coverage.reason).not.toContain("NO authority could be asked about");
   });
 });
+
+describe("runConfirm — which authority is asked, and how often", () => {
+  it("sends a Greek VAT number to the connector that serves Greece", async () => {
+    // Greece files VAT under EL and is "gr" everywhere else. Carried as "el",
+    // the number matched no connector's country list and VIES was never asked.
+    const asked: string[] = [];
+    selection.confirm = [
+      fake({
+        id: "eu-vies",
+        countries: ["gr", "de"],
+        verifyId: async (id) => {
+          asked.push(`${id.countryCode}:${id.value}`);
+          return undefined;
+        },
+      }),
+    ];
+    const p = place({ name: "Artopoieio Papadopoulos", pages: ["P1"], address: { commune: "Athina" } });
+    const dir = runWithPage(p.id, "P1", "Στοιχεία επιχείρησης\nΑΦΜ EL030440244");
+    await runConfirm(dir, [p], { countryCode: "gr" });
+    expect(asked).toEqual(["gr:EL030440244"]);
+  });
+});
