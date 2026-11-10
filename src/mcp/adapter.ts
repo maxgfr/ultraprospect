@@ -39,6 +39,7 @@ import { needsConfirming, persistConfirm, runConfirm } from "../confirm.js";
 import { probeAll } from "../doctor.js";
 import { enrichable, persistEnrich, runEnrich } from "../enrich.js";
 import { newPageStore } from "../pages.js";
+import { parseMinFit } from "../csv.js";
 import { buildAll } from "../render.js";
 import { CONNECTORS, servesCountry } from "../registry/index.js";
 import { ingestSnapshot, listSnapshots, type SnapshotSource } from "../snapshot.js";
@@ -479,7 +480,7 @@ export function createAdapter(): McpAdapter {
             runDir,
             noPeople: args.noPeople === true,
             minScore: typeof args.minScore === "number" ? clampInt(args.minScore, 0, 10_000, 0) : undefined,
-            minFit: typeof args.minFit === "string" ? (args.minFit as "strong" | "possible" | "weak") : undefined,
+            minFit: parseMinFit(args.minFit),
           });
           for (const file of outcome.files) writeArtifact(join(runDir, file.path), file.content);
           return {

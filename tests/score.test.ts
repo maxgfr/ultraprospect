@@ -110,6 +110,25 @@ describe("scoreOf", () => {
   });
 });
 
+describe("applyFit on a file that is not what it should be", () => {
+  it("refuses a fit outside the four levels instead of storing it", () => {
+    const p = place();
+    const result = applyFit([p], [{ id: p.id, fit: "high", why: "x" } as never]);
+    expect(result.applied).toBe(0);
+    expect(result.invalid).toHaveLength(1);
+    expect(result.invalid[0]).toContain("high");
+    expect(p.score?.fit).toBeUndefined();
+  });
+
+  it("reports an entry with no id, and does not crash on null", () => {
+    const p = place();
+    const result = applyFit([p], [null, { fit: "strong", why: "x" }, { id: p.id, fit: "possible", why: "ok" }] as never);
+    expect(result.invalid).toHaveLength(2);
+    expect(result.applied).toBe(1);
+    expect(p.score?.fit).toBe("possible");
+  });
+});
+
 describe("applyFit", () => {
   it("adds the verdict WITHOUT touching the measured total", () => {
     // The measured column is the one nobody had to be trusted for. Overwriting

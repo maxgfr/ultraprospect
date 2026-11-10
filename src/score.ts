@@ -180,7 +180,12 @@ export function scoreAll(places: Place[], weights?: ScoreWeights): void {
 export interface ApplyFitResult {
   applied: number;
   unknown: string[];
+  /** Entries that are not a verdict at all: no id, or a fit outside the four levels. */
+  invalid: string[];
 }
+
+/** The four answers a fit verdict can give. */
+export const FIT_LEVELS = ["strong", "possible", "weak", "no"] as const;
 
 /**
  * Fold the agent's ICP verdicts onto the places.
@@ -192,8 +197,17 @@ export interface ApplyFitResult {
 export function applyFit(places: Place[], verdicts: readonly FitVerdict[]): ApplyFitResult {
   const byId = new Map(places.map((p) => [p.id, p]));
   const unknown: string[] = [];
+  const invalid: string[] = [];
   let applied = 0;
-  for (const v of verdicts) {
+  for (const v of verdicts as readonly unknown[]) {
+    // The file is written by an agent, so it is checked like input. A fit of
+    // "high" used to be stored as-is: it ranked as NaN, was dropped by every
+    // --min-fit, and appeared in the report as a fifth verdict nobody defined.
+    // A `null` entry crashed the command after the scores were recomputed.
+    if (!isFitVerdict(v)) {
+      invalid.push(describeVerdict(v));
+      continue;
+    }
     const place = byId.get(v.id);
     if (!place) {
       unknown.push(v.id);
@@ -202,7 +216,19 @@ export function applyFit(places: Place[], verdicts: readonly FitVerdict[]): Appl
     place.score = { ...(place.score ?? scoreOf(place)), fit: v.fit, why: v.why, angle: v.angle };
     applied++;
   }
-  return { applied, unknown };
+  return { applied, unknown, invalid };
+}
+
+function isFitVerdict(v: unknown): v is FitVerdict {
+  if (!v || typeof v !== "object") return false;
+  const { id, fit } = v as { id?: unknown; fit?: unknown };
+  return typeof id === "string" && id !== "" && typeof fit === "string" && (FIT_LEVELS as readonly string[]).includes(fit);
+}
+
+function describeVerdict(v: unknown): string {
+  if (!v || typeof v !== "object") return JSON.stringify(v) ?? "undefined";
+  const { id, fit } = v as { id?: unknown; fit?: unknown };
+  return `${typeof id === "string" && id ? id : "(no id)"}: fit ${JSON.stringify(fit) ?? "missing"}`;
 }
 
 /**

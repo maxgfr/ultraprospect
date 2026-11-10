@@ -56,6 +56,7 @@ import { SKIP_REASONS, describeSkips } from "./skip.js";
 import { newPageStore } from "./pages.js";
 import { enrichable, persistEnrich, runEnrich } from "./enrich.js";
 import { applyFit, ranked, scoreAll } from "./score.js";
+import { parseMinFit } from "./csv.js";
 import { buildDossierPacket, dossierPathFor } from "./dossier.js";
 import { formatReport, runCheck } from "./check.js";
 import { buildAll } from "./render.js";
@@ -1054,6 +1055,13 @@ async function cmdScore(values: Record<string, string>, bools: ReadonlySet<strin
     const verdicts: FitVerdict[] = Array.isArray(parsed) ? parsed : (parsed?.verdicts ?? []);
     const result = applyFit(places, verdicts);
     say(`score: folded ${result.applied} fit verdict(s)`);
+    if (result.invalid.length) {
+      say(
+        `score: ${result.invalid.length} entr${result.invalid.length === 1 ? "y is" : "ies are"} not a verdict — fit must be strong, possible, weak or no: ${result.invalid.slice(0, 5).join("; ")}`,
+      );
+      writePlaces(runDir, places);
+      return EXIT_FAILURE;
+    }
     if (result.unknown.length) {
       say(`score: ${result.unknown.length} verdict(s) named an id this run does not have: ${result.unknown.slice(0, 5).join(", ")}`);
       writePlaces(runDir, places);
@@ -1147,7 +1155,7 @@ async function cmdRender(values: Record<string, string>, bools: ReadonlySet<stri
     runDir,
     noPeople: bools.has("no-people"),
     minScore: values["min-score"] ? clampInt(values["min-score"], 0, 10_000, 0) : undefined,
-    minFit: (values["min-fit"] as "strong" | "possible" | "weak" | undefined) ?? undefined,
+    minFit: parseMinFit(values["min-fit"]),
   });
 
   for (const file of outcome.files) writeArtifact(join(runDir, file.path), file.content);

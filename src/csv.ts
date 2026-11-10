@@ -13,6 +13,7 @@
 import { sizeBandLabel } from "./registry/index.js";
 import { ranked } from "./score.js";
 import type { Place } from "./types.js";
+import { UsageError } from "./engine.js";
 import { csvRow, streetLine } from "./util.js";
 
 export interface CsvOptions {
@@ -86,6 +87,20 @@ const HEADER = [
 
 const FIT_ORDER = ["weak", "possible", "strong"] as const;
 
+/**
+ * Read a `--min-fit` value, or refuse it.
+ *
+ * The value used to be cast and trusted. A typo — `--min-fit strng` — then
+ * ranked below every level, so the filter kept EVERY row, including the ones
+ * judged "no": the user asked for the shortlist and was handed the whole file
+ * with nothing to say so.
+ */
+export function parseMinFit(raw: unknown): CsvOptions["minFit"] {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  if (typeof raw === "string" && (FIT_ORDER as readonly string[]).includes(raw)) return raw as CsvOptions["minFit"];
+  throw new UsageError(`--min-fit must be strong, possible or weak — got ${JSON.stringify(raw)}`);
+}
+
 function keep(place: Place, opts: CsvOptions): boolean {
   if (opts.minScore !== undefined && (place.score?.total ?? 0) < opts.minScore) return false;
   if (opts.minFit) {
@@ -97,6 +112,9 @@ function keep(place: Place, opts: CsvOptions): boolean {
 }
 
 export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
+  // Checked here as well as at the flag, so no caller can hand over a level the
+  // filter would silently treat as "keep everything".
+  parseMinFit(opts.minFit);
   const rows: string[] = [csvRow(HEADER)];
 
   for (const place of ranked(places).filter((p) => keep(p, opts))) {

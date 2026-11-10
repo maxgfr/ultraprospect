@@ -21331,11 +21331,17 @@ function scoreOf(place, weights = DEFAULT_WEIGHTS) {
 function scoreAll(places, weights) {
   for (const place of places) place.score = scoreOf(place, weights);
 }
+var FIT_LEVELS = ["strong", "possible", "weak", "no"];
 function applyFit(places, verdicts) {
   const byId = new Map(places.map((p) => [p.id, p]));
   const unknown = [];
+  const invalid = [];
   let applied = 0;
   for (const v of verdicts) {
+    if (!isFitVerdict(v)) {
+      invalid.push(describeVerdict(v));
+      continue;
+    }
     const place = byId.get(v.id);
     if (!place) {
       unknown.push(v.id);
@@ -21344,7 +21350,17 @@ function applyFit(places, verdicts) {
     place.score = { ...place.score ?? scoreOf(place), fit: v.fit, why: v.why, angle: v.angle };
     applied++;
   }
-  return { applied, unknown };
+  return { applied, unknown, invalid };
+}
+function isFitVerdict(v) {
+  if (!v || typeof v !== "object") return false;
+  const { id, fit } = v;
+  return typeof id === "string" && id !== "" && typeof fit === "string" && FIT_LEVELS.includes(fit);
+}
+function describeVerdict(v) {
+  if (!v || typeof v !== "object") return JSON.stringify(v) ?? "undefined";
+  const { id, fit } = v;
+  return `${typeof id === "string" && id ? id : "(no id)"}: fit ${JSON.stringify(fit) ?? "missing"}`;
 }
 var FIT_RANK = { strong: 3, possible: 2, weak: 1, no: -2 };
 var UNJUDGED = -1;
@@ -21355,6 +21371,167 @@ function ranked(places) {
     if (rejected(a) !== rejected(b)) return rejected(a) - rejected(b);
     return (b.score?.total ?? 0) - (a.score?.total ?? 0) || rank(b) - rank(a);
   });
+}
+
+// src/csv.ts
+var HEADER = [
+  "id",
+  "name",
+  "score",
+  "fit",
+  "fit_why",
+  "angle",
+  "category",
+  "registry",
+  "activity_code",
+  "activity_scheme",
+  "section",
+  "company_activity_code",
+  "company_section",
+  "headcount_band",
+  "company_headcount_band",
+  "revenue",
+  "revenue_currency",
+  "revenue_year",
+  "registry_id",
+  "establishment_id",
+  "registry_url",
+  "registry_evidence",
+  // The date the register record was TRUE, when it came from a bulk snapshot
+  // rather than from asking the register. Empty means live. A CRM importing this
+  // column is the last place the distinction can still be made.
+  "registry_as_of",
+  "is_head_office",
+  "registered_since",
+  "street",
+  "postcode",
+  "city",
+  "insee_code",
+  "lat",
+  "lon",
+  "website",
+  "website_confidence",
+  "web_presence",
+  "emails",
+  "contact_source",
+  "phones",
+  "phone_source",
+  "socials",
+  "social_source",
+  "officers",
+  "is_hiring",
+  "open_roles",
+  "matched_roles",
+  "role_filter",
+  "oldest_open_role_days",
+  "term_matches",
+  "term_match_source",
+  "ats",
+  "cms",
+  "last_content_at",
+  "pages_read",
+  "sources",
+  "match_confidence"
+];
+var FIT_ORDER = ["weak", "possible", "strong"];
+function parseMinFit(raw) {
+  if (raw === void 0 || raw === null || raw === "") return void 0;
+  if (typeof raw === "string" && FIT_ORDER.includes(raw)) return raw;
+  throw new UsageError(`--min-fit must be strong, possible or weak \u2014 got ${JSON.stringify(raw)}`);
+}
+function keep(place, opts) {
+  if (opts.minScore !== void 0 && (place.score?.total ?? 0) < opts.minScore) return false;
+  if (opts.minFit) {
+    const want = FIT_ORDER.indexOf(opts.minFit);
+    const got = place.score?.fit ? FIT_ORDER.indexOf(place.score.fit) : -1;
+    if (got < want) return false;
+  }
+  return true;
+}
+function toCsv(places, opts = {}) {
+  parseMinFit(opts.minFit);
+  const rows = [csvRow(HEADER)];
+  for (const place of ranked(places).filter((p) => keep(p, opts))) {
+    const s = place.registry;
+    const sg = place.signals;
+    const people = opts.noPeople ? "" : (s?.officers ?? []).map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" \u2014 ")).join(" | ");
+    rows.push(
+      csvRow([
+        place.id,
+        place.name,
+        place.score?.total ?? 0,
+        place.score?.fit ?? "",
+        place.score?.why ?? "",
+        place.score?.angle ?? "",
+        place.category ?? "",
+        s?.connectorId ?? "",
+        s?.activityCode ?? "",
+        // The scheme travels with the code, always. NACE "D" and US SIC "D" are
+        // different economies, and a spreadsheet that lost the scheme would
+        // merge them without anyone noticing.
+        s?.activityScheme ?? "",
+        s?.section ?? "",
+        // The legal unit's, in its own columns: every register filter matched
+        // on these, so a row that looks off-target can be explained instead of
+        // looking like a bug.
+        s?.parent?.activityCode ?? "",
+        s?.parent?.section ?? "",
+        s ? sizeBandLabel(s, s.sizeBand) ?? (s.employees != null ? String(s.employees) : "") : "",
+        s ? sizeBandLabel(s, s.parent?.sizeBand) ?? (s.parent?.employees != null ? String(s.parent.employees) : "") : "",
+        s?.finances?.revenue ?? "",
+        s?.finances?.currency ?? "",
+        s?.finances?.year ?? "",
+        s?.id ?? "",
+        s?.establishmentId ?? "",
+        s?.sourceUrl ?? "",
+        // How the register record got attached: swept with the territory, or
+        // confirmed against an identifier read off the company's own site. Not
+        // equally strong, so the CSV says which.
+        place.registryEvidence ? `${place.registryEvidence.mode}:${place.registryEvidence.how}` : "",
+        place.registry?.asOf ?? "",
+        s?.isHeadOffice ? "yes" : s ? "no" : "",
+        s?.dateCreated ?? "",
+        streetLine(place.address),
+        place.address.codePostal ?? "",
+        place.address.commune ?? "",
+        place.address.codeCommune ?? "",
+        place.lat ?? "",
+        place.lon ?? "",
+        place.website?.url ?? "",
+        place.website?.confidence ?? "",
+        // Empty means discovery has not run for this row — NOT that it has no
+        // presence. "none" is the measured absence; blank is silence.
+        place.webPresence ?? "",
+        place.contacts.emails.map((e) => e.value).join(" | "),
+        // The page each contact came from, in the same order as the column
+        // beside it. A CRM row without this cannot be audited later.
+        place.contacts.emails.map((e) => e.from).join(" | "),
+        place.contacts.phones.map((p) => p.value).join(" | "),
+        place.contacts.phones.map((p) => p.from).join(" | "),
+        place.contacts.socials.map((x) => x.value).join(" | "),
+        place.contacts.socials.map((x) => x.from).join(" | "),
+        people,
+        // Three states, not two: an empty cell means a board was found and
+        // could not be read, which is not the same as "no".
+        sg?.isHiring === true ? "yes" : sg?.isHiring === false ? "no" : "",
+        sg?.openRoles ?? "",
+        sg?.matchedRoles ?? "",
+        sg?.roleFilter?.join(" | ") ?? "",
+        sg?.oldestOpenRoleDays ?? "",
+        // The terms the company itself used, verbatim, with the page beside
+        // them — so a row can be checked without opening the run.
+        sg?.termMentions?.map((m) => m.value).join(" | ") ?? "",
+        [...new Set(sg?.termMentions?.map((m) => m.from) ?? [])].join(" | "),
+        sg?.atsProviders.join(" | ") ?? "",
+        sg?.cms ?? "",
+        sg?.lastContentAt ?? "",
+        place.pages.length,
+        place.sources.join("+"),
+        place.matchConfidence ?? ""
+      ])
+    );
+  }
+  return rows.join("\n") + "\n";
 }
 
 // src/dossier.ts
@@ -21947,161 +22124,6 @@ function formatReport(report2) {
 // src/render.ts
 import { existsSync as existsSync17, readFileSync as readFileSync17 } from "fs";
 import { join as join24 } from "path";
-
-// src/csv.ts
-var HEADER = [
-  "id",
-  "name",
-  "score",
-  "fit",
-  "fit_why",
-  "angle",
-  "category",
-  "registry",
-  "activity_code",
-  "activity_scheme",
-  "section",
-  "company_activity_code",
-  "company_section",
-  "headcount_band",
-  "company_headcount_band",
-  "revenue",
-  "revenue_currency",
-  "revenue_year",
-  "registry_id",
-  "establishment_id",
-  "registry_url",
-  "registry_evidence",
-  // The date the register record was TRUE, when it came from a bulk snapshot
-  // rather than from asking the register. Empty means live. A CRM importing this
-  // column is the last place the distinction can still be made.
-  "registry_as_of",
-  "is_head_office",
-  "registered_since",
-  "street",
-  "postcode",
-  "city",
-  "insee_code",
-  "lat",
-  "lon",
-  "website",
-  "website_confidence",
-  "web_presence",
-  "emails",
-  "contact_source",
-  "phones",
-  "phone_source",
-  "socials",
-  "social_source",
-  "officers",
-  "is_hiring",
-  "open_roles",
-  "matched_roles",
-  "role_filter",
-  "oldest_open_role_days",
-  "term_matches",
-  "term_match_source",
-  "ats",
-  "cms",
-  "last_content_at",
-  "pages_read",
-  "sources",
-  "match_confidence"
-];
-var FIT_ORDER = ["weak", "possible", "strong"];
-function keep(place, opts) {
-  if (opts.minScore !== void 0 && (place.score?.total ?? 0) < opts.minScore) return false;
-  if (opts.minFit) {
-    const want = FIT_ORDER.indexOf(opts.minFit);
-    const got = place.score?.fit ? FIT_ORDER.indexOf(place.score.fit) : -1;
-    if (got < want) return false;
-  }
-  return true;
-}
-function toCsv(places, opts = {}) {
-  const rows = [csvRow(HEADER)];
-  for (const place of ranked(places).filter((p) => keep(p, opts))) {
-    const s = place.registry;
-    const sg = place.signals;
-    const people = opts.noPeople ? "" : (s?.officers ?? []).map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" \u2014 ")).join(" | ");
-    rows.push(
-      csvRow([
-        place.id,
-        place.name,
-        place.score?.total ?? 0,
-        place.score?.fit ?? "",
-        place.score?.why ?? "",
-        place.score?.angle ?? "",
-        place.category ?? "",
-        s?.connectorId ?? "",
-        s?.activityCode ?? "",
-        // The scheme travels with the code, always. NACE "D" and US SIC "D" are
-        // different economies, and a spreadsheet that lost the scheme would
-        // merge them without anyone noticing.
-        s?.activityScheme ?? "",
-        s?.section ?? "",
-        // The legal unit's, in its own columns: every register filter matched
-        // on these, so a row that looks off-target can be explained instead of
-        // looking like a bug.
-        s?.parent?.activityCode ?? "",
-        s?.parent?.section ?? "",
-        s ? sizeBandLabel(s, s.sizeBand) ?? (s.employees != null ? String(s.employees) : "") : "",
-        s ? sizeBandLabel(s, s.parent?.sizeBand) ?? (s.parent?.employees != null ? String(s.parent.employees) : "") : "",
-        s?.finances?.revenue ?? "",
-        s?.finances?.currency ?? "",
-        s?.finances?.year ?? "",
-        s?.id ?? "",
-        s?.establishmentId ?? "",
-        s?.sourceUrl ?? "",
-        // How the register record got attached: swept with the territory, or
-        // confirmed against an identifier read off the company's own site. Not
-        // equally strong, so the CSV says which.
-        place.registryEvidence ? `${place.registryEvidence.mode}:${place.registryEvidence.how}` : "",
-        place.registry?.asOf ?? "",
-        s?.isHeadOffice ? "yes" : s ? "no" : "",
-        s?.dateCreated ?? "",
-        streetLine(place.address),
-        place.address.codePostal ?? "",
-        place.address.commune ?? "",
-        place.address.codeCommune ?? "",
-        place.lat ?? "",
-        place.lon ?? "",
-        place.website?.url ?? "",
-        place.website?.confidence ?? "",
-        // Empty means discovery has not run for this row — NOT that it has no
-        // presence. "none" is the measured absence; blank is silence.
-        place.webPresence ?? "",
-        place.contacts.emails.map((e) => e.value).join(" | "),
-        // The page each contact came from, in the same order as the column
-        // beside it. A CRM row without this cannot be audited later.
-        place.contacts.emails.map((e) => e.from).join(" | "),
-        place.contacts.phones.map((p) => p.value).join(" | "),
-        place.contacts.phones.map((p) => p.from).join(" | "),
-        place.contacts.socials.map((x) => x.value).join(" | "),
-        place.contacts.socials.map((x) => x.from).join(" | "),
-        people,
-        // Three states, not two: an empty cell means a board was found and
-        // could not be read, which is not the same as "no".
-        sg?.isHiring === true ? "yes" : sg?.isHiring === false ? "no" : "",
-        sg?.openRoles ?? "",
-        sg?.matchedRoles ?? "",
-        sg?.roleFilter?.join(" | ") ?? "",
-        sg?.oldestOpenRoleDays ?? "",
-        // The terms the company itself used, verbatim, with the page beside
-        // them — so a row can be checked without opening the run.
-        sg?.termMentions?.map((m) => m.value).join(" | ") ?? "",
-        [...new Set(sg?.termMentions?.map((m) => m.from) ?? [])].join(" | "),
-        sg?.atsProviders.join(" | ") ?? "",
-        sg?.cms ?? "",
-        sg?.lastContentAt ?? "",
-        place.pages.length,
-        place.sources.join("+"),
-        place.matchConfidence ?? ""
-      ])
-    );
-  }
-  return rows.join("\n") + "\n";
-}
 
 // src/excerpts.ts
 import { existsSync as existsSync16, readFileSync as readFileSync16 } from "fs";
@@ -25782,7 +25804,7 @@ ${JSON.stringify({ ok: report2.ok, errors: report2.errors, warnings: report2.war
             runDir,
             noPeople: args.noPeople === true,
             minScore: typeof args.minScore === "number" ? clampInt(args.minScore, 0, 1e4, 0) : void 0,
-            minFit: typeof args.minFit === "string" ? args.minFit : void 0
+            minFit: parseMinFit(args.minFit)
           });
           for (const file of outcome.files) writeArtifact(join31(runDir, file.path), file.content);
           return {
@@ -27428,6 +27450,13 @@ async function cmdScore(values, bools) {
     const verdicts = Array.isArray(parsed) ? parsed : parsed?.verdicts ?? [];
     const result = applyFit(places, verdicts);
     say(`score: folded ${result.applied} fit verdict(s)`);
+    if (result.invalid.length) {
+      say(
+        `score: ${result.invalid.length} entr${result.invalid.length === 1 ? "y is" : "ies are"} not a verdict \u2014 fit must be strong, possible, weak or no: ${result.invalid.slice(0, 5).join("; ")}`
+      );
+      writePlaces(runDir, places);
+      return EXIT_FAILURE;
+    }
     if (result.unknown.length) {
       say(`score: ${result.unknown.length} verdict(s) named an id this run does not have: ${result.unknown.slice(0, 5).join(", ")}`);
       writePlaces(runDir, places);
@@ -27510,7 +27539,7 @@ async function cmdRender(values, bools) {
     runDir,
     noPeople: bools.has("no-people"),
     minScore: values["min-score"] ? clampInt(values["min-score"], 0, 1e4, 0) : void 0,
-    minFit: values["min-fit"] ?? void 0
+    minFit: parseMinFit(values["min-fit"])
   });
   for (const file of outcome.files) writeArtifact(join33(runDir, file.path), file.content);
   if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join33(runDir, f.path)) }));

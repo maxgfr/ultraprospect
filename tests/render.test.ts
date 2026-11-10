@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CSV_COLUMNS, toCsv } from "../src/csv.js";
+import { CSV_COLUMNS, parseMinFit, toCsv } from "../src/csv.js";
 import { collectEvidence } from "../src/excerpts.js";
 import { buildAll, buildHtml, buildPrivacyNote, buildReport, HTML_ROW_CAP } from "../src/render.js";
 import { buildDelta, diffRuns, identityOf } from "../src/watch.js";
@@ -150,6 +150,19 @@ describe("CSV", () => {
     // The caller's rows are untouched: stripping is for the handover only.
     expect(p.registry?.officers).toHaveLength(1);
     expect(p.contacts.people).toHaveLength(1);
+  });
+
+  it("refuses a --min-fit it does not know rather than keeping every row", () => {
+    const rows = [
+      place({ id: "osm:n1", score: { total: 50, parts: {}, fit: "strong", why: "x" } }),
+      place({ id: "osm:n2", score: { total: 40, parts: {}, fit: "no", why: "x" } }),
+    ];
+    // A typo used to rank below every level, so the filter let both rows through.
+    expect(() => toCsv(rows, { minFit: "strng" as never })).toThrow(/min-fit/);
+    expect(() => parseMinFit("strng")).toThrow(/strong, possible or weak/);
+    expect(parseMinFit(undefined)).toBeUndefined();
+    expect(parseMinFit("possible")).toBe("possible");
+    expect(toCsv(rows, { minFit: "possible" }).split("\n").filter(Boolean)).toHaveLength(2);
   });
 
   it("drops officers under --no-people", () => {
