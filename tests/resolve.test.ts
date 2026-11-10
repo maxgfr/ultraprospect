@@ -133,6 +133,21 @@ describe("classifyHost", () => {
   });
 });
 
+describe("corroborate reads a name as words", () => {
+  const named = (name: string) => place({ name, osm: { id: "n1", osmType: "node", osmId: 1, name, lat: 0, lon: 0, tags: {} }, address: {} });
+
+  it("does not find a short name inside a longer word", () => {
+    expect(corroborate(named("Arte"), "Découvrez notre carte du jour et nos partenaires.").ok).toBe(false);
+    expect(corroborate(named("Mars"), "Livraison à Marseille et alentours.").ok).toBe(false);
+  });
+
+  it("still finds the name itself, hyphenated, or written as one word", () => {
+    expect(corroborate(named("Arte"), "Bienvenue chez Arte, galerie d'art.").ok).toBe(true);
+    expect(corroborate(named("Light Control"), "Light-Control Eventtechnik: Licht, Ton, Bühne.").ok).toBe(true);
+    expect(corroborate(named("Match Tune"), "MatchTune — music for video.").ok).toBe(true);
+  });
+});
+
 describe("corroborate", () => {
   it("accepts a page carrying the SIREN", () => {
     const p = place({ registry: rec({ id: "302474648" }) });

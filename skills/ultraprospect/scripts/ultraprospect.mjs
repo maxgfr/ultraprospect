@@ -20399,11 +20399,14 @@ ${pageText}`).toLowerCase();
     const streetSeen = streetWords.length > 0 && streetWords.every((w) => haystack.includes(w));
     if (streetSeen && haystack.includes(postcode)) evidence.push(`address "${street} ${postcode}" on the page`);
   }
+  const words = new Set(haystack.split(/[^a-z0-9]+/).filter(Boolean));
   const candidateNames = [place.osm?.name, ...namesOf2(place)].filter((n) => Boolean(n));
   for (const name of candidateNames) {
     const distinctive = [...tokenSet(normalizeName(name))].filter((t) => t.length >= 4);
     if (distinctive.length === 0) continue;
-    if (distinctive.every((t) => haystack.includes(t))) {
+    const eachIsAWord = distinctive.every((t) => words.has(t));
+    const runTogether = distinctive.length > 1 && words.has(distinctive.join(""));
+    if (eachIsAWord || runTogether) {
       evidence.push(`name "${name}" on the page`);
       break;
     }

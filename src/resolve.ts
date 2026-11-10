@@ -494,11 +494,20 @@ export function corroborate(place: Place, pageText: string, pageTitle?: string, 
     if (streetSeen && haystack.includes(postcode)) evidence.push(`address "${street} ${postcode}" on the page`);
   }
 
+  // The name is matched WORD BY WORD, the rule `groupHits` already learned for
+  // search hits. As a substring, a company called Arte was corroborated by any
+  // page with "carte" on it and one called Mars by any page about Marseille —
+  // and this is the check whose answer is filed as `corroborated`. A brand
+  // written as one word ("MatchTune" for MATCH TUNE) is still read, as the
+  // tokens run together.
+  const words = new Set(haystack.split(/[^a-z0-9]+/).filter(Boolean));
   const candidateNames = [place.osm?.name, ...namesOf(place)].filter((n): n is string => Boolean(n));
   for (const name of candidateNames) {
     const distinctive = [...tokenSet(normalizeName(name))].filter((t) => t.length >= 4);
     if (distinctive.length === 0) continue;
-    if (distinctive.every((t) => haystack.includes(t))) {
+    const eachIsAWord = distinctive.every((t) => words.has(t));
+    const runTogether = distinctive.length > 1 && words.has(distinctive.join(""));
+    if (eachIsAWord || runTogether) {
       evidence.push(`name "${name}" on the page`);
       break;
     }
