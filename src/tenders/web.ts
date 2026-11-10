@@ -21,6 +21,7 @@
 import { createHash } from "node:crypto";
 import { search } from "../engine.js";
 import { fetchPage, type PageStore } from "../pages.js";
+import { foldAccents } from "../util.js";
 import type { Tender } from "./types.js";
 import { statusFromDeadline } from "./util.js";
 
@@ -271,11 +272,7 @@ export async function engineSearchWeb(todo: WebTodo, onNote?: (n: string) => voi
   return hits;
 }
 
-const fold = (s: string) =>
-  s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+const fold = (s: string) => foldAccents(s.toLowerCase());
 
 /**
  * Read a deadline off a notice page — only where a deadline label introduces it.

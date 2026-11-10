@@ -6,6 +6,8 @@
 // certificate, a missing registration — rather than from a blank page. Every
 // entry names the official text it comes from, so a reader can check it, and a
 // jurisdiction with no entry here says so instead of borrowing another's.
+import { EU27 } from "./util.js";
+
 export interface ChecklistItem {
   piece: string;
   note?: string;
@@ -103,45 +105,15 @@ export const CHECKLISTS: Record<string, Checklist> = {
   },
 };
 
-const EU_MEMBERS = new Set([
-  "at",
-  "be",
-  "bg",
-  "hr",
-  "cy",
-  "cz",
-  "dk",
-  "ee",
-  "fi",
-  "fr",
-  "de",
-  "gr",
-  "hu",
-  "ie",
-  "it",
-  "lv",
-  "lt",
-  "lu",
-  "mt",
-  "nl",
-  "pl",
-  "pt",
-  "ro",
-  "sk",
-  "si",
-  "es",
-  "se",
-]);
-
 export function checklistFor(country: string, aboveThreshold: boolean): Checklist | undefined {
   const own = CHECKLISTS[country];
   if (own) {
-    if (aboveThreshold && EU_MEMBERS.has(country) && !own.items.some((i) => i.piece.includes("ESPD") || i.piece.includes("DUME") || i.piece.includes("EEE"))) {
+    if (aboveThreshold && EU27.includes(country) && !own.items.some((i) => i.piece.includes("ESPD") || i.piece.includes("DUME") || i.piece.includes("EEE"))) {
       return { ...own, items: [EU_ESPD, ...own.items] };
     }
     return own;
   }
-  if (EU_MEMBERS.has(country)) {
+  if (EU27.includes(country)) {
     return {
       jurisdiction: `${country.toUpperCase()} — EU public procurement directives (2014/24/EU)`,
       source: "https://eur-lex.europa.eu/eli/reg_impl/2016/7/oj",

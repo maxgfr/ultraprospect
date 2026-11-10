@@ -23,6 +23,7 @@ import { docFormatForUrl, extractDocument, extractPdf, httpGet, isNoWrite, write
 import { politeUa } from "../net.js";
 import { fetchPage, pageDirFor, type PageStore } from "../pages.js";
 import type { PageRecord } from "../types.js";
+import { foldAccents } from "../util.js";
 import { readZipMember, zipEntries } from "../zip.js";
 import type { Tender } from "./types.js";
 
@@ -36,11 +37,7 @@ const DOC_LINK = /href\s*=\s*["']([^"'#]+\.(?:pdf|docx?|odt|xlsx?|ods|zip|rtf)(?
 const WALL =
   /(s['’]identifier|vous identifier|identifiez[- ]vous|créer un compte|cr[ée]er votre compte|bordereau de retrait|mot de passe|connexion requise|se connecter|anmelden|registrieren|passwort|login|log in|sign in|password|register to|inscripción|registrarse|contraseña|accedi|registrati|zaloguj|hasło|inloggen|registreren|wachtwoord)/i;
 
-const fold = (s: string) =>
-  s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+const fold = (s: string) => foldAccents(s.toLowerCase());
 
 /**
  * Is this document about THIS procedure?

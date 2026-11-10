@@ -16579,7 +16579,7 @@ function keepByQuery(t, q) {
   return true;
 }
 function keywordHit(t, keywords) {
-  const fold3 = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const fold3 = (s) => foldAccents(s.toLowerCase());
   const hay = fold3(`${t.title}
 ${t.description ?? ""}
 ${t.lots.map((l) => l.title ?? "").join("\n")}`);
@@ -23918,44 +23918,15 @@ var CHECKLISTS = {
     ]
   }
 };
-var EU_MEMBERS = /* @__PURE__ */ new Set([
-  "at",
-  "be",
-  "bg",
-  "hr",
-  "cy",
-  "cz",
-  "dk",
-  "ee",
-  "fi",
-  "fr",
-  "de",
-  "gr",
-  "hu",
-  "ie",
-  "it",
-  "lv",
-  "lt",
-  "lu",
-  "mt",
-  "nl",
-  "pl",
-  "pt",
-  "ro",
-  "sk",
-  "si",
-  "es",
-  "se"
-]);
 function checklistFor(country, aboveThreshold) {
   const own = CHECKLISTS[country];
   if (own) {
-    if (aboveThreshold && EU_MEMBERS.has(country) && !own.items.some((i) => i.piece.includes("ESPD") || i.piece.includes("DUME") || i.piece.includes("EEE"))) {
+    if (aboveThreshold && EU27.includes(country) && !own.items.some((i) => i.piece.includes("ESPD") || i.piece.includes("DUME") || i.piece.includes("EEE"))) {
       return { ...own, items: [EU_ESPD, ...own.items] };
     }
     return own;
   }
-  if (EU_MEMBERS.has(country)) {
+  if (EU27.includes(country)) {
     return {
       jurisdiction: `${country.toUpperCase()} \u2014 EU public procurement directives (2014/24/EU)`,
       source: "https://eur-lex.europa.eu/eli/reg_impl/2016/7/oj",
@@ -24358,7 +24329,7 @@ import { tmpdir as tmpdir4 } from "os";
 import { join as join27 } from "path";
 var DOC_LINK = /href\s*=\s*["']([^"'#]+\.(?:pdf|docx?|odt|xlsx?|ods|zip|rtf)(?:\?[^"']*)?)["']/gi;
 var WALL = /(s['’]identifier|vous identifier|identifiez[- ]vous|créer un compte|cr[ée]er votre compte|bordereau de retrait|mot de passe|connexion requise|se connecter|anmelden|registrieren|passwort|login|log in|sign in|password|register to|inscripción|registrarse|contraseña|accedi|registrati|zaloguj|hasło|inloggen|registreren|wachtwoord)/i;
-var fold = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+var fold = (s) => foldAccents(s.toLowerCase());
 function aboutThisProcedure(text3, t) {
   const ft = fold(text3);
   if (t.noticeId && ft.includes(fold(t.noticeId))) return true;
@@ -25210,7 +25181,7 @@ async function engineSearchWeb(todo, onNote) {
   }
   return hits;
 }
-var fold2 = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+var fold2 = (s) => foldAccents(s.toLowerCase());
 function readLabelledDeadline(text3, labels) {
   const t = text3.replace(/\s+/g, " ");
   const ft = fold2(t);

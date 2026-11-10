@@ -1,5 +1,6 @@
 // Small, pure helpers shared by the tender connectors. No network here.
 import { htmlToText } from "../engine.js";
+import { foldAccents } from "../util.js";
 import type { ContractNature, Money, Tender, TenderQuery } from "./types.js";
 
 /**
@@ -444,11 +445,7 @@ export function keepByQuery(t: Tender, q: TenderQuery): boolean {
 }
 
 function keywordHit(t: Tender, keywords: readonly string[]): boolean {
-  const fold = (s: string) =>
-    s
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
+  const fold = (s: string) => foldAccents(s.toLowerCase());
   const hay = fold(`${t.title}\n${t.description ?? ""}\n${t.lots.map((l) => l.title ?? "").join("\n")}`);
   return keywords.some((k) => hay.includes(fold(k)));
 }
