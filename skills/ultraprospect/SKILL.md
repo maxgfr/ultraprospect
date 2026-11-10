@@ -169,6 +169,14 @@ ultraprospect awards --country fr --cpv 72 --since 2y         # who wins, who bu
    `--max-results` budget. The register lane stops at that budget and declares
    itself partial rather than spending twenty minutes.
 
+   `--no-people` belongs on THIS command. It strips named individuals before
+   anything is written and records `filters.noPeople: true` in the manifest,
+   which binds the rest of the run: `enrich` keeps no person read off a page,
+   `confirm` attaches a register record without its officers, and `render`
+   strips every deliverable without being asked again. There is no flag to undo
+   it on a later stage; a run that should hold the names is a run scanned
+   without it.
+
 2a. **`--category` is the only filter that aims BOTH lanes. Reach for it first.**
 
    The older filters each reach one lane and only one: `--osm-groups` narrows

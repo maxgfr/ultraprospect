@@ -19843,7 +19843,12 @@ async function runScan(target, opts = {}) {
     includeCeased: Boolean(opts.includeCeased),
     maxResults: opts.maxResults ?? null,
     registryIds: opts.registryIds ?? null,
-    ...narrowedLanes ? { narrowedLanes } : {}
+    ...narrowedLanes ? { narrowedLanes } : {},
+    // Recorded, because the flag is given once and has to hold for the run:
+    // without it a later `enrich` read people off a team page and `confirm`
+    // attached a record with its directors, back into a run that had been
+    // stripped. Every stage that can bring a person in reads this first.
+    ...opts.noPeople ? { noPeople: true } : {}
   };
   manifest.lanes = lanes;
   manifest.timings = timings;
@@ -19874,6 +19879,39 @@ function writeScan(runDir, outcome) {
 
 // src/confirm.ts
 import { join as join15 } from "path";
+
+// src/no-people.ts
+function bindsNoPeople(manifest) {
+  return manifest?.filters?.noPeople === true;
+}
+function runBindsNoPeople(runDir) {
+  return bindsNoPeople(readManifest(runDir));
+}
+function withoutOfficers(record2) {
+  return record2.officers.length ? { ...record2, officers: [] } : record2;
+}
+function withoutPeople(place) {
+  return {
+    ...place,
+    registry: place.registry ? withoutOfficers(place.registry) : place.registry,
+    contacts: { ...place.contacts, people: [] }
+  };
+}
+function holdNoPeople(manifest, places) {
+  if (!bindsNoPeople(manifest)) return 0;
+  let removed = 0;
+  for (const place of places) {
+    removed += place.contacts.people.length + (place.registry?.officers.length ?? 0);
+    place.contacts.people = [];
+    if (place.registry) place.registry = withoutOfficers(place.registry);
+  }
+  return removed;
+}
+function noPeopleNote(removed) {
+  return `--no-people (recorded at scan): removed ${removed} named individual(s) this stage read; the run still holds organisation data only`;
+}
+
+// src/confirm.ts
 function needsConfirming(places) {
   const targets = places.filter((p) => !p.registry && Boolean(p.name?.trim()));
   return [...targets].sort((a, b) => (b.pages.length > 0 ? 1 : 0) - (a.pages.length > 0 ? 1 : 0));
@@ -20132,6 +20170,7 @@ async function runConfirm(runDir, places, opts = {}) {
       }
     }
     if (attached) {
+      if (runBindsNoPeople(runDir)) attached.rec = withoutOfficers(attached.rec);
       place.registry = attached.rec;
       place.registryEvidence = { mode: "confirm", how: attached.how, from: attached.from, legalId: attached.legalId };
       place.sources = [.../* @__PURE__ */ new Set([...place.sources, "registry"])];
@@ -23671,17 +23710,11 @@ function readDossiers(runDir, places) {
   }
   return out2;
 }
-function withoutPeople(place) {
-  return {
-    ...place,
-    registry: place.registry ? { ...place.registry, officers: [] } : place.registry,
-    contacts: { ...place.contacts, people: [] }
-  };
-}
 function buildAll(places, manifest, opts = {}) {
   const feedback = opts.runDir ? readFeedback(opts.runDir) : void 0;
   if (feedback) places = feedbackSelection(places, feedback);
-  if (opts.noPeople) places = places.map(withoutPeople);
+  const noPeople = Boolean(opts.noPeople) || bindsNoPeople(manifest);
+  if (noPeople) places = places.map(withoutPeople);
   const visible = ranked(places).slice(0, HTML_ROW_CAP);
   const ctx = opts.runDir ? { ...collectEvidence(opts.runDir, visible), dossiers: readDossiers(opts.runDir, visible) } : {};
   const files = [
@@ -23691,7 +23724,7 @@ function buildAll(places, manifest, opts = {}) {
     { path: "index.html", content: buildHtml(places, manifest, ctx) }
   ];
   if (feedback?.entries.length) files.push({ path: "FEEDBACK.json", content: JSON.stringify(feedback, null, 2) + "\n" });
-  const privacy = opts.noPeople ? void 0 : buildPrivacyNote(places, manifest);
+  const privacy = noPeople ? void 0 : buildPrivacyNote(places, manifest);
   if (privacy) files.push({ path: "PRIVACY.md", content: privacy });
   return { files };
 }
@@ -26159,6 +26192,11 @@ ${JSON.stringify({ ok: report2.ok, errors: report2.errors, warnings: report2.war
             town: shortLabel(enrichManifest.target.label),
             onNote: (n) => notes.push(n)
           });
+          const removed = holdNoPeople(enrichManifest, places);
+          if (removed) {
+            outcome.notes.push(noPeopleNote(removed));
+            notes.push(noPeopleNote(removed));
+          }
           persistEnrich(runDir, places, tier, outcome);
           return { text: JSON.stringify({ run: runDir, tier, ...outcome, notes }, null, 2), artifact: runDir };
         }
@@ -27331,6 +27369,9 @@ OUTPUT
   --json                 Machine-readable payload on stdout.
   --stdout               Produce nothing on disk; stream artifacts instead.
   --no-people            Strip named individuals from the run (register directors included).
+                         Given to scan it is recorded in the manifest and binds the run:
+                         enrich keeps no person read off a page, confirm attaches a record
+                         without its officers, and render strips without being asked again.
   --help                 This text.
   --version              Print the version.
 
@@ -27827,6 +27868,11 @@ async function cmdEnrich(values, bools) {
       if (done % 5 === 0 || done === total) say(`  enrich: ${done}/${total} \u2014 ${name}`);
     }
   });
+  const removed = holdNoPeople(requireManifest(runDir), places);
+  if (removed) {
+    outcome.notes.push(noPeopleNote(removed));
+    say(`  ${noPeopleNote(removed)}`);
+  }
   persistEnrich(runDir, places, tier, outcome);
   if (bools.has("json")) out(jsonLine({ run: runDir, tier, ...outcome, notes: void 0 }));
   say("");

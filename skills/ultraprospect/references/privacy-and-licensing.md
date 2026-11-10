@@ -62,6 +62,13 @@ time, before anything is written. Not at render time: a run that never held the
 names cannot leak them through a cached page, a stray artifact, or someone
 reading `places.json` directly. Reaching for it is usually the cheaper choice.
 
+The choice is recorded in the manifest (`filters.noPeople: true`) and holds for
+the run. `enrich` writes no `contacts.people` for it, `confirm` attaches a
+register record without its officers, and `render` strips every deliverable
+whether or not the flag is repeated. The fetched pages themselves are stored as
+they were read — they are the evidence the gate re-opens — so a person named on
+a company's own site is still in `pages/`.
+
 ### The German export is the largest single source of personal data here
 
 `de-offeneregister` carries **officers** — directors, Geschäftsführer, Prokuristen

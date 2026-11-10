@@ -38,6 +38,7 @@ import { runCheck, formatReport } from "../check.js";
 import { needsConfirming, persistConfirm, runConfirm } from "../confirm.js";
 import { probeAll } from "../doctor.js";
 import { enrichable, persistEnrich, runEnrich } from "../enrich.js";
+import { holdNoPeople, noPeopleNote } from "../no-people.js";
 import { newPageStore } from "../pages.js";
 import { parseMinFit } from "../csv.js";
 import { buildAll } from "../render.js";
@@ -486,6 +487,13 @@ export function createAdapter(): McpAdapter {
             town: shortLabel(enrichManifest.target.label),
             onNote: (n) => notes.push(n),
           });
+          // The CLI's step, through the same helper: a run scanned with
+          // --no-people keeps no person a page named.
+          const removed = holdNoPeople(enrichManifest, places);
+          if (removed) {
+            outcome.notes.push(noPeopleNote(removed));
+            notes.push(noPeopleNote(removed));
+          }
           persistEnrich(runDir, places, tier, outcome);
           return { text: JSON.stringify({ run: runDir, tier, ...outcome, notes }, null, 2), artifact: runDir };
         }

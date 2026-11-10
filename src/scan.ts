@@ -490,6 +490,11 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
     maxResults: opts.maxResults ?? null,
     registryIds: opts.registryIds ?? null,
     ...(narrowedLanes ? { narrowedLanes } : {}),
+    // Recorded, because the flag is given once and has to hold for the run:
+    // without it a later `enrich` read people off a team page and `confirm`
+    // attached a record with its directors, back into a run that had been
+    // stripped. Every stage that can bring a person in reads this first.
+    ...(opts.noPeople ? { noPeople: true } : {}),
   };
   manifest.lanes = lanes;
   manifest.timings = timings;

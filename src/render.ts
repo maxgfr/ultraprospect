@@ -15,6 +15,7 @@ import { buildHtml, HTML_ROW_CAP } from "./html.js";
 import { buildReport } from "./report.js";
 import { ranked } from "./score.js";
 import { feedbackSelection, readFeedback } from "./feedback.js";
+import { bindsNoPeople, withoutPeople } from "./no-people.js";
 import type { Place, RunManifest } from "./types.js";
 
 export { buildReport } from "./report.js";
@@ -102,23 +103,17 @@ function readDossiers(runDir: string, places: readonly Place[]): Map<string, str
   return out;
 }
 
-/** A copy of the place with no named individual on it: no officers, no people read off a page. */
-function withoutPeople(place: Place): Place {
-  return {
-    ...place,
-    registry: place.registry ? { ...place.registry, officers: [] } : place.registry,
-    contacts: { ...place.contacts, people: [] },
-  };
-}
-
 /** Everything a run hands over, built from the same places and manifest. */
 export function buildAll(places: readonly Place[], manifest: RunManifest, opts: RenderOptions = {}): RenderOutcome {
   const feedback = opts.runDir ? readFeedback(opts.runDir) : undefined;
   if (feedback) places = feedbackSelection(places, feedback);
   // `--no-people` is a promise about the HANDOVER, not about one column of one
   // file. Every deliverable below is built from the same stripped rows, so none
-  // of them can be the one that remembered the names.
-  if (opts.noPeople) places = places.map(withoutPeople);
+  // of them can be the one that remembered the names. A run SCANNED with the
+  // flag is rendered that way without being asked again: the manifest carries
+  // the choice, and forgetting to repeat a flag must not be how a name ships.
+  const noPeople = Boolean(opts.noPeople) || bindsNoPeople(manifest);
+  if (noPeople) places = places.map(withoutPeople);
   // Only the rows the page will show are worth reading evidence for: a quote
   // attached to a company nobody can scroll to is bytes with no reader.
   const visible = ranked(places).slice(0, HTML_ROW_CAP);
@@ -131,7 +126,7 @@ export function buildAll(places: readonly Place[], manifest: RunManifest, opts: 
     { path: "index.html", content: buildHtml(places, manifest, ctx) },
   ];
   if (feedback?.entries.length) files.push({ path: "FEEDBACK.json", content: JSON.stringify(feedback, null, 2) + "\n" });
-  const privacy = opts.noPeople ? undefined : buildPrivacyNote(places, manifest);
+  const privacy = noPeople ? undefined : buildPrivacyNote(places, manifest);
   if (privacy) files.push({ path: "PRIVACY.md", content: privacy });
   return { files };
 }

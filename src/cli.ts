@@ -55,6 +55,7 @@ import { DEFAULT_QUERIES_PER_PLACE, buildResolveTodo, resolveTargets, runResolve
 import { SKIP_REASONS, describeSkips } from "./skip.js";
 import { newPageStore } from "./pages.js";
 import { enrichable, persistEnrich, runEnrich } from "./enrich.js";
+import { holdNoPeople, noPeopleNote } from "./no-people.js";
 import { applyFit, ranked, scoreAll } from "./score.js";
 import { parseMinFit } from "./csv.js";
 import { buildDossierPacket, dossierPathFor } from "./dossier.js";
@@ -388,6 +389,9 @@ OUTPUT
   --json                 Machine-readable payload on stdout.
   --stdout               Produce nothing on disk; stream artifacts instead.
   --no-people            Strip named individuals from the run (register directors included).
+                         Given to scan it is recorded in the manifest and binds the run:
+                         enrich keeps no person read off a page, confirm attaches a record
+                         without its officers, and render strips without being asked again.
   --help                 This text.
   --version              Print the version.
 
@@ -1038,6 +1042,13 @@ async function cmdEnrich(values: Record<string, string>, bools: ReadonlySet<stri
     },
   });
 
+  // A run scanned with --no-people stays without them: whoever the pages named
+  // is taken back out before anything is written.
+  const removed = holdNoPeople(requireManifest(runDir), places);
+  if (removed) {
+    outcome.notes.push(noPeopleNote(removed));
+    say(`  ${noPeopleNote(removed)}`);
+  }
   persistEnrich(runDir, places, tier as 1 | 2, outcome);
 
   if (bools.has("json")) out(jsonLine({ run: runDir, tier, ...outcome, notes: undefined }));

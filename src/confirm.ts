@@ -34,6 +34,7 @@ import { readJsonSafe } from "./engine.js";
 import { buildMatchTodo } from "./match.js";
 import { licencesFor, writeJson, writePlaces, writeRunManifest } from "./run.js";
 import { readPageText } from "./run.js";
+import { runBindsNoPeople, withoutOfficers } from "./no-people.js";
 import type { LaneCoverage, MatchCandidate, MatchTodo, Place, RunManifest } from "./types.js";
 import { foldAccents, nameSimilarity, normalizeName, shortLabel, tokenSet } from "./util.js";
 
@@ -511,6 +512,12 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
     }
 
     if (attached) {
+      // A run scanned with --no-people holds no named individual, and a register
+      // record arrives with its directors on it. They are left off the copy that
+      // is attached, which is also the copy `registry.json` receives: stripping
+      // at scan and attaching them here is how the names came back into a run
+      // that reported holding organisation data only.
+      if (runBindsNoPeople(runDir)) attached.rec = withoutOfficers(attached.rec);
       place.registry = attached.rec;
       place.registryEvidence = { mode: "confirm", how: attached.how, from: attached.from, legalId: attached.legalId };
       place.sources = [...new Set([...place.sources, "registry" as const])];
