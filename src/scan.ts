@@ -185,16 +185,30 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
   if (replay) {
     note(`fixture: replaying a recorded sweep from ${opts.fixture}`);
     lanes.push({ lane: "osm", requested: 0, returned: replay.osm.length, truncated: false, reason: "replayed from a fixture", partitions: 1 });
-    lanes.push({
-      lane: "registry",
-      mode: "sweep",
-      connectorId: replay.connectorId,
-      requested: 0,
-      returned: replay.registry.length,
-      truncated: false,
-      reason: "replayed from a fixture",
-      partitions: 1,
-    });
+    if (replay.registry.length > 0 || selection.sweep) {
+      lanes.push({
+        lane: "registry",
+        mode: "sweep",
+        connectorId: replay.connectorId ?? selection.sweep?.id,
+        requested: 0,
+        returned: replay.registry.length,
+        truncated: false,
+        reason: "replayed from a fixture",
+        partitions: 1,
+      });
+    } else {
+      // A recording of a territory whose register cannot be enumerated holds no
+      // register records, and replaying it must not turn that into a sweep that
+      // found nothing. Replayed, a German run used to carry `mode: "sweep"` with
+      // zero rows — the confirmed-presented-as-swept claim, made offline.
+      lanes.push({
+        lane: "registry",
+        requested: 0,
+        returned: 0,
+        truncated: false,
+        reason: `${noSweepReason(target.countryCode, selection)} (replayed from a fixture)`,
+      });
+    }
   }
 
   // ---- Cross-lane targeting -------------------------------------------------

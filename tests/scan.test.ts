@@ -81,6 +81,27 @@ describe("fixture identifier fusion", () => {
     expect(loadFixture(fixture).registry.some((r) => r.officers.length > 0)).toBe(true);
   });
 
+  it("does not replay a territory with no sweepable register as a sweep that found nothing", async () => {
+    const source = loadFixture(fixture);
+    const dir = outDir();
+    writeFileSync(join(dir, "target.json"), JSON.stringify({ ...source.target, query: "Hamburg", label: "Hamburg, Deutschland", countryCode: "de" }));
+    writeFileSync(join(dir, "osm.json"), JSON.stringify(source.osm.slice(0, 5)));
+    writeFileSync(join(dir, "registry.json"), "[]");
+
+    const outcome = await runScan(loadFixture(dir).target, { fixture: dir });
+    const registryLane = outcome.manifest.lanes.find((lane) => lane.lane === "registry");
+    expect(registryLane?.mode).not.toBe("sweep");
+    expect(registryLane?.reason).toContain("no register can be swept");
+    expect(registryLane?.reason).toContain("replayed from a fixture");
+  });
+
+  it("still replays a swept register as the sweep it was", async () => {
+    const outcome = await runScan(loadFixture(fixture).target, { fixture });
+    const registryLane = outcome.manifest.lanes.find((lane) => lane.lane === "registry");
+    expect(registryLane?.mode).toBe("sweep");
+    expect(registryLane?.connectorId).toBe("fr-sirene");
+  });
+
   it("writes byte-identical places.json when the same fixture runs twice", async () => {
     const target = loadFixture(fixture).target;
     const first = await runScan(target, { fixture });
