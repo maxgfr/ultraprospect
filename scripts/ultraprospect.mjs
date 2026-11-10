@@ -25569,6 +25569,7 @@ var TOOLS = [
         query: { type: "string", description: "A town, a street, an address." },
         country: { type: "string" },
         radius: { type: "string", description: "For a point search: 800, 800m, 2km." },
+        pick: { type: "number", description: "Take the Nth candidate (1-based) that ultraprospect_where listed, instead of refusing an ambiguous place." },
         section: { type: "string", description: "Activity section letters in the country's own scheme, comma-separated. NACE A-U across Europe, e.g. J,M." },
         legalForms: { type: "string", description: "Filed legal-form codes to include, comma-separated." },
         excludeLegalForms: { type: "string", description: "Filed legal-form codes to exclude, comma-separated. Applied client-side in France." },
@@ -25651,7 +25652,10 @@ var TOOLS = [
         run: { type: "string" },
         tier: { type: "number", description: "1 or 2. Default 1." },
         limit: { type: "number", description: "Only enrich this many places." },
-        only: { type: "string", description: "Restrict to these place ids, comma-separated." }
+        only: { type: "string", description: "Restrict to these place ids, comma-separated." },
+        roles: { type: "string", description: "Job-title terms you care about, comma-separated. Counted into matched_roles. No default." },
+        terms: { type: "string", description: "Terms to find verbatim in the pages, comma-separated, in the market's own language. No default." },
+        termsOn: { type: "string", description: "Page roles `terms` may be read on, comma-separated. Default: careers." }
       },
       required: ["run"]
     }
@@ -25698,6 +25702,11 @@ var TOOLS = [
     }
   }
 ];
+function csvArg(value) {
+  if (typeof value !== "string") return void 0;
+  const items = value.split(",").map((item) => item.trim()).filter(Boolean);
+  return items.length ? items : void 0;
+}
 function createAdapter() {
   return {
     version: VERSION,
@@ -25729,9 +25738,16 @@ function createAdapter() {
         }
         case "ultraprospect_scan": {
           const radiusM = typeof args.radius === "string" ? parseDistanceM(args.radius) : void 0;
+          if (typeof args.radius === "string" && radiusM === void 0) {
+            throw new ToolError(`radius ${JSON.stringify(args.radius)} is not a distance \u2014 use 800, 800m or 2km`);
+          }
           const resolved = await resolveWhere(str3(args.query, "query"), {
             country: typeof args.country === "string" ? args.country : void 0,
-            radiusM
+            radiusM,
+            // The refusal below tells the caller to pass `pick`, and until now
+            // there was nowhere to pass it: an ambiguous place could be resolved
+            // over MCP and never scanned.
+            pick: typeof args.pick === "number" ? clampInt(args.pick, 1, 5, 1) : void 0
           });
           if (!resolved.ok) throw new ToolError(`${resolved.reason}. Call ultraprospect_where first, then pass its pick.`);
           const outcome = await runScan(resolved.target, {
@@ -25875,12 +25891,22 @@ ${JSON.stringify({ ok: report2.ok, errors: report2.errors, warnings: report2.war
             );
           }
           const tier = typeof args.tier === "number" ? clampInt(args.tier, 1, 2, 1) : 1;
+          const enrichManifest = requireManifest(runDir);
           const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }))));
           const notes = [];
           const outcome = await runEnrich(runDir, places, store, {
             tier,
             limit: typeof args.limit === "number" ? clampInt(args.limit, 1, 1e5, 20) : void 0,
             only: typeof args.only === "string" ? args.only.split(",").map((s) => s.trim()) : void 0,
+            roleFilter: csvArg(args.roles),
+            termLexicon: csvArg(args.terms),
+            termRoles: csvArg(args.termsOn),
+            // From the run's own manifest, exactly as the CLI passes them: the
+            // role labels that name a person are the country's, and the town is
+            // never mistaken for a surname. Without them this handler read every
+            // page with the English labels only.
+            countryCode: enrichManifest.target.countryCode,
+            town: shortLabel(enrichManifest.target.label),
             onNote: (n) => notes.push(n)
           });
           persistEnrich(runDir, places, tier, outcome);
@@ -25939,6 +25965,8 @@ ${JSON.stringify({ ok: report2.ok, errors: report2.errors, warnings: report2.war
         case "ultraprospect_watch": {
           const after = resolveRun(str3(args.run, "run"));
           const before = resolveRun(str3(args.since, "since"));
+          if (after === before) throw new ToolError("run and since resolve to the same run; there is nothing to compare");
+          if (isTenderRun(after) !== isTenderRun(before)) throw new ToolError("run and since must both be tenders runs, or both territory runs");
           if (isTenderRun(after) && isTenderRun(before)) {
             const w = watchTenderRuns(after, before);
             return { text: readFileSync22(w.path, "utf8"), artifact: after };

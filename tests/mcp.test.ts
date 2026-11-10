@@ -134,6 +134,7 @@ describe("the tool list", () => {
         "query",
         "country",
         "radius",
+        "pick",
         "section",
         "legalForms",
         "excludeLegalForms",
@@ -163,6 +164,37 @@ describe("argument validation happens before the handler runs", () => {
   it("rejects an unknown tool by name", async () => {
     const res = await call("ultraprospect_nope", {});
     expect(res.isError).toBe(true);
+  });
+});
+
+describe("the surface matches what the CLI does", () => {
+  const schemaOf = async (name: string): Promise<Record<string, unknown>> => {
+    const tool = createServer(createAdapter())
+      .tools()
+      .find((t) => t.name === name)!;
+    return (tool.inputSchema as unknown as { properties: Record<string, unknown> }).properties;
+  };
+
+  it("lets a scan take the pick its own refusal tells the caller to pass", async () => {
+    expect(await schemaOf("ultraprospect_scan")).toHaveProperty("pick");
+  });
+
+  it("lets enrich be told which roles and terms to read, as the CLI can", async () => {
+    const props = await schemaOf("ultraprospect_enrich");
+    for (const key of ["roles", "terms", "termsOn"]) expect(props).toHaveProperty(key);
+  });
+
+  it("refuses a radius that is not a distance instead of sweeping the whole town", async () => {
+    const res = await call("ultraprospect_scan", { query: "48.85,2.35", radius: "2 miles" });
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain("not a distance");
+  });
+
+  it("refuses to compare a run with itself", async () => {
+    const run = emptyRun();
+    const res = await call("ultraprospect_watch", { run, since: run });
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain("same run");
   });
 });
 

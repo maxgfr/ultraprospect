@@ -50,7 +50,8 @@ import { readPlaces, requireManifest, resolveRun, newRun, writePlaces, DEFAULT_O
 import { runScan, writeScan } from "../scan.js";
 import { ranked, scoreAll } from "../score.js";
 import { factSheet } from "../dossier.js";
-import { clampInt, parseDistanceM } from "../util.js";
+import type { PageRole } from "../types.js";
+import { clampInt, parseDistanceM, shortLabel } from "../util.js";
 import { VERSION } from "../version.js";
 import { readFileSync } from "node:fs";
 import { readManifest } from "../engine.js";
@@ -104,6 +105,7 @@ const TOOLS: ToolDecl[] = [
         query: { type: "string", description: "A town, a street, an address." },
         country: { type: "string" },
         radius: { type: "string", description: "For a point search: 800, 800m, 2km." },
+        pick: { type: "number", description: "Take the Nth candidate (1-based) that ultraprospect_where listed, instead of refusing an ambiguous place." },
         section: { type: "string", description: "Activity section letters in the country's own scheme, comma-separated. NACE A-U across Europe, e.g. J,M." },
         legalForms: { type: "string", description: "Filed legal-form codes to include, comma-separated." },
         excludeLegalForms: { type: "string", description: "Filed legal-form codes to exclude, comma-separated. Applied client-side in France." },
@@ -192,6 +194,9 @@ const TOOLS: ToolDecl[] = [
         tier: { type: "number", description: "1 or 2. Default 1." },
         limit: { type: "number", description: "Only enrich this many places." },
         only: { type: "string", description: "Restrict to these place ids, comma-separated." },
+        roles: { type: "string", description: "Job-title terms you care about, comma-separated. Counted into matched_roles. No default." },
+        terms: { type: "string", description: "Terms to find verbatim in the pages, comma-separated, in the market's own language. No default." },
+        termsOn: { type: "string", description: "Page roles `terms` may be read on, comma-separated. Default: careers." },
       },
       required: ["run"],
     } as never,
@@ -243,6 +248,16 @@ const TOOLS: ToolDecl[] = [
   },
 ];
 
+/** A comma-separated argument as a list, or undefined when it names nothing. */
+function csvArg(value: unknown): string[] | undefined {
+  if (typeof value !== "string") return undefined;
+  const items = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return items.length ? items : undefined;
+}
+
 export function createAdapter(): McpAdapter {
   return {
     version: VERSION,
@@ -278,9 +293,19 @@ export function createAdapter(): McpAdapter {
 
         case "ultraprospect_scan": {
           const radiusM = typeof args.radius === "string" ? parseDistanceM(args.radius) : undefined;
+          // A radius that does not parse is refused, as the CLI refuses it.
+          // Dropped silently it turned a 2 km point search into a sweep of the
+          // whole town the point happens to sit in.
+          if (typeof args.radius === "string" && radiusM === undefined) {
+            throw new ToolError(`radius ${JSON.stringify(args.radius)} is not a distance — use 800, 800m or 2km`);
+          }
           const resolved = await resolveWhere(str(args.query, "query"), {
             country: typeof args.country === "string" ? args.country : undefined,
             radiusM,
+            // The refusal below tells the caller to pass `pick`, and until now
+            // there was nowhere to pass it: an ambiguous place could be resolved
+            // over MCP and never scanned.
+            pick: typeof args.pick === "number" ? clampInt(args.pick, 1, 5, 1) : undefined,
           });
           if (!resolved.ok) throw new ToolError(`${resolved.reason}. Call ultraprospect_where first, then pass its pick.`);
 
@@ -432,12 +457,22 @@ export function createAdapter(): McpAdapter {
             );
           }
           const tier = typeof args.tier === "number" ? (clampInt(args.tier, 1, 2, 1) as 1 | 2) : 1;
+          const enrichManifest = requireManifest(runDir);
           const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }) as never)));
           const notes: string[] = [];
           const outcome = await runEnrich(runDir, places, store, {
             tier,
             limit: typeof args.limit === "number" ? clampInt(args.limit, 1, 100_000, 20) : undefined,
             only: typeof args.only === "string" ? args.only.split(",").map((s) => s.trim()) : undefined,
+            roleFilter: csvArg(args.roles),
+            termLexicon: csvArg(args.terms),
+            termRoles: csvArg(args.termsOn) as PageRole[] | undefined,
+            // From the run's own manifest, exactly as the CLI passes them: the
+            // role labels that name a person are the country's, and the town is
+            // never mistaken for a surname. Without them this handler read every
+            // page with the English labels only.
+            countryCode: enrichManifest.target.countryCode,
+            town: shortLabel(enrichManifest.target.label),
             onNote: (n) => notes.push(n),
           });
           persistEnrich(runDir, places, tier, outcome);
@@ -501,6 +536,11 @@ export function createAdapter(): McpAdapter {
         case "ultraprospect_watch": {
           const after = resolveRun(str(args.run, "run"));
           const before = resolveRun(str(args.since, "since"));
+          // The CLI's two guards. Without them a run compared with itself came
+          // back as an empty delta, and a tenders run compared with a territory
+          // run failed on a missing places.json.
+          if (after === before) throw new ToolError("run and since resolve to the same run; there is nothing to compare");
+          if (isTenderRun(after) !== isTenderRun(before)) throw new ToolError("run and since must both be tenders runs, or both territory runs");
           if (isTenderRun(after) && isTenderRun(before)) {
             const w = watchTenderRuns(after, before);
             return { text: readFileSync(w.path, "utf8"), artifact: after };
