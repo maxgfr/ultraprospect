@@ -22549,6 +22549,7 @@ function summarise(places, manifest) {
 // src/html.ts
 var esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 function link(url, text3) {
+  if (!/^(?:https?:|mailto:|tel:)/i.test(url.trim())) return esc(text3 ?? url);
   return `<a href="${esc(url)}" rel="noreferrer nofollow">${esc(text3 ?? url)}</a>`;
 }
 function hostOf3(url) {

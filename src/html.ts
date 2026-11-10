@@ -47,6 +47,12 @@ const esc = (s: unknown): string =>
 
 /** A link to somewhere outside the run. Never followed while the page loads. */
 function link(url: string, text?: string): string {
+  // Escaping makes a URL safe to PRINT, not safe to click. Job links come
+  // straight out of an applicant-tracking API's JSON and source links out of a
+  // register's, so a `javascript:` URL would otherwise be one click away in a
+  // page opened from the user's own disk. Anything but a web, mail or phone
+  // link is shown as text.
+  if (!/^(?:https?:|mailto:|tel:)/i.test(url.trim())) return esc(text ?? url);
   return `<a href="${esc(url)}" rel="noreferrer nofollow">${esc(text ?? url)}</a>`;
 }
 

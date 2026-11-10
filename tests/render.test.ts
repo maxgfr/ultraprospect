@@ -152,6 +152,20 @@ describe("CSV", () => {
     expect(p.contacts.people).toHaveLength(1);
   });
 
+  it("prints a link it would not be safe to click as text", () => {
+    // A job URL comes straight out of an applicant-tracking API's JSON.
+    const p = place({
+      jobs: [
+        { title: "Data Engineer", url: "javascript:alert(document.cookie)", via: "lever" },
+        { title: "ML Engineer", url: "https://jobs.example/ml", via: "lever" },
+      ],
+    });
+    const html = buildHtml([p], manifest(), {});
+    expect(html).not.toContain('href="javascript:');
+    expect(html).toContain("Data Engineer");
+    expect(html).toContain('href="https://jobs.example/ml"');
+  });
+
   it("refuses a --min-fit it does not know rather than keeping every row", () => {
     const rows = [
       place({ id: "osm:n1", score: { total: 50, parts: {}, fit: "strong", why: "x" } }),
