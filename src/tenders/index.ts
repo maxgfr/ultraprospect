@@ -67,9 +67,6 @@ export function tenderConnectorsFor(
   return { connectors: TENDER_CONNECTORS.filter((c) => connectors.has(c)), gaps };
 }
 
-/** The countries a TED-only run reaches, for help text and the doctor. */
-export const TED_COUNTRIES = [...EU27];
-
 export {
   euTed,
   frBoamp,

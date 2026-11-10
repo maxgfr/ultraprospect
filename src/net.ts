@@ -28,14 +28,3 @@ export const CONTACT_URL = "https://github.com/maxgfr/ultraprospect";
 export function politeUa(): string {
   return `ultraprospect/${VERSION} (+${CONTACT_URL})`;
 }
-
-/**
- * Request options every community-infrastructure call shares.
- *
- * `accept` is left to the caller: Overpass is content to negotiate, but some
- * instances behind a CDN answer 406 to an over-specific Accept, and the payload
- * is unambiguous anyway.
- */
-export function politeRequest(timeoutMs: number): { userAgent: string; timeoutMs: number } {
-  return { userAgent: politeUa(), timeoutMs };
-}

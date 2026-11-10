@@ -32,13 +32,6 @@ import { connectorById } from "./registry/index.js";
 export const SKIP_REASONS = ["chain", "unnamed", "public", "vacant"] as const;
 export type SkipReason = (typeof SKIP_REASONS)[number];
 
-export const SKIP_REASON_LABELS: Record<SkipReason, string> = {
-  chain: "an outlet of a brand the mapper named (`brand` / `brand:wikidata`)",
-  unnamed: "no name on the row — nothing to search for",
-  public: "a public body (`operator:type=public|government` or a filed public legal form)",
-  vacant: "an empty or disused unit (`shop=vacant`, `disused:*`, `abandoned:*`)",
-};
-
 const PUBLIC_OPERATORS = new Set(["public", "government"]);
 
 /**

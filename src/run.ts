@@ -108,11 +108,6 @@ export function writeJson(runDir: string, file: string, value: unknown): void {
   writeArtifact(join(runDir, file), JSON.stringify(value, null, 2) + "\n");
 }
 
-/** Per-place page directory. One slug per company, stable across re-runs. */
-export function pagesDir(runDir: string, placeId: string): string {
-  return join(runDir, "pages", placeId);
-}
-
 export function readPageText(runDir: string, extractRelPath: string): string | undefined {
   const p = join(runDir, extractRelPath);
   if (!existsSync(p)) return undefined;

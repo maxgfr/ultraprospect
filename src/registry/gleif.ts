@@ -192,8 +192,3 @@ export const gleif: RegistryConnector = {
     return { ok: hits.length > 0, detail: hits.length ? `${hits.length} record(s)` : "no answer" };
   },
 };
-
-/** Exposed so `confirm` can report the coverage caveat rather than implying a full register. */
-export function gleifCoverageNote(): string {
-  return "gleif: an LEI is held by entities that trade in financial markets — roughly 2.7 million worldwide. A street of independent shops will match almost none of them.";
-}

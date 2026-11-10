@@ -363,11 +363,6 @@ export interface RegistryConnector {
   probe(ctx: ConnectorContext): Promise<{ ok: boolean; detail: string }>;
 }
 
-/** The best name to show for a record: the trading name if there is one, else the legal one. */
-export function displayName(rec: RegistryRecord): string {
-  return rec.names.find((n) => n?.trim()) ?? rec.id;
-}
-
 /**
  * The stable id a place gets when a register record is its origin.
  *

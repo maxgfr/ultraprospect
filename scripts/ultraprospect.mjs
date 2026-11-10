@@ -18174,7 +18174,6 @@ function tenderConnectorsFor(countries, opts = {}) {
   }
   return { connectors: TENDER_CONNECTORS.filter((c) => connectors.has(c)), gaps };
 }
-var TED_COUNTRIES = [...EU27];
 
 // src/legal-notice.ts
 var LEGAL_NOTICE_COUNTRIES = ["fr", "de", "es", "gb", "it", "nl", "be", "at", "pt", "pl", "ie", "lu", "cz", "dk", "fi", "se", "no"];
