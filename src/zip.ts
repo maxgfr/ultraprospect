@@ -74,8 +74,15 @@ export async function zipEntries(path: string): Promise<ZipEntry[]> {
       throw new ZipError("ZIP64 archive — not supported, and refused rather than misread");
     }
 
+    // Both fields are four bytes somebody else wrote. Trusted, a corrupt or
+    // crafted archive made this allocate whatever it claimed — up to 4 GB — to
+    // hold a directory that is not there.
+    if (directoryOffset + directorySize > size) {
+      throw new ZipError("the central directory lies outside the file — the archive is truncated or corrupt");
+    }
     const dir = Buffer.alloc(directorySize);
-    await fh.read(dir, 0, directorySize, directoryOffset);
+    const { bytesRead } = await fh.read(dir, 0, directorySize, directoryOffset);
+    if (bytesRead !== directorySize) throw new ZipError("the central directory could not be read whole");
 
     const entries: ZipEntry[] = [];
     let at = 0;
@@ -134,5 +141,35 @@ export async function openZipMember(path: string, entry: ZipEntry): Promise<Read
   }
   const start = await dataStart(path, entry);
   const raw = createReadStream(path, { start, end: start + entry.compressedSize - 1 });
-  return entry.method === STORED ? raw : raw.pipe(createInflateRaw());
+  if (entry.method === STORED) return raw;
+  // `pipe` forwards data and nothing else: a read error on the file never
+  // reached the inflater, which then waited forever for bytes that were not
+  // coming, and the ingest hung instead of failing.
+  const inflate = createInflateRaw();
+  raw.on("error", (e) => inflate.destroy(e));
+  return raw.pipe(inflate);
+}
+
+/**
+ * One member, whole, in memory — or `undefined` when it is larger than `maxBytes`.
+ *
+ * For members a caller has to hold at once (a PDF, an office document). The
+ * declared size is checked first and the bytes are counted as they arrive,
+ * because the header is the archive's own claim: a few kilobytes of deflate can
+ * declare a small file and inflate to gigabytes.
+ */
+export async function readZipMember(path: string, entry: ZipEntry, maxBytes: number): Promise<Buffer | undefined> {
+  if (entry.uncompressedSize > maxBytes) return undefined;
+  const stream = await openZipMember(path, entry);
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of stream) {
+    total += (chunk as Buffer).length;
+    if (total > maxBytes) {
+      stream.destroy();
+      return undefined;
+    }
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
 }

@@ -23,7 +23,7 @@ import { docFormatForUrl, extractDocument, extractPdf, httpGet, isNoWrite, write
 import { politeUa } from "../net.js";
 import { fetchPage, pageDirFor, type PageStore } from "../pages.js";
 import type { PageRecord } from "../types.js";
-import { openZipMember, zipEntries } from "../zip.js";
+import { readZipMember, zipEntries } from "../zip.js";
 import type { Tender } from "./types.js";
 
 const DOC_LINK = /href\s*=\s*["']([^"'#]+\.(?:pdf|docx?|odt|xlsx?|ods|zip|rtf)(?:\?[^"']*)?)["']/gi;
@@ -132,6 +132,9 @@ function storePage(
   return { id, url, role, title, fetchedAt, extractor, chars: text.length, extract };
 }
 
+/** The most one archive member may inflate to. A tender's largest PDF is a few tens of megabytes. */
+const MAX_ARCHIVE_MEMBER_BYTES = 128 * 1024 * 1024;
+
 async function zipMembers(
   runDir: string,
   t: Tender,
@@ -144,6 +147,7 @@ async function zipMembers(
   writeFileSync(scratch, bytes);
   const pages: PageRecord[] = [];
   let skipped = 0;
+  let oversized = 0;
   try {
     for (const entry of await zipEntries(scratch)) {
       if (pages.length >= max) {
@@ -152,10 +156,13 @@ async function zipMembers(
       }
       if (entry.name.endsWith("/")) continue;
       const lower = entry.name.toLowerCase();
-      const stream = await openZipMember(scratch, entry);
-      const chunks: Buffer[] = [];
-      for await (const c of stream) chunks.push(c as Buffer);
-      const buf = Buffer.concat(chunks);
+      // A buyer's platform is not a trusted source of archives: one member is
+      // held in memory at a time, and never more than this much of it.
+      const buf = await readZipMember(scratch, entry, MAX_ARCHIVE_MEMBER_BYTES);
+      if (!buf) {
+        oversized += 1;
+        continue;
+      }
       let text = "";
       let via = "";
       if (lower.endsWith(".pdf")) {
@@ -186,7 +193,11 @@ async function zipMembers(
   } finally {
     rmSync(scratch, { force: true });
   }
-  return { pages, note: skipped ? `${skipped} archive member(s) not read (no extractable text, unsupported format, or past --max-pages)` : undefined };
+  const notes = [
+    skipped ? `${skipped} archive member(s) not read (no extractable text, unsupported format, or past --max-pages)` : "",
+    oversized ? `${oversized} archive member(s) not read because they inflate past ${MAX_ARCHIVE_MEMBER_BYTES / 1024 / 1024} MB` : "",
+  ].filter(Boolean);
+  return { pages, note: notes.length ? notes.join("; ") : undefined };
 }
 
 async function fetchDocument(

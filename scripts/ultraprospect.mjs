@@ -14043,8 +14043,12 @@ async function zipEntries(path) {
     if (directoryOffset === 4294967295 || entryCount === 65535) {
       throw new ZipError("ZIP64 archive \u2014 not supported, and refused rather than misread");
     }
+    if (directoryOffset + directorySize2 > size) {
+      throw new ZipError("the central directory lies outside the file \u2014 the archive is truncated or corrupt");
+    }
     const dir2 = Buffer.alloc(directorySize2);
-    await fh.read(dir2, 0, directorySize2, directoryOffset);
+    const { bytesRead } = await fh.read(dir2, 0, directorySize2, directoryOffset);
+    if (bytesRead !== directorySize2) throw new ZipError("the central directory could not be read whole");
     const entries = [];
     let at = 0;
     for (let i = 0; i < entryCount; i++) {
@@ -14086,7 +14090,25 @@ async function openZipMember(path, entry) {
   }
   const start = await dataStart(path, entry);
   const raw = createReadStream(path, { start, end: start + entry.compressedSize - 1 });
-  return entry.method === STORED ? raw : raw.pipe(createInflateRaw());
+  if (entry.method === STORED) return raw;
+  const inflate = createInflateRaw();
+  raw.on("error", (e) => inflate.destroy(e));
+  return raw.pipe(inflate);
+}
+async function readZipMember(path, entry, maxBytes) {
+  if (entry.uncompressedSize > maxBytes) return void 0;
+  const stream = await openZipMember(path, entry);
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of stream) {
+    total += chunk.length;
+    if (total > maxBytes) {
+      stream.destroy();
+      return void 0;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 // src/snapshot.ts
@@ -24246,11 +24268,13 @@ function storePage(runDir, t, store, title, url, role, text3, extractor) {
   writeArtifact(join27(runDir, extract), header2 + text3 + "\n");
   return { id, url, role, title, fetchedAt, extractor, chars: text3.length, extract };
 }
+var MAX_ARCHIVE_MEMBER_BYTES = 128 * 1024 * 1024;
 async function zipMembers(runDir, t, store, url, bytes, max) {
   const scratch = join27(tmpdir4(), `ultraprospect-dce-${process.pid}-${Date.now()}.zip`);
   writeFileSync8(scratch, bytes);
   const pages = [];
   let skipped = 0;
+  let oversized = 0;
   try {
     for (const entry of await zipEntries(scratch)) {
       if (pages.length >= max) {
@@ -24259,10 +24283,11 @@ async function zipMembers(runDir, t, store, url, bytes, max) {
       }
       if (entry.name.endsWith("/")) continue;
       const lower = entry.name.toLowerCase();
-      const stream = await openZipMember(scratch, entry);
-      const chunks = [];
-      for await (const c of stream) chunks.push(c);
-      const buf = Buffer.concat(chunks);
+      const buf = await readZipMember(scratch, entry, MAX_ARCHIVE_MEMBER_BYTES);
+      if (!buf) {
+        oversized += 1;
+        continue;
+      }
       let text3 = "";
       let via = "";
       if (lower.endsWith(".pdf")) {
@@ -24293,7 +24318,11 @@ async function zipMembers(runDir, t, store, url, bytes, max) {
   } finally {
     rmSync6(scratch, { force: true });
   }
-  return { pages, note: skipped ? `${skipped} archive member(s) not read (no extractable text, unsupported format, or past --max-pages)` : void 0 };
+  const notes = [
+    skipped ? `${skipped} archive member(s) not read (no extractable text, unsupported format, or past --max-pages)` : "",
+    oversized ? `${oversized} archive member(s) not read because they inflate past ${MAX_ARCHIVE_MEMBER_BYTES / 1024 / 1024} MB` : ""
+  ].filter(Boolean);
+  return { pages, note: notes.length ? notes.join("; ") : void 0 };
 }
 async function fetchDocument(runDir, t, store, url, max) {
   if (/\.zip(\?|$)/i.test(url)) {
