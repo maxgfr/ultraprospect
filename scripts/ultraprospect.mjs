@@ -20113,7 +20113,8 @@ var DIRECTORY_HOSTS_BY_COUNTRY = {
     "gelbeseiten.de",
     "dasoertliche.de",
     "11880.com",
-    "wlw.de",
+    // `wlw.` rather than wlw.de: the same directory answers on wlw.com/en.
+    "wlw.",
     "firmenwissen.de",
     "northdata.de",
     "unternehmensregister.de",
@@ -20159,9 +20160,13 @@ function classifyHost(url, countryCode) {
   } catch {
     return "directory";
   }
-  if (SOCIAL_HOSTS.some((h) => host.includes(h))) return "social";
-  if (directoryHostsFor(countryCode).some((h) => host.includes(h))) return "directory";
+  if (SOCIAL_HOSTS.some((h) => hostIs2(host, h))) return "social";
+  if (directoryHostsFor(countryCode).some((h) => hostIs2(host, h))) return "directory";
   return "own";
+}
+function hostIs2(host, listed) {
+  if (listed.endsWith(".")) return host.startsWith(listed) || host.includes(`.${listed}`);
+  return host === listed || host.endsWith(`.${listed}`);
 }
 function queriesFor(place, fallbackTown, countryCode, perPlace = DEFAULT_QUERIES_PER_PLACE) {
   const town = place.address.commune ?? place.address.codePostal ?? fallbackTown ?? "";

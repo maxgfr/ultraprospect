@@ -161,7 +161,8 @@ const DIRECTORY_HOSTS_BY_COUNTRY: Record<string, string[]> = {
     "gelbeseiten.de",
     "dasoertliche.de",
     "11880.com",
-    "wlw.de",
+    // `wlw.` rather than wlw.de: the same directory answers on wlw.com/en.
+    "wlw.",
     "firmenwissen.de",
     "northdata.de",
     "unternehmensregister.de",
@@ -222,9 +223,25 @@ export function classifyHost(url: string, countryCode?: string): HostKind {
   } catch {
     return "directory";
   }
-  if (SOCIAL_HOSTS.some((h) => host.includes(h))) return "social";
-  if (directoryHostsFor(countryCode).some((h) => host.includes(h))) return "directory";
+  if (SOCIAL_HOSTS.some((h) => hostIs(host, h))) return "social";
+  if (directoryHostsFor(countryCode).some((h) => hostIs(host, h))) return "directory";
   return "own";
+}
+
+/**
+ * Whether `host` IS the listed host or sits under it.
+ *
+ * Never "contains its letters": a substring test read `x.com` out of
+ * rolex.com, dropbox.com and fedex.com and filed each as a social profile —
+ * never fetched, never corroborated, the company left without a site — and
+ * read `ebay.` out of a shop called debay.fr.
+ *
+ * An entry ending in a dot is a brand listed without its TLD (`yelp.` for
+ * yelp.com, yelp.de, www.yelp.fr), so it has to open a label.
+ */
+function hostIs(host: string, listed: string): boolean {
+  if (listed.endsWith(".")) return host.startsWith(listed) || host.includes(`.${listed}`);
+  return host === listed || host.endsWith(`.${listed}`);
 }
 
 /**

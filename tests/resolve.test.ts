@@ -23,6 +23,23 @@ describe("classifyHost", () => {
     expect(classifyHost("https://lesofficiers.fr/", "fr")).toBe("own");
   });
 
+  it("matches a listed host as a host, never as a run of letters inside another one", () => {
+    // `x.com` is a substring of each of these; none of them is a social network.
+    for (const url of ["https://www.rolex.com/", "https://www.dropbox.com/", "https://www.fedex.com/de-de/", "https://relax.com/"]) {
+      expect(classifyHost(url, "de"), url).toBe("own");
+    }
+    // `ebay.` is a substring of a shop called Debay.
+    expect(classifyHost("https://www.debay.fr/", "fr")).toBe("own");
+    // …and the real ones still are what they are, on any subdomain and any TLD.
+    expect(classifyHost("https://x.com/acme", "de")).toBe("social");
+    expect(classifyHost("https://mobile.x.com/acme", "de")).toBe("social");
+    expect(classifyHost("https://de.linkedin.com/company/acme", "de")).toBe("social");
+    expect(classifyHost("https://www.pinterest.de/acme", "de")).toBe("social");
+    expect(classifyHost("https://www.ebay.de/str/acme", "de")).toBe("directory");
+    expect(classifyHost("https://www.yelp.de/biz/acme", "de")).toBe("directory");
+    expect(classifyHost("https://www.wlw.com/en/company/acme-1", "de")).toBe("directory");
+  });
+
   it("excludes each country's own directories, which a French-only list never did", () => {
     // A Berlin sweep would otherwise have enriched from gelbeseiten.de and
     // produced a dossier about a phone book.
