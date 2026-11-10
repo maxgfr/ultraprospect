@@ -13180,6 +13180,7 @@ function parseBbox(raw) {
   if (parts.length !== 4 || parts.some((p) => !Number.isFinite(p))) return void 0;
   const [s, w, n, e] = parts;
   if (s >= n || w >= e) return void 0;
+  if (s < -90 || n > 90 || w < -180 || e > 180) return void 0;
   return [s, n, w, e];
 }
 function shortLabel(label) {
@@ -27257,7 +27258,7 @@ async function cmdIngest(values, bools) {
   }
   for (const connector of applicable) {
     const meta = await ingestSnapshot(connector.id, connector.snapshot, {
-      limit: values.limit ? clampInt(values.limit, 1, 1e8, 1e3) : void 0,
+      limit: values.limit ? flagInt("limit", values.limit, 1, 1e8, 1e3) : void 0,
       fromFile: values["from-file"],
       onNote: (n) => say(`  ${n}`),
       onProgress: (rows) => say(`  ingest: ${rows} records indexed\u2026`)
@@ -27291,7 +27292,7 @@ async function cmdConfirm(values, bools) {
   const outcome = await runConfirm(runDir, places, {
     countryCode: country,
     town: manifest.target.label,
-    limit: values.limit ? clampInt(values.limit, 1, 1e5, 200) : void 0,
+    limit: values.limit ? flagInt("limit", values.limit, 1, 1e5, 200) : void 0,
     registryIds: list2(values.registry),
     keys: connectorKeys(values),
     onNote: (n) => say(`  ${n}`),
@@ -27357,6 +27358,7 @@ async function targetFrom(values, positional) {
     const lat = Number.parseFloat(values.lat);
     const lon = Number.parseFloat(values.long);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new UsageError("--lat and --long must be decimal degrees");
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) throw new UsageError("--lat must be between -90 and 90, and --long between -180 and 180");
     if (!radiusM) throw new UsageError("a point search needs --radius (try --radius 800m)");
     return {
       query: `${lat},${lon}`,
@@ -27374,7 +27376,7 @@ async function targetFrom(values, positional) {
   const result = await resolveWhere(query, {
     country: values.country,
     lang: values.lang,
-    pick: values.pick ? clampInt(values.pick, 1, 5, 1) : void 0,
+    pick: values.pick ? flagInt("pick", values.pick, 1, 50, 1) : void 0,
     radiusM
   });
   if (!result.ok) {
@@ -27423,13 +27425,13 @@ async function cmdScan(values, bools, positional) {
     sizeBands: list2(values["size-band"]),
     legalForms,
     excludeLegalForms,
-    minEmployees: values["min-employees"] ? clampInt(values["min-employees"], 0, 1e5, 0) : void 0,
+    minEmployees: values["min-employees"] ? flagInt("min-employees", values["min-employees"], 0, 1e5, 0) : void 0,
     includeCeased: bools.has("include-ceased"),
     noOsm: bools.has("no-osm"),
     noRegistry: bools.has("no-registry"),
     registryIds: list2(values.registry),
     keys: connectorKeys(values),
-    maxResults: values["max-results"] ? clampInt(values["max-results"], 1, 1e4, 3e3) : void 0,
+    maxResults: values["max-results"] ? flagInt("max-results", values["max-results"], 1, 1e4, 3e3) : void 0,
     overpass: values.overpass,
     fixture: values.fixture,
     noPeople: bools.has("no-people"),
@@ -27510,12 +27512,12 @@ async function cmdResolve(values, bools) {
   if (!values.run) throw new UsageError("resolve needs --run <dir>");
   const runDir = resolveRun(values.run);
   const places = readPlaces(runDir);
-  const limit = values.limit ? clampInt(values.limit, 1, 1e5, 50) : void 0;
+  const limit = values.limit ? flagInt("limit", values.limit, 1, 1e5, 50) : void 0;
   const selection = {
     only: list2(values.only),
     skip: skipReasons(values.skip),
     limit,
-    queriesPerPlace: values["queries-per-place"] ? clampInt(values["queries-per-place"], 1, 8, DEFAULT_QUERIES_PER_PLACE) : void 0
+    queriesPerPlace: values["queries-per-place"] ? flagInt("queries-per-place", values["queries-per-place"], 1, 8, DEFAULT_QUERIES_PER_PLACE) : void 0
   };
   const targets = resolveTargets(places, selection);
   if (bools.has("queries")) {
@@ -27603,7 +27605,7 @@ async function cmdResolve(values, bools) {
 }
 async function cmdEnrich(values, bools) {
   if (!values.run) throw new UsageError("enrich needs --run <dir>");
-  const tier = values.tier ? clampInt(values.tier, 1, 2, 1) : 1;
+  const tier = values.tier ? flagInt("tier", values.tier, 1, 2, 1) : 1;
   const runDir = resolveRun(values.run);
   const places = readPlaces(runDir);
   if (enrichable(places).length === 0) {
@@ -27614,7 +27616,7 @@ async function cmdEnrich(values, bools) {
   const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }))));
   const outcome = await runEnrich(runDir, places, store, {
     tier,
-    limit: values.limit ? clampInt(values.limit, 1, 1e5, 20) : void 0,
+    limit: values.limit ? flagInt("limit", values.limit, 1, 1e5, 20) : void 0,
     only: list2(values.only),
     roleFilter: list2(values.roles),
     termLexicon: list2(values.terms),
@@ -27624,8 +27626,8 @@ async function cmdEnrich(values, bools) {
     // never mistaken for a surname.
     countryCode: requireManifest(runDir).target.countryCode,
     town: shortLabel(requireManifest(runDir).target.label),
-    maxPages: values["max-pages"] ? clampInt(values["max-pages"], 1, 40, 9) : void 0,
-    concurrency: values.concurrency ? clampInt(values.concurrency, 1, 12, 4) : void 0,
+    maxPages: values["max-pages"] ? flagInt("max-pages", values["max-pages"], 1, 40, 9) : void 0,
+    concurrency: values.concurrency ? flagInt("concurrency", values.concurrency, 1, 12, 4) : void 0,
     onNote: (n) => say(`  ${n}`),
     onProgress: (done, total, name) => {
       if (done % 5 === 0 || done === total) say(`  enrich: ${done}/${total} \u2014 ${name}`);
@@ -27646,6 +27648,11 @@ function readJsonArg(value, what) {
   } catch (e) {
     throw new UsageError(`${what} is not valid JSON: ${e.message}`);
   }
+}
+function flagInt(name, raw, min, max, fallback) {
+  if (raw === void 0 || raw === "") return fallback;
+  if (!/^\s*-?\d+\s*$/.test(raw)) throw new UsageError(`--${name} must be a whole number \u2014 got ${JSON.stringify(raw)}`);
+  return clampInt(raw, min, max, fallback);
 }
 async function cmdScore(values, bools) {
   if (!values.run) throw new UsageError("score needs --run <dir>");
@@ -27686,7 +27693,7 @@ async function cmdScore(values, bools) {
       )
     );
   } else {
-    for (const p of order.slice(0, clampInt(values.limit, 1, 1e3, 25))) {
+    for (const p of order.slice(0, flagInt("limit", values.limit, 1, 1e3, 25))) {
       out(`${String(p.score?.total ?? 0).padStart(4)}  ${(p.score?.fit ?? "-").padEnd(8)}  ${p.name.slice(0, 42).padEnd(42)}  ${p.website?.url ?? ""}`);
     }
   }
@@ -27745,7 +27752,7 @@ async function cmdRender(values, bools) {
   const outcome = buildAll(places, manifest, {
     runDir,
     noPeople: bools.has("no-people"),
-    minScore: values["min-score"] ? clampInt(values["min-score"], 0, 1e4, 0) : void 0,
+    minScore: values["min-score"] ? flagInt("min-score", values["min-score"], 0, 1e4, 0) : void 0,
     minFit: parseMinFit(values["min-fit"])
   });
   for (const file of outcome.files) writeArtifact(join33(runDir, file.path), file.content);
@@ -27816,7 +27823,7 @@ async function cmdMcp(values) {
   const adapter = createAdapter();
   if ((values.transport ?? "stdio") === "http") {
     const server = await startHttpServer(adapter, {
-      port: values.port ? clampInt(values.port, 1, 65535, 8787) : 8787,
+      port: values.port ? flagInt("port", values.port, 1, 65535, 8787) : 8787,
       // Loopback unless the operator says otherwise. A prospect run holds
       // personal data; binding it to every interface by default would be a
       // surprising thing for a CLI flag-less invocation to do.

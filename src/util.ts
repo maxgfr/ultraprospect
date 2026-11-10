@@ -387,6 +387,9 @@ export function parseBbox(raw: string): [number, number, number, number] | undef
   if (parts.length !== 4 || parts.some((p) => !Number.isFinite(p))) return undefined;
   const [s, w, n, e] = parts as [number, number, number, number];
   if (s >= n || w >= e) return undefined;
+  // Coordinates that are not on the planet. Overpass answers them with a parse
+  // error, which the lane then reports as a territory it could not fetch.
+  if (s < -90 || n > 90 || w < -180 || e > 180) return undefined;
   return [s, n, w, e];
 }
 

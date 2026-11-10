@@ -561,7 +561,7 @@ async function cmdIngest(values: Record<string, string>, bools: ReadonlySet<stri
 
   for (const connector of applicable) {
     const meta = await ingestSnapshot(connector.id, connector.snapshot as SnapshotSource, {
-      limit: values.limit ? clampInt(values.limit, 1, 100_000_000, 1000) : undefined,
+      limit: values.limit ? flagInt("limit", values.limit, 1, 100_000_000, 1000) : undefined,
       fromFile: values["from-file"],
       onNote: (n) => say(`  ${n}`),
       onProgress: (rows) => say(`  ingest: ${rows} records indexed…`),
@@ -602,7 +602,7 @@ async function cmdConfirm(values: Record<string, string>, bools: ReadonlySet<str
   const outcome = await runConfirm(runDir, places, {
     countryCode: country,
     town: manifest.target.label,
-    limit: values.limit ? clampInt(values.limit, 1, 100_000, 200) : undefined,
+    limit: values.limit ? flagInt("limit", values.limit, 1, 100_000, 200) : undefined,
     registryIds: list(values.registry),
     keys: connectorKeys(values),
     onNote: (n) => say(`  ${n}`),
@@ -686,6 +686,7 @@ async function targetFrom(values: Record<string, string>, positional: string) {
     const lat = Number.parseFloat(values.lat);
     const lon = Number.parseFloat(values.long);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new UsageError("--lat and --long must be decimal degrees");
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) throw new UsageError("--lat must be between -90 and 90, and --long between -180 and 180");
     if (!radiusM) throw new UsageError("a point search needs --radius (try --radius 800m)");
     return {
       query: `${lat},${lon}`,
@@ -705,7 +706,7 @@ async function targetFrom(values: Record<string, string>, positional: string) {
   const result = await resolveWhere(query, {
     country: values.country,
     lang: values.lang,
-    pick: values.pick ? clampInt(values.pick, 1, 5, 1) : undefined,
+    pick: values.pick ? flagInt("pick", values.pick, 1, 50, 1) : undefined,
     radiusM,
   });
   if (!result.ok) {
@@ -760,13 +761,13 @@ async function cmdScan(values: Record<string, string>, bools: ReadonlySet<string
     sizeBands: list(values["size-band"]),
     legalForms,
     excludeLegalForms,
-    minEmployees: values["min-employees"] ? clampInt(values["min-employees"], 0, 100_000, 0) : undefined,
+    minEmployees: values["min-employees"] ? flagInt("min-employees", values["min-employees"], 0, 100_000, 0) : undefined,
     includeCeased: bools.has("include-ceased"),
     noOsm: bools.has("no-osm"),
     noRegistry: bools.has("no-registry"),
     registryIds: list(values.registry),
     keys: connectorKeys(values),
-    maxResults: values["max-results"] ? clampInt(values["max-results"], 1, 10_000, 3000) : undefined,
+    maxResults: values["max-results"] ? flagInt("max-results", values["max-results"], 1, 10_000, 3000) : undefined,
     overpass: values.overpass,
     fixture: values.fixture,
     noPeople: bools.has("no-people"),
@@ -865,12 +866,12 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
   if (!values.run) throw new UsageError("resolve needs --run <dir>");
   const runDir = resolveRun(values.run);
   const places = readPlaces(runDir);
-  const limit = values.limit ? clampInt(values.limit, 1, 100_000, 50) : undefined;
+  const limit = values.limit ? flagInt("limit", values.limit, 1, 100_000, 50) : undefined;
   const selection = {
     only: list(values.only),
     skip: skipReasons(values.skip),
     limit,
-    queriesPerPlace: values["queries-per-place"] ? clampInt(values["queries-per-place"], 1, 8, DEFAULT_QUERIES_PER_PLACE) : undefined,
+    queriesPerPlace: values["queries-per-place"] ? flagInt("queries-per-place", values["queries-per-place"], 1, 8, DEFAULT_QUERIES_PER_PLACE) : undefined,
   };
   const targets = resolveTargets(places, selection);
 
@@ -992,7 +993,7 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
 
 async function cmdEnrich(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
   if (!values.run) throw new UsageError("enrich needs --run <dir>");
-  const tier = values.tier ? clampInt(values.tier, 1, 2, 1) : 1;
+  const tier = values.tier ? flagInt("tier", values.tier, 1, 2, 1) : 1;
   const runDir = resolveRun(values.run);
   const places = readPlaces(runDir);
 
@@ -1005,7 +1006,7 @@ async function cmdEnrich(values: Record<string, string>, bools: ReadonlySet<stri
   const store = newPageStore(places.flatMap((p) => p.pages.map((id) => ({ id }) as any)));
   const outcome = await runEnrich(runDir, places, store, {
     tier: tier as 1 | 2,
-    limit: values.limit ? clampInt(values.limit, 1, 100_000, 20) : undefined,
+    limit: values.limit ? flagInt("limit", values.limit, 1, 100_000, 20) : undefined,
     only: list(values.only),
     roleFilter: list(values.roles),
     termLexicon: list(values.terms),
@@ -1015,8 +1016,8 @@ async function cmdEnrich(values: Record<string, string>, bools: ReadonlySet<stri
     // never mistaken for a surname.
     countryCode: requireManifest(runDir).target.countryCode,
     town: shortLabel(requireManifest(runDir).target.label),
-    maxPages: values["max-pages"] ? clampInt(values["max-pages"], 1, 40, 9) : undefined,
-    concurrency: values.concurrency ? clampInt(values.concurrency, 1, 12, 4) : undefined,
+    maxPages: values["max-pages"] ? flagInt("max-pages", values["max-pages"], 1, 40, 9) : undefined,
+    concurrency: values.concurrency ? flagInt("concurrency", values.concurrency, 1, 12, 4) : undefined,
     onNote: (n) => say(`  ${n}`),
     onProgress: (done, total, name) => {
       if (done % 5 === 0 || done === total) say(`  enrich: ${done}/${total} — ${name}`);
@@ -1042,6 +1043,21 @@ function readJsonArg(value: string, what: string): any {
   } catch (e) {
     throw new UsageError(`${what} is not valid JSON: ${(e as Error).message}`);
   }
+}
+
+/**
+ * A whole-number flag, or a usage error.
+ *
+ * `clampInt` is forgiving by design — it is also used on values read out of
+ * files — and on a flag that forgiveness hid the mistake: `--max-results 1e4`
+ * parsed as 1 and the register lane declared itself partial after one row,
+ * `--limit abc` quietly became the default. A flag that is not a whole number
+ * is refused; one outside its range is still clamped, as before.
+ */
+function flagInt(name: string, raw: string | undefined, min: number, max: number, fallback: number): number {
+  if (raw === undefined || raw === "") return fallback;
+  if (!/^\s*-?\d+\s*$/.test(raw)) throw new UsageError(`--${name} must be a whole number — got ${JSON.stringify(raw)}`);
+  return clampInt(raw, min, max, fallback);
 }
 
 async function cmdScore(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
@@ -1085,7 +1101,7 @@ async function cmdScore(values: Record<string, string>, bools: ReadonlySet<strin
       ),
     );
   } else {
-    for (const p of order.slice(0, clampInt(values.limit, 1, 1000, 25))) {
+    for (const p of order.slice(0, flagInt("limit", values.limit, 1, 1000, 25))) {
       out(`${String(p.score?.total ?? 0).padStart(4)}  ${(p.score?.fit ?? "-").padEnd(8)}  ${p.name.slice(0, 42).padEnd(42)}  ${p.website?.url ?? ""}`);
     }
   }
@@ -1154,7 +1170,7 @@ async function cmdRender(values: Record<string, string>, bools: ReadonlySet<stri
   const outcome = buildAll(places, manifest, {
     runDir,
     noPeople: bools.has("no-people"),
-    minScore: values["min-score"] ? clampInt(values["min-score"], 0, 10_000, 0) : undefined,
+    minScore: values["min-score"] ? flagInt("min-score", values["min-score"], 0, 10_000, 0) : undefined,
     minFit: parseMinFit(values["min-fit"]),
   });
 
@@ -1234,7 +1250,7 @@ async function cmdMcp(values: Record<string, string>): Promise<number> {
   const adapter = createAdapter();
   if ((values.transport ?? "stdio") === "http") {
     const server = await startHttpServer(adapter, {
-      port: values.port ? clampInt(values.port, 1, 65535, 8787) : 8787,
+      port: values.port ? flagInt("port", values.port, 1, 65535, 8787) : 8787,
       // Loopback unless the operator says otherwise. A prospect run holds
       // personal data; binding it to every interface by default would be a
       // surprising thing for a CLI flag-less invocation to do.
