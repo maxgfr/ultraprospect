@@ -167,6 +167,39 @@ export function dayFromDmy(value: string | undefined): string | undefined {
 }
 
 /**
+ * Which number of a `nn/nn/yyyy` date is the month, in one market.
+ *
+ *   dmy     day first: Europe, Latin America, most of the world;
+ *   mdy     month first: the United States;
+ *   either  both are in everyday use, so the numbers alone do not say. Canada
+ *           writes dd/mm in French, and both dd/mm and mm/dd in English.
+ */
+export type DateOrder = "dmy" | "mdy" | "either";
+
+/**
+ * The ISO day(s) a `nn/nn/yyyy` date can mean in a market.
+ *
+ * Every such date used to be read day first, wherever it was written: a US
+ * notice saying "Due date: 03/04/2026" was given a deadline of 3 April when it
+ * closes on 4 March, a month before the date the bidder was told.
+ *
+ * One day when the market's order settles it. A date with only one possible
+ * reading ("23/11/2026" has no month 23) is that day in any market. Two days
+ * only where the market uses both orders and the numbers fit both: the caller
+ * then has two candidates and no deadline.
+ */
+export function numericDays(first: string, second: string, year: string, order: DateOrder): string[] {
+  const a = Number(first);
+  const b = Number(second);
+  const day = (d: number, m: number) =>
+    m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${year}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : undefined;
+  const dayFirst = day(a, b);
+  const monthFirst = day(b, a);
+  const readings = order === "dmy" ? [dayFirst ?? monthFirst] : order === "mdy" ? [monthFirst ?? dayFirst] : [dayFirst, monthFirst];
+  return [...new Set(readings.filter((d): d is string => d !== undefined))];
+}
+
+/**
  * Whether a published deadline is already behind us.
  *
  * Read IN THE DEADLINE'S OWN TERMS, which means in its own timezone when it

@@ -21,7 +21,7 @@ import type { Tender, TenderQuery } from "../src/tenders/types.js";
 import { cpvPrefix, deadlinePassed, durationMonths, keepByQuery, readEforms, sinceToDate } from "../src/tenders/util.js";
 import { applyTenderVerdicts, buildTendersTodo, rankTenders } from "../src/tenders/verdicts.js";
 import { diffTenderRuns } from "../src/tenders/watch.js";
-import { buildWebTodo, readLabelledDeadline } from "../src/tenders/web.js";
+import { buildWebTodo, dateOrderFor, readLabelledDeadline } from "../src/tenders/web.js";
 import { caRowToTender, pncpCallToTender, secopToTender, usaToTender, worldBankToTender } from "../src/tenders/world-sources.js";
 
 const fx = (name: string) => JSON.parse(readFileSync(join(__dirname, "fixtures", "tenders", name), "utf8"));
@@ -526,6 +526,26 @@ describe("web lane", () => {
     ).toBe("2026-11-23T12:00");
     expect(readLabelledDeadline("Publié le 23/11/2026. Réunion le 01/12/2026.", ["date limite"]).deadline).toBeUndefined();
   });
+
+  it("reads nn/nn/yyyy in the market's own order: month first in the United States", () => {
+    // Read day first, this notice closed on 3 April — a month after it shut.
+    expect(readLabelledDeadline("Due date: 03/04/2026 at 14:00", ["due date"], dateOrderFor("us")).deadline).toBe("2026-03-04T14:00");
+    expect(readLabelledDeadline("Date limite : 03/04/2026", ["date limite"], dateOrderFor("fr")).deadline).toBe("2026-04-03");
+    expect(dateOrderFor("jp")).toBe("dmy");
+  });
+
+  it("reads a date with one possible reading as that day, whatever the market", () => {
+    expect(readLabelledDeadline("Due date: 23/11/2026", ["due date"], "mdy").deadline).toBe("2026-11-23");
+    expect(readLabelledDeadline("Date limite : 11/23/2026", ["date limite"], "dmy").deadline).toBe("2026-11-23");
+    expect(readLabelledDeadline("Date limite : 31/13/2026", ["date limite"], "dmy").deadline).toBeUndefined();
+  });
+
+  it("reads no deadline from a date Canada could mean two ways, and still reads one it could not", () => {
+    expect(dateOrderFor("ca")).toBe("either");
+    expect(readLabelledDeadline("Closing date: 03/04/2026", ["closing date"], "either").deadline).toBeUndefined();
+    expect(readLabelledDeadline("Date de clôture : 23/11/2026", ["date de clôture"], "either").deadline).toBe("2026-11-23");
+    expect(readLabelledDeadline("Closing date: 2026-03-04", ["closing date"], "either").deadline).toBe("2026-03-04");
+  });
 });
 
 describe("watch", () => {
@@ -571,6 +591,18 @@ describe("the bid gate", () => {
     );
     const rules = r.errors.map((e) => e.rule).sort();
     expect(rules).toEqual(["award-forecast-unlabelled", "bid-claim-unsourced", "deadline-mismatch", "reference-unknown"]);
+  });
+
+  it("compares a deadline written month first with a US notice's, and day first with a French one's", () => {
+    const stated = "# Response\n\nDue date: 03/04/2026 [P1]\n";
+    const us = runWith(stated, { country: "us", deadline: "2026-03-04T17:00:00-05:00" });
+    expect(us.errors.map((e) => e.rule)).not.toContain("deadline-mismatch");
+    // The same line against a notice that closes on 3 April, in each market.
+    expect(runWith(stated, { country: "us", deadline: "2026-04-03" }).errors.map((e) => e.rule)).toContain("deadline-mismatch");
+    expect(runWith(stated, { country: "fr", deadline: "2026-04-03" }).errors.map((e) => e.rule)).not.toContain("deadline-mismatch");
+    // Canada writes both: either reading matches, a third date does not.
+    expect(runWith(stated, { country: "ca", deadline: "2026-03-04" }).errors.map((e) => e.rule)).not.toContain("deadline-mismatch");
+    expect(runWith(stated, { country: "ca", deadline: "2026-05-05" }).errors.map((e) => e.rule)).toContain("deadline-mismatch");
   });
 
   it("refuses a citation to another notice's page, and a go on a closed call", () => {

@@ -23,7 +23,7 @@ import { search } from "../engine.js";
 import { fetchPage, type PageStore } from "../pages.js";
 import { foldAccents } from "../util.js";
 import type { Tender } from "./types.js";
-import { statusFromDeadline } from "./util.js";
+import { type DateOrder, numericDays, statusFromDeadline } from "./util.js";
 
 export interface WebMarket {
   /** BCP-47 tag the engines answer in. */
@@ -37,6 +37,8 @@ export interface WebMarket {
    * because of its host; corroboration reads the page.
    */
   portals: string[];
+  /** How this market writes `nn/nn/yyyy`. Day first unless it says otherwise. */
+  dateOrder?: DateOrder;
 }
 
 export const WEB_MARKETS: Record<string, WebMarket> = {
@@ -132,12 +134,16 @@ export const WEB_MARKETS: Record<string, WebMarket> = {
     terms: ["tender", "request for proposal", "appel d'offres"],
     deadlineLabels: ["closing date", "date de clôture"],
     portals: ["canadabuys.canada.ca", "merx.com"],
+    // Both orders are written here, on portals in both languages: a date that
+    // fits both is not read at all rather than read as either.
+    dateOrder: "either",
   },
   us: {
     lang: "en-US",
     terms: ["request for proposal", "RFP", "solicitation", "invitation for bid"],
     deadlineLabels: ["response date", "due date", "closing date", "proposals due"],
     portals: ["sam.gov", "bidnetdirect.com"],
+    dateOrder: "mdy",
   },
   au: {
     lang: "en-AU",
@@ -200,6 +206,11 @@ const DEFAULT_MARKET: WebMarket = {
 
 export function marketFor(country: string): WebMarket {
   return WEB_MARKETS[country] ?? DEFAULT_MARKET;
+}
+
+/** How a country writes `nn/nn/yyyy`: the one table the web lane and the bid gate both read. */
+export function dateOrderFor(country: string): DateOrder {
+  return marketFor(country).dateOrder ?? "dmy";
 }
 
 export interface WebTodoItem {
@@ -277,8 +288,12 @@ const fold = (s: string) => foldAccents(s.toLowerCase());
 /**
  * Read a deadline off a notice page — only where a deadline label introduces it.
  * Returns the date as written, normalised to ISO, plus the evidence string.
+ *
+ * `order` is the market's way of writing `nn/nn/yyyy` (see `numericDays`). A
+ * date the market could mean two ways is passed over, as a date with no label
+ * is: an absent deadline sends the reader to the notice, a wrong one does not.
  */
-export function readLabelledDeadline(text: string, labels: readonly string[]): { deadline?: string; evidence?: string } {
+export function readLabelledDeadline(text: string, labels: readonly string[], order: DateOrder = "dmy"): { deadline?: string; evidence?: string } {
   const t = text.replace(/\s+/g, " ");
   const ft = fold(t);
   for (const label of [...labels, ...DEFAULT_MARKET.deadlineLabels]) {
@@ -290,16 +305,19 @@ export function readLabelledDeadline(text: string, labels: readonly string[]): {
       from = at + fl.length;
       const window = t.slice(at + label.length, at + label.length + 80);
       const iso = window.match(/(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
-      const dmy = window.match(/(\d{1,2})[./](\d{1,2})[./](\d{4})(?:\D{1,8}(\d{1,2})[:h](\d{2}))?/);
-      const m = iso
-        ? { y: iso[1], mo: iso[2], d: iso[3], h: iso[4], mi: iso[5] }
-        : dmy
-          ? { y: dmy[3], mo: dmy[2]!.padStart(2, "0"), d: dmy[1]!.padStart(2, "0"), h: dmy[4], mi: dmy[5] }
-          : undefined;
-      if (!m) continue;
-      const day = `${m.y}-${m.mo}-${m.d}`;
-      if (Number(m.mo) < 1 || Number(m.mo) > 12 || Number(m.d) < 1 || Number(m.d) > 31) continue;
-      return { deadline: m.h ? `${day}T${m.h.padStart(2, "0")}:${m.mi}` : day, evidence: t.slice(at, at + label.length + 40).trim() };
+      const numeric = window.match(/(\d{1,2})[./](\d{1,2})[./](\d{4})(?:\D{1,8}(\d{1,2})[:h](\d{2}))?/);
+      let day: string | undefined;
+      let time: { h?: string; mi?: string } = {};
+      if (iso) {
+        if (Number(iso[2]) >= 1 && Number(iso[2]) <= 12 && Number(iso[3]) >= 1 && Number(iso[3]) <= 31) day = `${iso[1]}-${iso[2]}-${iso[3]}`;
+        time = { h: iso[4], mi: iso[5] };
+      } else if (numeric) {
+        const days = numericDays(numeric[1]!, numeric[2]!, numeric[3]!, order);
+        if (days.length === 1) day = days[0];
+        time = { h: numeric[4], mi: numeric[5] };
+      }
+      if (!day) continue;
+      return { deadline: time.h ? `${day}T${time.h.padStart(2, "0")}:${time.mi}` : day, evidence: t.slice(at, at + label.length + 40).trim() };
     }
   }
   return {};
@@ -372,7 +390,7 @@ export async function foldWebHits(
       rejected.push({ url, why: !procurement.length ? "no procurement term of this market on the page" : "none of your terms on the page" });
       continue;
     }
-    const { deadline, evidence } = readLabelledDeadline(text, market.deadlineLabels);
+    const { deadline, evidence } = readLabelledDeadline(text, market.deadlineLabels, market.dateOrder);
     // A labelled deadline already behind us is an old call, not a lead.
     if (deadline && statusFromDeadline("call", deadline) === "closed") {
       rejected.push({ url, why: `closed: the page gives a deadline of ${deadline} ("${evidence}")` });

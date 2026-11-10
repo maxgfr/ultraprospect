@@ -16370,6 +16370,15 @@ function dayFromDmy(value) {
   if (mo <= 0) return void 0;
   return `${m[3]}-${String(mo).padStart(2, "0")}-${m[1].padStart(2, "0")}`;
 }
+function numericDays(first, second, year, order) {
+  const a = Number(first);
+  const b = Number(second);
+  const day = (d, m) => m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${year}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : void 0;
+  const dayFirst = day(a, b);
+  const monthFirst = day(b, a);
+  const readings = order === "dmy" ? [dayFirst ?? monthFirst] : order === "mdy" ? [monthFirst ?? dayFirst] : [dayFirst, monthFirst];
+  return [...new Set(readings.filter((d) => d !== void 0))];
+}
 function deadlinePassed(deadline, now = /* @__PURE__ */ new Date()) {
   const day = dayOf(deadline);
   if (!day) return void 0;
@@ -24180,6 +24189,318 @@ function qualifySummary(t) {
 // src/tenders/check.ts
 import { existsSync as existsSync19, readFileSync as readFileSync19, readdirSync as readdirSync10 } from "fs";
 import { basename as basename5, join as join26 } from "path";
+
+// src/tenders/web.ts
+import { createHash as createHash3 } from "crypto";
+var WEB_MARKETS = {
+  es: {
+    lang: "es-ES",
+    terms: ["licitaci\xF3n", "licitacion", "pliego", "contrataci\xF3n p\xFAblica", "anuncio de licitaci\xF3n"],
+    deadlineLabels: ["plazo de presentaci\xF3n", "fecha l\xEDmite", "fin de plazo"],
+    portals: ["contrataciondelestado.es"]
+  },
+  it: {
+    lang: "it-IT",
+    terms: ["bando di gara", "gara d'appalto", "avviso", "procedura aperta", "appalto"],
+    deadlineLabels: ["termine ricezione offerte", "scadenza", "termine di presentazione"],
+    portals: ["anticorruzione.it", "acquistinretepa.it"]
+  },
+  pt: {
+    lang: "pt-PT",
+    terms: ["concurso p\xFAblico", "an\xFAncio de procedimento", "caderno de encargos"],
+    deadlineLabels: ["prazo para apresenta\xE7\xE3o", "data limite"],
+    portals: ["base.gov.pt", "dre.pt"]
+  },
+  nl: {
+    lang: "nl-NL",
+    terms: ["aanbesteding", "openbare procedure", "inschrijving"],
+    deadlineLabels: ["sluitingsdatum", "uiterste datum", "termijn voor ontvangst"],
+    portals: ["tenderned.nl"]
+  },
+  be: {
+    lang: "fr-BE",
+    terms: ["march\xE9 public", "appel d'offres", "overheidsopdracht", "aanbesteding"],
+    deadlineLabels: ["date limite", "uiterste datum"],
+    portals: ["publicprocurement.be"]
+  },
+  ch: {
+    lang: "de-CH",
+    terms: ["Ausschreibung", "appel d'offres", "bando", "\xF6ffentliche Beschaffung"],
+    deadlineLabels: ["Eingabetermin", "Frist", "d\xE9lai de remise"],
+    portals: ["simap.ch"]
+  },
+  at: {
+    lang: "de-AT",
+    terms: ["Ausschreibung", "Vergabeverfahren", "Bekanntmachung"],
+    deadlineLabels: ["Angebotsfrist", "Ende der Angebotsfrist", "Schlusstermin"],
+    portals: ["auftrag.at", "usp.gv.at"]
+  },
+  de: {
+    lang: "de-DE",
+    terms: ["Ausschreibung", "Vergabe", "Bekanntmachung", "Auftragsbekanntmachung"],
+    deadlineLabels: ["Angebotsfrist", "Ablauf der Angebotsfrist", "Schlusstermin"],
+    portals: ["service.bund.de", "evergabe-online.de"]
+  },
+  pl: {
+    lang: "pl-PL",
+    terms: ["przetarg", "og\u0142oszenie o zam\xF3wieniu", "zam\xF3wienie publiczne"],
+    deadlineLabels: ["termin sk\u0142adania ofert"],
+    portals: ["ezamowienia.gov.pl"]
+  },
+  se: {
+    lang: "sv-SE",
+    terms: ["upphandling", "anbud", "f\xF6rfr\xE5gningsunderlag"],
+    deadlineLabels: ["sista anbudsdag", "sista dag f\xF6r anbud"],
+    portals: ["upphandlingsmyndigheten.se"]
+  },
+  dk: { lang: "da-DK", terms: ["udbud", "udbudsbekendtg\xF8relse"], deadlineLabels: ["tilbudsfrist", "frist for modtagelse af tilbud"], portals: ["udbud.dk"] },
+  fi: {
+    lang: "fi-FI",
+    terms: ["hankintailmoitus", "tarjouspyynt\xF6", "kilpailutus"],
+    deadlineLabels: ["tarjousten m\xE4\xE4r\xE4aika", "m\xE4\xE4r\xE4aika"],
+    portals: ["hankintailmoitukset.fi"]
+  },
+  no: { lang: "nb-NO", terms: ["anbudskonkurranse", "kunngj\xF8ring", "anskaffelse"], deadlineLabels: ["tilbudsfrist"], portals: ["doffin.no"] },
+  ie: {
+    lang: "en-IE",
+    terms: ["tender", "request for tender", "contract notice"],
+    deadlineLabels: ["deadline", "closing date", "time limit for receipt"],
+    portals: ["etenders.gov.ie"]
+  },
+  gb: {
+    lang: "en-GB",
+    terms: ["tender", "invitation to tender", "contract notice"],
+    deadlineLabels: ["deadline", "closing date", "tender submission deadline"],
+    portals: ["find-tender.service.gov.uk", "contractsfinder.service.gov.uk"]
+  },
+  fr: {
+    lang: "fr-FR",
+    terms: ["appel d'offres", "avis de march\xE9", "march\xE9 public", "consultation", "DCE"],
+    deadlineLabels: ["date limite de r\xE9ception des offres", "date limite de remise des offres", "date limite"],
+    portals: ["marches-publics.gouv.fr", "boamp.fr"]
+  },
+  lu: { lang: "fr-LU", terms: ["avis de march\xE9", "march\xE9 public", "appel d'offres"], deadlineLabels: ["date limite"], portals: ["pmp.b2g.etat.lu"] },
+  ca: {
+    lang: "en-CA",
+    terms: ["tender", "request for proposal", "appel d'offres"],
+    deadlineLabels: ["closing date", "date de cl\xF4ture"],
+    portals: ["canadabuys.canada.ca", "merx.com"],
+    // Both orders are written here, on portals in both languages: a date that
+    // fits both is not read at all rather than read as either.
+    dateOrder: "either"
+  },
+  us: {
+    lang: "en-US",
+    terms: ["request for proposal", "RFP", "solicitation", "invitation for bid"],
+    deadlineLabels: ["response date", "due date", "closing date", "proposals due"],
+    portals: ["sam.gov", "bidnetdirect.com"],
+    dateOrder: "mdy"
+  },
+  au: {
+    lang: "en-AU",
+    terms: ["approach to market", "request for tender", "tender"],
+    deadlineLabels: ["close date", "closing time"],
+    portals: ["tenders.gov.au"]
+  },
+  nz: { lang: "en-NZ", terms: ["tender", "request for proposal", "RFx"], deadlineLabels: ["closing date", "deadline"], portals: ["gets.govt.nz"] },
+  in: {
+    lang: "en-IN",
+    terms: ["tender", "e-tender", "NIT", "bid document"],
+    deadlineLabels: ["bid submission end date", "last date", "closing date"],
+    portals: ["eprocure.gov.in", "gem.gov.in"]
+  },
+  sg: { lang: "en-SG", terms: ["tender", "quotation", "invitation to quote"], deadlineLabels: ["closing date"], portals: ["gebiz.gov.sg"] },
+  za: { lang: "en-ZA", terms: ["tender", "bid", "request for bid"], deadlineLabels: ["closing date", "closing time"], portals: ["etenders.gov.za"] },
+  ma: {
+    lang: "fr-MA",
+    terms: ["appel d'offres", "avis d'appel d'offres", "march\xE9 public"],
+    deadlineLabels: ["date limite", "date d'ouverture des plis"],
+    portals: ["marchespublics.gov.ma"]
+  },
+  tn: { lang: "fr-TN", terms: ["appel d'offres", "consultation"], deadlineLabels: ["date limite"], portals: ["tuneps.tn"] },
+  sn: {
+    lang: "fr-SN",
+    terms: ["appel d'offres", "avis d'appel d'offres", "DAO"],
+    deadlineLabels: ["date limite de d\xE9p\xF4t", "date limite"],
+    portals: ["marchespublics.sn"]
+  },
+  ci: { lang: "fr-CI", terms: ["appel d'offres", "avis d'appel d'offres"], deadlineLabels: ["date limite"], portals: ["marchespublics.ci"] },
+  mx: {
+    lang: "es-MX",
+    terms: ["licitaci\xF3n p\xFAblica", "convocatoria", "contrataci\xF3n"],
+    deadlineLabels: ["presentaci\xF3n y apertura de proposiciones", "fecha l\xEDmite"],
+    portals: ["comprasmx.buengobierno.gob.mx"]
+  },
+  cl: { lang: "es-CL", terms: ["licitaci\xF3n", "mercado p\xFAblico"], deadlineLabels: ["fecha de cierre"], portals: ["mercadopublico.cl"] },
+  ar: { lang: "es-AR", terms: ["licitaci\xF3n", "contrataci\xF3n"], deadlineLabels: ["fecha de apertura"], portals: ["comprar.gob.ar"] },
+  pe: {
+    lang: "es-PE",
+    terms: ["licitaci\xF3n", "convocatoria", "procedimiento de selecci\xF3n"],
+    deadlineLabels: ["presentaci\xF3n de ofertas"],
+    portals: ["seace.gob.pe"]
+  },
+  br: { lang: "pt-BR", terms: ["licita\xE7\xE3o", "edital", "preg\xE3o"], deadlineLabels: ["encerramento", "data limite"], portals: ["pncp.gov.br", "gov.br/compras"] },
+  co: {
+    lang: "es-CO",
+    terms: ["licitaci\xF3n", "proceso de contrataci\xF3n", "pliego de condiciones"],
+    deadlineLabels: ["presentaci\xF3n de ofertas", "fecha de cierre"],
+    portals: ["secop.gov.co"]
+  }
+};
+var DEFAULT_MARKET = {
+  lang: "en",
+  terms: ["tender", "call for tenders", "request for proposal", "procurement notice"],
+  deadlineLabels: ["deadline", "closing date"],
+  portals: []
+};
+function marketFor(country) {
+  return WEB_MARKETS[country] ?? DEFAULT_MARKET;
+}
+function dateOrderFor(country) {
+  return marketFor(country).dateOrder ?? "dmy";
+}
+function buildWebTodo(countries, termsFor2, perCountry = 6, now = /* @__PURE__ */ new Date()) {
+  const items = [];
+  const year = now.getUTCFullYear();
+  for (const country of countries) {
+    const m = marketFor(country);
+    const primary = m.lang.slice(0, 2);
+    const terms = termsFor2(primary);
+    if (!terms.length) continue;
+    const queries = [];
+    for (const term of terms) {
+      queries.push(`"${term}" ${m.terms[0]} ${year}`);
+      for (const portal of m.portals) queries.push(`site:${portal} "${term}"`);
+      if (m.terms[1]) queries.push(`"${term}" ${m.terms[1]}`);
+    }
+    items.push({ country, lang: m.lang, terms, queries: [...new Set(queries)].slice(0, perCountry) });
+  }
+  return {
+    version: 1,
+    generatedAt: now.toISOString(),
+    items,
+    why: "These countries have no open API this tool reads, or only an above-threshold one. Their national market is visible by search alone."
+  };
+}
+async function engineSearchWeb(todo, onNote) {
+  const hits = [];
+  for (const item of todo.items) {
+    for (const query of item.queries) {
+      const res = await search(query, { lang: item.lang, limit: 10, timeoutMs: 2e4 });
+      for (const n of res.notes) onNote?.(`${item.country}: ${n}`);
+      for (const h of res.hits) hits.push({ url: h.url, title: h.title, snippet: h.snippet, country: item.country, query });
+    }
+  }
+  return hits;
+}
+var fold = (s) => foldAccents(s.toLowerCase());
+function readLabelledDeadline(text3, labels, order = "dmy") {
+  const t = text3.replace(/\s+/g, " ");
+  const ft = fold(t);
+  for (const label of [...labels, ...DEFAULT_MARKET.deadlineLabels]) {
+    let from = 0;
+    const fl = fold(label);
+    for (; ; ) {
+      const at = ft.indexOf(fl, from);
+      if (at < 0) break;
+      from = at + fl.length;
+      const window = t.slice(at + label.length, at + label.length + 80);
+      const iso3 = window.match(/(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+      const numeric = window.match(/(\d{1,2})[./](\d{1,2})[./](\d{4})(?:\D{1,8}(\d{1,2})[:h](\d{2}))?/);
+      let day;
+      let time = {};
+      if (iso3) {
+        if (Number(iso3[2]) >= 1 && Number(iso3[2]) <= 12 && Number(iso3[3]) >= 1 && Number(iso3[3]) <= 31) day = `${iso3[1]}-${iso3[2]}-${iso3[3]}`;
+        time = { h: iso3[4], mi: iso3[5] };
+      } else if (numeric) {
+        const days = numericDays(numeric[1], numeric[2], numeric[3], order);
+        if (days.length === 1) day = days[0];
+        time = { h: numeric[4], mi: numeric[5] };
+      }
+      if (!day) continue;
+      return { deadline: time.h ? `${day}T${time.h.padStart(2, "0")}:${time.mi}` : day, evidence: t.slice(at, at + label.length + 40).trim() };
+    }
+  }
+  return {};
+}
+function webTenderId(url) {
+  return `web:${createHash3("sha256").update(url).digest("hex").slice(0, 16)}`;
+}
+async function foldWebHits(runDir, hits, todo, store, known, opts = {}) {
+  const out2 = [];
+  const rejected = [];
+  const unreadable = [];
+  const seen = /* @__PURE__ */ new Set();
+  let fetched = 0;
+  for (const hit of hits) {
+    if (opts.limit && out2.length >= opts.limit) break;
+    let url;
+    try {
+      url = new URL(hit.url).toString();
+    } catch {
+      rejected.push({ url: hit.url, why: "not a URL" });
+      continue;
+    }
+    if (seen.has(url)) continue;
+    seen.add(url);
+    const id = webTenderId(url);
+    if (known.has(id)) continue;
+    const country = (hit.country ?? todo?.items.find((i) => i.queries.includes(hit.query ?? ""))?.country ?? "").toLowerCase();
+    const market = marketFor(country);
+    const item = todo?.items.find((i) => i.country === country);
+    const userTerms = item?.terms ?? [];
+    const res = await fetchPage2(runDir, id, url, "notice", store);
+    fetched += 1;
+    if (!res.ok) {
+      unreadable.push({ url, why: res.reason === "refused" ? `HTTP ${res.status}` : res.reason });
+      continue;
+    }
+    const text3 = res.page.text;
+    const ft = fold(text3);
+    const procurement = market.terms.filter((t2) => ft.includes(fold(t2)));
+    const mine = userTerms.filter((t2) => ft.includes(fold(t2)));
+    if (!procurement.length || userTerms.length && !mine.length) {
+      rejected.push({ url, why: !procurement.length ? "no procurement term of this market on the page" : "none of your terms on the page" });
+      continue;
+    }
+    const { deadline, evidence } = readLabelledDeadline(text3, market.deadlineLabels, market.dateOrder);
+    if (deadline && statusFromDeadline("call", deadline) === "closed") {
+      rejected.push({ url, why: `closed: the page gives a deadline of ${deadline} ("${evidence}")` });
+      continue;
+    }
+    const t = {
+      id,
+      connectorId: "web",
+      noticeId: url,
+      country: country || "ww",
+      kind: "call",
+      status: statusFromDeadline("call", deadline),
+      title: (res.page.title ?? hit.title ?? url).slice(0, 300),
+      description: hit.snippet,
+      language: market.lang.slice(0, 2),
+      buyer: { name: "" },
+      cpv: [],
+      nature: "unknown",
+      lots: [],
+      deadline,
+      documentsAccess: "unknown",
+      places: [],
+      criteria: [],
+      awards: [],
+      sourceUrl: res.page.record.url,
+      coverage: "web",
+      aliases: [url],
+      pages: [res.page.record],
+      web: { query: hit.query, hitUrl: hit.url, corroboratedBy: [...procurement.slice(0, 3), ...mine.slice(0, 3)] },
+      national: { deadlineEvidence: evidence }
+    };
+    out2.push(t);
+    opts.onProgress?.(`  web: kept ${url}${deadline ? ` (deadline ${deadline})` : " (no labelled deadline \u2014 open it)"}`);
+  }
+  return { tenders: out2, fetched, rejected, unreadable };
+}
+
+// src/tenders/check.ts
 var PROFILE_CITE = /\[((?:R|C)\d+|profile\.[a-zA-Z0-9_.]+)\]/g;
 var MODEL_MARK2 = /\[M\]/;
 var FIRST_PERSON = /\b(we|our|us|nous|notre|nos|wir|unser[e]?|nosotros|nuestr[oa]s?|noi|nostr[oaie]|wij|onze|my|nasz[aey]?)\b/i;
@@ -24196,9 +24517,9 @@ function profileFromRun(runDir) {
     return void 0;
   }
 }
-function datesOn(line) {
+function datesOn(line, order) {
   const out2 = [];
-  for (const m of line.matchAll(DATE)) out2.push(m[1] ? m[1] : `${m[4]}-${m[3].padStart(2, "0")}-${m[2].padStart(2, "0")}`);
+  for (const m of line.matchAll(DATE)) out2.push(...m[1] ? [m[1]] : numericDays(m[2], m[3], m[4], order));
   return out2;
 }
 function runTenderCheck(input) {
@@ -24278,7 +24599,7 @@ function runTenderCheck(input) {
         const day = dayOf(t.deadline);
         for (const [i, line] of text3.split("\n").entries()) {
           if (!DEADLINE_WORDS.test(line)) continue;
-          const dates = datesOn(line);
+          const dates = datesOn(line, dateOrderFor(t.country));
           if (!dates.length) continue;
           if (day && !dates.includes(day))
             err("deadline-mismatch", `${rel}:${i + 1}`, `states ${dates.join(", ")} as the deadline; the notice publishes ${t.deadline}.`);
@@ -24296,7 +24617,7 @@ function runTenderCheck(input) {
         if (!(t.pages ?? []).length) err("citation-unresolved", rel, "this notice has no stored pages at all: run `tender --id` before drafting.");
       }
       for (const [i, line] of text3.split("\n").entries()) {
-        if (RETENDER.test(line) && datesOn(line).length && !/(estimated|estimé|estimée|geschätzt|estimad|stimat)/i.test(line) && !line.includes(FORECAST_LABEL)) {
+        if (RETENDER.test(line) && datesOn(line, dateOrderFor(t.country)).length && !/(estimated|estimé|estimée|geschätzt|estimad|stimat)/i.test(line) && !line.includes(FORECAST_LABEL)) {
           err("award-forecast-unlabelled", `${rel}:${i + 1}`, `a re-tender date stated as a fact. It is ${FORECAST_LABEL} \u2014 say so on the same line.`);
         }
       }
@@ -24329,14 +24650,14 @@ import { tmpdir as tmpdir4 } from "os";
 import { join as join27 } from "path";
 var DOC_LINK = /href\s*=\s*["']([^"'#]+\.(?:pdf|docx?|odt|xlsx?|ods|zip|rtf)(?:\?[^"']*)?)["']/gi;
 var WALL = /(s['’]identifier|vous identifier|identifiez[- ]vous|créer un compte|cr[ée]er votre compte|bordereau de retrait|mot de passe|connexion requise|se connecter|anmelden|registrieren|passwort|login|log in|sign in|password|register to|inscripción|registrarse|contraseña|accedi|registrati|zaloguj|hasło|inloggen|registreren|wachtwoord)/i;
-var fold = (s) => foldAccents(s.toLowerCase());
+var fold2 = (s) => foldAccents(s.toLowerCase());
 function aboutThisProcedure(text3, t) {
-  const ft = fold(text3);
-  if (t.noticeId && ft.includes(fold(t.noticeId))) return true;
-  if (t.buyer.name && t.buyer.name.length >= 5 && ft.includes(fold(t.buyer.name))) return true;
+  const ft = fold2(text3);
+  if (t.noticeId && ft.includes(fold2(t.noticeId))) return true;
+  if (t.buyer.name && t.buyer.name.length >= 5 && ft.includes(fold2(t.buyer.name))) return true;
   const words = [
     ...new Set(
-      fold(t.title).split(/[^a-z0-9]+/).filter((w) => w.length >= 6)
+      fold2(t.title).split(/[^a-z0-9]+/).filter((w) => w.length >= 6)
     )
   ];
   const hits = words.filter((w) => ft.includes(w)).length;
@@ -24983,302 +25304,6 @@ function tenderDeltaMarkdown(d, before, after) {
     ""
   );
   return out2.join("\n");
-}
-
-// src/tenders/web.ts
-import { createHash as createHash3 } from "crypto";
-var WEB_MARKETS = {
-  es: {
-    lang: "es-ES",
-    terms: ["licitaci\xF3n", "licitacion", "pliego", "contrataci\xF3n p\xFAblica", "anuncio de licitaci\xF3n"],
-    deadlineLabels: ["plazo de presentaci\xF3n", "fecha l\xEDmite", "fin de plazo"],
-    portals: ["contrataciondelestado.es"]
-  },
-  it: {
-    lang: "it-IT",
-    terms: ["bando di gara", "gara d'appalto", "avviso", "procedura aperta", "appalto"],
-    deadlineLabels: ["termine ricezione offerte", "scadenza", "termine di presentazione"],
-    portals: ["anticorruzione.it", "acquistinretepa.it"]
-  },
-  pt: {
-    lang: "pt-PT",
-    terms: ["concurso p\xFAblico", "an\xFAncio de procedimento", "caderno de encargos"],
-    deadlineLabels: ["prazo para apresenta\xE7\xE3o", "data limite"],
-    portals: ["base.gov.pt", "dre.pt"]
-  },
-  nl: {
-    lang: "nl-NL",
-    terms: ["aanbesteding", "openbare procedure", "inschrijving"],
-    deadlineLabels: ["sluitingsdatum", "uiterste datum", "termijn voor ontvangst"],
-    portals: ["tenderned.nl"]
-  },
-  be: {
-    lang: "fr-BE",
-    terms: ["march\xE9 public", "appel d'offres", "overheidsopdracht", "aanbesteding"],
-    deadlineLabels: ["date limite", "uiterste datum"],
-    portals: ["publicprocurement.be"]
-  },
-  ch: {
-    lang: "de-CH",
-    terms: ["Ausschreibung", "appel d'offres", "bando", "\xF6ffentliche Beschaffung"],
-    deadlineLabels: ["Eingabetermin", "Frist", "d\xE9lai de remise"],
-    portals: ["simap.ch"]
-  },
-  at: {
-    lang: "de-AT",
-    terms: ["Ausschreibung", "Vergabeverfahren", "Bekanntmachung"],
-    deadlineLabels: ["Angebotsfrist", "Ende der Angebotsfrist", "Schlusstermin"],
-    portals: ["auftrag.at", "usp.gv.at"]
-  },
-  de: {
-    lang: "de-DE",
-    terms: ["Ausschreibung", "Vergabe", "Bekanntmachung", "Auftragsbekanntmachung"],
-    deadlineLabels: ["Angebotsfrist", "Ablauf der Angebotsfrist", "Schlusstermin"],
-    portals: ["service.bund.de", "evergabe-online.de"]
-  },
-  pl: {
-    lang: "pl-PL",
-    terms: ["przetarg", "og\u0142oszenie o zam\xF3wieniu", "zam\xF3wienie publiczne"],
-    deadlineLabels: ["termin sk\u0142adania ofert"],
-    portals: ["ezamowienia.gov.pl"]
-  },
-  se: {
-    lang: "sv-SE",
-    terms: ["upphandling", "anbud", "f\xF6rfr\xE5gningsunderlag"],
-    deadlineLabels: ["sista anbudsdag", "sista dag f\xF6r anbud"],
-    portals: ["upphandlingsmyndigheten.se"]
-  },
-  dk: { lang: "da-DK", terms: ["udbud", "udbudsbekendtg\xF8relse"], deadlineLabels: ["tilbudsfrist", "frist for modtagelse af tilbud"], portals: ["udbud.dk"] },
-  fi: {
-    lang: "fi-FI",
-    terms: ["hankintailmoitus", "tarjouspyynt\xF6", "kilpailutus"],
-    deadlineLabels: ["tarjousten m\xE4\xE4r\xE4aika", "m\xE4\xE4r\xE4aika"],
-    portals: ["hankintailmoitukset.fi"]
-  },
-  no: { lang: "nb-NO", terms: ["anbudskonkurranse", "kunngj\xF8ring", "anskaffelse"], deadlineLabels: ["tilbudsfrist"], portals: ["doffin.no"] },
-  ie: {
-    lang: "en-IE",
-    terms: ["tender", "request for tender", "contract notice"],
-    deadlineLabels: ["deadline", "closing date", "time limit for receipt"],
-    portals: ["etenders.gov.ie"]
-  },
-  gb: {
-    lang: "en-GB",
-    terms: ["tender", "invitation to tender", "contract notice"],
-    deadlineLabels: ["deadline", "closing date", "tender submission deadline"],
-    portals: ["find-tender.service.gov.uk", "contractsfinder.service.gov.uk"]
-  },
-  fr: {
-    lang: "fr-FR",
-    terms: ["appel d'offres", "avis de march\xE9", "march\xE9 public", "consultation", "DCE"],
-    deadlineLabels: ["date limite de r\xE9ception des offres", "date limite de remise des offres", "date limite"],
-    portals: ["marches-publics.gouv.fr", "boamp.fr"]
-  },
-  lu: { lang: "fr-LU", terms: ["avis de march\xE9", "march\xE9 public", "appel d'offres"], deadlineLabels: ["date limite"], portals: ["pmp.b2g.etat.lu"] },
-  ca: {
-    lang: "en-CA",
-    terms: ["tender", "request for proposal", "appel d'offres"],
-    deadlineLabels: ["closing date", "date de cl\xF4ture"],
-    portals: ["canadabuys.canada.ca", "merx.com"]
-  },
-  us: {
-    lang: "en-US",
-    terms: ["request for proposal", "RFP", "solicitation", "invitation for bid"],
-    deadlineLabels: ["response date", "due date", "closing date", "proposals due"],
-    portals: ["sam.gov", "bidnetdirect.com"]
-  },
-  au: {
-    lang: "en-AU",
-    terms: ["approach to market", "request for tender", "tender"],
-    deadlineLabels: ["close date", "closing time"],
-    portals: ["tenders.gov.au"]
-  },
-  nz: { lang: "en-NZ", terms: ["tender", "request for proposal", "RFx"], deadlineLabels: ["closing date", "deadline"], portals: ["gets.govt.nz"] },
-  in: {
-    lang: "en-IN",
-    terms: ["tender", "e-tender", "NIT", "bid document"],
-    deadlineLabels: ["bid submission end date", "last date", "closing date"],
-    portals: ["eprocure.gov.in", "gem.gov.in"]
-  },
-  sg: { lang: "en-SG", terms: ["tender", "quotation", "invitation to quote"], deadlineLabels: ["closing date"], portals: ["gebiz.gov.sg"] },
-  za: { lang: "en-ZA", terms: ["tender", "bid", "request for bid"], deadlineLabels: ["closing date", "closing time"], portals: ["etenders.gov.za"] },
-  ma: {
-    lang: "fr-MA",
-    terms: ["appel d'offres", "avis d'appel d'offres", "march\xE9 public"],
-    deadlineLabels: ["date limite", "date d'ouverture des plis"],
-    portals: ["marchespublics.gov.ma"]
-  },
-  tn: { lang: "fr-TN", terms: ["appel d'offres", "consultation"], deadlineLabels: ["date limite"], portals: ["tuneps.tn"] },
-  sn: {
-    lang: "fr-SN",
-    terms: ["appel d'offres", "avis d'appel d'offres", "DAO"],
-    deadlineLabels: ["date limite de d\xE9p\xF4t", "date limite"],
-    portals: ["marchespublics.sn"]
-  },
-  ci: { lang: "fr-CI", terms: ["appel d'offres", "avis d'appel d'offres"], deadlineLabels: ["date limite"], portals: ["marchespublics.ci"] },
-  mx: {
-    lang: "es-MX",
-    terms: ["licitaci\xF3n p\xFAblica", "convocatoria", "contrataci\xF3n"],
-    deadlineLabels: ["presentaci\xF3n y apertura de proposiciones", "fecha l\xEDmite"],
-    portals: ["comprasmx.buengobierno.gob.mx"]
-  },
-  cl: { lang: "es-CL", terms: ["licitaci\xF3n", "mercado p\xFAblico"], deadlineLabels: ["fecha de cierre"], portals: ["mercadopublico.cl"] },
-  ar: { lang: "es-AR", terms: ["licitaci\xF3n", "contrataci\xF3n"], deadlineLabels: ["fecha de apertura"], portals: ["comprar.gob.ar"] },
-  pe: {
-    lang: "es-PE",
-    terms: ["licitaci\xF3n", "convocatoria", "procedimiento de selecci\xF3n"],
-    deadlineLabels: ["presentaci\xF3n de ofertas"],
-    portals: ["seace.gob.pe"]
-  },
-  br: { lang: "pt-BR", terms: ["licita\xE7\xE3o", "edital", "preg\xE3o"], deadlineLabels: ["encerramento", "data limite"], portals: ["pncp.gov.br", "gov.br/compras"] },
-  co: {
-    lang: "es-CO",
-    terms: ["licitaci\xF3n", "proceso de contrataci\xF3n", "pliego de condiciones"],
-    deadlineLabels: ["presentaci\xF3n de ofertas", "fecha de cierre"],
-    portals: ["secop.gov.co"]
-  }
-};
-var DEFAULT_MARKET = {
-  lang: "en",
-  terms: ["tender", "call for tenders", "request for proposal", "procurement notice"],
-  deadlineLabels: ["deadline", "closing date"],
-  portals: []
-};
-function marketFor(country) {
-  return WEB_MARKETS[country] ?? DEFAULT_MARKET;
-}
-function buildWebTodo(countries, termsFor2, perCountry = 6, now = /* @__PURE__ */ new Date()) {
-  const items = [];
-  const year = now.getUTCFullYear();
-  for (const country of countries) {
-    const m = marketFor(country);
-    const primary = m.lang.slice(0, 2);
-    const terms = termsFor2(primary);
-    if (!terms.length) continue;
-    const queries = [];
-    for (const term of terms) {
-      queries.push(`"${term}" ${m.terms[0]} ${year}`);
-      for (const portal of m.portals) queries.push(`site:${portal} "${term}"`);
-      if (m.terms[1]) queries.push(`"${term}" ${m.terms[1]}`);
-    }
-    items.push({ country, lang: m.lang, terms, queries: [...new Set(queries)].slice(0, perCountry) });
-  }
-  return {
-    version: 1,
-    generatedAt: now.toISOString(),
-    items,
-    why: "These countries have no open API this tool reads, or only an above-threshold one. Their national market is visible by search alone."
-  };
-}
-async function engineSearchWeb(todo, onNote) {
-  const hits = [];
-  for (const item of todo.items) {
-    for (const query of item.queries) {
-      const res = await search(query, { lang: item.lang, limit: 10, timeoutMs: 2e4 });
-      for (const n of res.notes) onNote?.(`${item.country}: ${n}`);
-      for (const h of res.hits) hits.push({ url: h.url, title: h.title, snippet: h.snippet, country: item.country, query });
-    }
-  }
-  return hits;
-}
-var fold2 = (s) => foldAccents(s.toLowerCase());
-function readLabelledDeadline(text3, labels) {
-  const t = text3.replace(/\s+/g, " ");
-  const ft = fold2(t);
-  for (const label of [...labels, ...DEFAULT_MARKET.deadlineLabels]) {
-    let from = 0;
-    const fl = fold2(label);
-    for (; ; ) {
-      const at = ft.indexOf(fl, from);
-      if (at < 0) break;
-      from = at + fl.length;
-      const window = t.slice(at + label.length, at + label.length + 80);
-      const iso3 = window.match(/(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
-      const dmy = window.match(/(\d{1,2})[./](\d{1,2})[./](\d{4})(?:\D{1,8}(\d{1,2})[:h](\d{2}))?/);
-      const m = iso3 ? { y: iso3[1], mo: iso3[2], d: iso3[3], h: iso3[4], mi: iso3[5] } : dmy ? { y: dmy[3], mo: dmy[2].padStart(2, "0"), d: dmy[1].padStart(2, "0"), h: dmy[4], mi: dmy[5] } : void 0;
-      if (!m) continue;
-      const day = `${m.y}-${m.mo}-${m.d}`;
-      if (Number(m.mo) < 1 || Number(m.mo) > 12 || Number(m.d) < 1 || Number(m.d) > 31) continue;
-      return { deadline: m.h ? `${day}T${m.h.padStart(2, "0")}:${m.mi}` : day, evidence: t.slice(at, at + label.length + 40).trim() };
-    }
-  }
-  return {};
-}
-function webTenderId(url) {
-  return `web:${createHash3("sha256").update(url).digest("hex").slice(0, 16)}`;
-}
-async function foldWebHits(runDir, hits, todo, store, known, opts = {}) {
-  const out2 = [];
-  const rejected = [];
-  const unreadable = [];
-  const seen = /* @__PURE__ */ new Set();
-  let fetched = 0;
-  for (const hit of hits) {
-    if (opts.limit && out2.length >= opts.limit) break;
-    let url;
-    try {
-      url = new URL(hit.url).toString();
-    } catch {
-      rejected.push({ url: hit.url, why: "not a URL" });
-      continue;
-    }
-    if (seen.has(url)) continue;
-    seen.add(url);
-    const id = webTenderId(url);
-    if (known.has(id)) continue;
-    const country = (hit.country ?? todo?.items.find((i) => i.queries.includes(hit.query ?? ""))?.country ?? "").toLowerCase();
-    const market = marketFor(country);
-    const item = todo?.items.find((i) => i.country === country);
-    const userTerms = item?.terms ?? [];
-    const res = await fetchPage2(runDir, id, url, "notice", store);
-    fetched += 1;
-    if (!res.ok) {
-      unreadable.push({ url, why: res.reason === "refused" ? `HTTP ${res.status}` : res.reason });
-      continue;
-    }
-    const text3 = res.page.text;
-    const ft = fold2(text3);
-    const procurement = market.terms.filter((t2) => ft.includes(fold2(t2)));
-    const mine = userTerms.filter((t2) => ft.includes(fold2(t2)));
-    if (!procurement.length || userTerms.length && !mine.length) {
-      rejected.push({ url, why: !procurement.length ? "no procurement term of this market on the page" : "none of your terms on the page" });
-      continue;
-    }
-    const { deadline, evidence } = readLabelledDeadline(text3, market.deadlineLabels);
-    if (deadline && statusFromDeadline("call", deadline) === "closed") {
-      rejected.push({ url, why: `closed: the page gives a deadline of ${deadline} ("${evidence}")` });
-      continue;
-    }
-    const t = {
-      id,
-      connectorId: "web",
-      noticeId: url,
-      country: country || "ww",
-      kind: "call",
-      status: statusFromDeadline("call", deadline),
-      title: (res.page.title ?? hit.title ?? url).slice(0, 300),
-      description: hit.snippet,
-      language: market.lang.slice(0, 2),
-      buyer: { name: "" },
-      cpv: [],
-      nature: "unknown",
-      lots: [],
-      deadline,
-      documentsAccess: "unknown",
-      places: [],
-      criteria: [],
-      awards: [],
-      sourceUrl: res.page.record.url,
-      coverage: "web",
-      aliases: [url],
-      pages: [res.page.record],
-      web: { query: hit.query, hitUrl: hit.url, corroboratedBy: [...procurement.slice(0, 3), ...mine.slice(0, 3)] },
-      national: { deadlineEvidence: evidence }
-    };
-    out2.push(t);
-    opts.onProgress?.(`  web: kept ${url}${deadline ? ` (deadline ${deadline})` : " (no labelled deadline \u2014 open it)"}`);
-  }
-  return { tenders: out2, fetched, rejected, unreadable };
 }
 
 // src/tenders/commands.ts

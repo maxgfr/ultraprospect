@@ -15,7 +15,8 @@ import { bidDirFor } from "./bid.js";
 import { type BidderProfile, profileCitations } from "./profile.js";
 import type { TenderManifest } from "./run.js";
 import type { Tender } from "./types.js";
-import { dayOf, deadlinePassed } from "./util.js";
+import { type DateOrder, dayOf, deadlinePassed, numericDays } from "./util.js";
+import { dateOrderFor } from "./web.js";
 
 const PROFILE_CITE = /\[((?:R|C)\d+|profile\.[a-zA-Z0-9_.]+)\]/g;
 const MODEL_MARK = /\[M\]/;
@@ -37,9 +38,17 @@ export function profileFromRun(runDir: string): BidderProfile | undefined {
   }
 }
 
-function datesOn(line: string): string[] {
+/**
+ * Every day a line states, in the order the notice's own market writes dates.
+ *
+ * Read day first for every country, a response to a US notice that gave the
+ * deadline correctly as "03/04/2026" was refused as a mismatch with the 4 March
+ * the notice publishes. Where a market writes both orders, both readings are
+ * kept: the gate is then satisfied by whichever one the notice publishes.
+ */
+function datesOn(line: string, order: DateOrder): string[] {
   const out: string[] = [];
-  for (const m of line.matchAll(DATE)) out.push(m[1] ? m[1] : `${m[4]}-${m[3]!.padStart(2, "0")}-${m[2]!.padStart(2, "0")}`);
+  for (const m of line.matchAll(DATE)) out.push(...(m[1] ? [m[1]] : numericDays(m[2]!, m[3]!, m[4]!, order)));
   return out;
 }
 
@@ -142,7 +151,7 @@ export function runTenderCheck(input: {
         const day = dayOf(t.deadline);
         for (const [i, line] of text.split("\n").entries()) {
           if (!DEADLINE_WORDS.test(line)) continue;
-          const dates = datesOn(line);
+          const dates = datesOn(line, dateOrderFor(t.country));
           if (!dates.length) continue;
           if (day && !dates.includes(day))
             err("deadline-mismatch", `${rel}:${i + 1}`, `states ${dates.join(", ")} as the deadline; the notice publishes ${t.deadline}.`);
@@ -166,7 +175,7 @@ export function runTenderCheck(input: {
       for (const [i, line] of text.split("\n").entries()) {
         if (
           RETENDER.test(line) &&
-          datesOn(line).length &&
+          datesOn(line, dateOrderFor(t.country)).length &&
           !/(estimated|estimé|estimée|geschätzt|estimad|stimat)/i.test(line) &&
           !line.includes(FORECAST_LABEL)
         ) {
