@@ -168,13 +168,33 @@ export function dayFromDmy(value: string | undefined): string | undefined {
 /**
  * Whether a published deadline is already behind us.
  *
- * Compares on the DAY, in the deadline's own terms: a notice saying
- * "2026-11-23+02:00" is open all of the 23rd. Undefined means "unknown", never
- * "open" — a call with no published deadline is not a call you can plan on.
+ * Read IN THE DEADLINE'S OWN TERMS, which means in its own timezone when it
+ * names one:
+ *
+ *   a time and an offset   "2026-11-23T23:00:00-08:00" is an instant, and is
+ *                          compared as one;
+ *   a day and an offset    "2026-11-23+02:00" is open all of the 23rd THERE,
+ *                          so it passes when the 24th begins at that offset;
+ *   neither                only a day is known, and it is compared with today's.
+ *
+ * Both sides used to be reduced to a day, but only the deadline in its own
+ * terms: "today" was UTC's. A US notice due at 23:00 Pacific was closed at
+ * 16:00 Pacific — the web lane then rejected it and a "go" verdict was refused
+ * — and an Australian one stayed open for eleven hours after it had shut.
+ *
+ * Undefined means "unknown", never "open" — a call with no published deadline
+ * is not a call you can plan on.
  */
 export function deadlinePassed(deadline: string | undefined, now = new Date()): boolean | undefined {
   const day = dayOf(deadline);
   if (!day) return undefined;
+  const m = deadline!.match(/(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?))?\s*(Z|[+-]\d{2}:?\d{2})?/);
+  const time = m?.[2];
+  const offset = m?.[3] ? (m[3] === "Z" ? "Z" : m[3].replace(/^([+-]\d{2}):?(\d{2})$/, "$1:$2")) : undefined;
+  if (offset) {
+    const instant = Date.parse(`${day}T${time ? (time.length === 5 ? `${time}:00` : time) : "00:00:00"}${offset}`);
+    if (Number.isFinite(instant)) return time ? instant < now.getTime() : instant + 24 * 3600 * 1000 <= now.getTime();
+  }
   return day < today(now);
 }
 

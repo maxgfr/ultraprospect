@@ -255,6 +255,21 @@ describe("filters", () => {
     expect(durationMonths("720", "DAY")).toBe(24);
   });
 
+  it("reads a deadline in its own timezone, not in UTC's", () => {
+    // Due 23:00 Pacific on the 23rd. At 02:00 UTC on the 24th it is 18:00 on the 23rd there: still open.
+    expect(deadlinePassed("2026-11-23T23:00:00-08:00", new Date("2026-11-24T02:00:00Z"))).toBe(false);
+    expect(deadlinePassed("2026-11-23T23:00:00-08:00", new Date("2026-11-24T07:00:01Z"))).toBe(true);
+    // Due noon in Sydney. At 05:00 UTC the same day it is 16:00 there: closed four hours ago.
+    expect(deadlinePassed("2026-11-23T12:00:00+11:00", new Date("2026-11-23T05:00:00Z"))).toBe(true);
+    // A day with an offset is open all of that day, at that offset.
+    expect(deadlinePassed("2026-11-23+02:00", new Date("2026-11-23T21:59:00Z"))).toBe(false);
+    expect(deadlinePassed("2026-11-23+02:00", new Date("2026-11-23T22:00:00Z"))).toBe(true);
+    // No offset: only the day is known, compared as before.
+    expect(deadlinePassed("2026-11-23", new Date("2026-11-23T23:00:00Z"))).toBe(false);
+    expect(deadlinePassed("2026-11-23", new Date("2026-11-24T00:30:00Z"))).toBe(true);
+    expect(deadlinePassed("2026-11-23T12:00:00Z", new Date("2026-11-23T12:00:01Z"))).toBe(true);
+  });
+
   it("walks an eForms payload for CPV, documents, duration and criteria", () => {
     const donnees = JSON.parse(fx("boamp-call.json").results[0].donnees);
     const e = readEforms(donnees);

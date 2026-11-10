@@ -16278,6 +16278,13 @@ function dayFromDmy(value) {
 function deadlinePassed(deadline, now = /* @__PURE__ */ new Date()) {
   const day = dayOf(deadline);
   if (!day) return void 0;
+  const m = deadline.match(/(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?))?\s*(Z|[+-]\d{2}:?\d{2})?/);
+  const time = m?.[2];
+  const offset = m?.[3] ? m[3] === "Z" ? "Z" : m[3].replace(/^([+-]\d{2}):?(\d{2})$/, "$1:$2") : void 0;
+  if (offset) {
+    const instant = Date.parse(`${day}T${time ? time.length === 5 ? `${time}:00` : time : "00:00:00"}${offset}`);
+    if (Number.isFinite(instant)) return time ? instant < now.getTime() : instant + 24 * 3600 * 1e3 <= now.getTime();
+  }
   return day < today(now);
 }
 function toNumber(v) {
