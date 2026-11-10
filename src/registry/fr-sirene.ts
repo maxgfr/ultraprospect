@@ -37,7 +37,7 @@ import { politeUa } from "../net.js";
 import { NACE_SECTIONS, naceSection } from "../classification/nace.js";
 import { divisionsOfSection } from "../classification/naf-codes.js";
 import type { Dirigeant, GeoTarget, LaneCoverage, PostalAddress } from "../types.js";
-import { firstText, isGenericTradeName } from "../util.js";
+import { bboxHalfDiagonalM, firstText, insideBbox, isGenericTradeName } from "../util.js";
 import { RegisterUnreachable } from "./upstream.js";
 import type {
   Availability,
@@ -713,12 +713,31 @@ export const frSirene: RegistryConnector = {
   },
 
   async sweep(target: GeoTarget, filters: RegistryFilters, ctx: ConnectorContext): Promise<SweepResult> {
-    return fetchSirene(
+    // Three shapes of territory, and the API has a search for only two of them:
+    // a commune code (the real boundary) and a disc around a point. A BOX —
+    // `--bbox`, or a place the geocoder resolved without a commune code — has
+    // neither, and used to be swept as a fixed 1 km disc around its centre
+    // whatever its size: a 10 km box got a 1 km register lane beside an OSM lane
+    // covering all of it, and nothing said so. It is now the disc that just
+    // covers the box, trimmed back to the box below.
+    const byCommune = Boolean(target.codeCommune && !target.radiusM);
+    // `/near_point` refuses a radius above 50 km (`buildUrl` clamps to it).
+    const maxRadiusKm = 50;
+    const disc = !byCommune && !target.radiusM ? bboxHalfDiagonalM(target.bbox) : undefined;
+    // A box with no extent has no diagonal to derive anything from.
+    const box = disc && Number.isFinite(disc.radiusM) && disc.radiusM > 0 ? disc : undefined;
+    const point = byCommune
+      ? undefined
+      : box
+        ? { lat: box.lat, lon: box.lon, radiusKm: Math.min(maxRadiusKm, box.radiusM / 1000) }
+        : { lat: target.lat, lon: target.lon, radiusKm: (target.radiusM ?? 1000) / 1000 };
+
+    const result = await fetchSirene(
       {
         // A commune code searches the real boundary; a radius is the fallback
         // when the geocoder gave us a point rather than an administrative area.
-        codeCommune: target.codeCommune && !target.radiusM ? [target.codeCommune] : undefined,
-        point: target.radiusM || !target.codeCommune ? { lat: target.lat, lon: target.lon, radiusKm: (target.radiusM ?? 1000) / 1000 } : undefined,
+        codeCommune: byCommune && target.codeCommune ? [target.codeCommune] : undefined,
+        point,
         sections: filters.sections,
         activitePrincipale: filters.activityCodes,
         tranchesEffectif: filters.sizeBands,
@@ -728,6 +747,40 @@ export const frSirene: RegistryConnector = {
       },
       { maxResults: filters.maxResults, onNote: ctx.onNote, onProgress: ctx.onProgress },
     );
+    if (!box) return result;
+
+    // The query was a disc; the territory is a box. Trim, as the OSM lane trims
+    // its square to a `--radius` circle, so both lanes cover the same ground. A
+    // record with no coordinates cannot be shown to be outside, and is kept.
+    const records = result.records.filter((r) => typeof r.lat !== "number" || typeof r.lon !== "number" || insideBbox(target.bbox, r.lat, r.lon));
+    const dropped = result.records.length - records.length;
+    const notes = [...result.notes];
+    const reasons: string[] = [];
+    let truncated = result.coverage.truncated;
+    if (dropped > 0) {
+      const line = `sirene: ${dropped} establishment${dropped === 1 ? "" : "s"} inside the search disc but outside the box ${dropped === 1 ? "was" : "were"} dropped so both lanes cover the same box`;
+      notes.push(line);
+      ctx.onNote?.(line);
+    }
+    const radiusKm = box.radiusM / 1000;
+    if (radiusKm > maxRadiusKm) {
+      // Beyond the cap the disc no longer reaches the corners, and a lane that
+      // covered the middle of a territory may not be read as the whole of it.
+      truncated = true;
+      reasons.push(
+        `the box reaches ${radiusKm.toFixed(1)} km from its centre and the register's point search stops at ${maxRadiusKm} km, so the parts of the box beyond that disc were NOT swept`,
+      );
+      const line = `sirene: the box is larger than the ${maxRadiusKm} km the register can search around a point — the lane is INCOMPLETE`;
+      notes.push(line);
+      ctx.onNote?.(line);
+    }
+    if (target.osmType === "relation") {
+      // A lane that sweeps a shape other than the one asked for has to say so:
+      // the OSM lane searched this place's real outline, this one its rectangle.
+      reasons.push("swept the bounding box of the place, not its administrative boundary — the geocoder gave no commune code for it");
+    }
+    const reason = [result.coverage.reason, ...reasons].filter(Boolean).join("; ") || undefined;
+    return { records, notes, coverage: { ...result.coverage, returned: records.length, truncated, reason } };
   },
 
   async lookup(query: LookupQuery): Promise<RegistryRecord[]> {

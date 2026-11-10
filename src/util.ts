@@ -270,6 +270,28 @@ export function bboxAround(lat: number, lon: number, radiusM: number): [number, 
 }
 
 /**
+ * The disc that just covers a [south, north, west, east] box: its centre, and
+ * the distance from there to the farthest corner.
+ *
+ * For the lanes that can only search around a point. The centre is the BOX's,
+ * not a geocoder's centroid: a commune's label node can sit well off the middle
+ * of its outline, and a disc drawn around it would leave a corner out.
+ */
+export function bboxHalfDiagonalM(bbox: readonly [number, number, number, number]): { lat: number; lon: number; radiusM: number } {
+  const [s, n, w, e] = bbox;
+  const lat = (s + n) / 2;
+  const lon = (w + e) / 2;
+  // The two east corners are not equally far: a degree of longitude is longer
+  // on the side nearer the equator.
+  return { lat, lon, radiusM: Math.max(haversineM(lat, lon, s, e), haversineM(lat, lon, n, e)) };
+}
+
+/** Whether a point lies inside a [south, north, west, east] box, edges included. */
+export function insideBbox(bbox: readonly [number, number, number, number], lat: number, lon: number): boolean {
+  return lat >= bbox[0] && lat <= bbox[1] && lon >= bbox[2] && lon <= bbox[3];
+}
+
+/**
  * The street line, without saying the street type twice.
  *
  * The register keeps `type_voie` and `libelle_voie` apart ("AVENUE" / "DE

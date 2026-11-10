@@ -13181,6 +13181,15 @@ function bboxAround(lat, lon, radiusM) {
   const dLon = radiusM / (111320 * Math.max(0.01, Math.cos(lat * Math.PI / 180)));
   return [lat - dLat, lat + dLat, lon - dLon, lon + dLon];
 }
+function bboxHalfDiagonalM(bbox) {
+  const [s, n, w, e] = bbox;
+  const lat = (s + n) / 2;
+  const lon = (w + e) / 2;
+  return { lat, lon, radiusM: Math.max(haversineM(lat, lon, s, e), haversineM(lat, lon, n, e)) };
+}
+function insideBbox(bbox, lat, lon) {
+  return lat >= bbox[0] && lat <= bbox[1] && lon >= bbox[2] && lon <= bbox[3];
+}
 function streetLine(a) {
   const type = a.typeVoie?.trim();
   const name = a.libelleVoie?.trim();
@@ -13692,12 +13701,17 @@ var frSirene = {
     return { available: true };
   },
   async sweep(target, filters, ctx) {
-    return fetchSirene(
+    const byCommune = Boolean(target.codeCommune && !target.radiusM);
+    const maxRadiusKm = 50;
+    const disc = !byCommune && !target.radiusM ? bboxHalfDiagonalM(target.bbox) : void 0;
+    const box = disc && Number.isFinite(disc.radiusM) && disc.radiusM > 0 ? disc : void 0;
+    const point = byCommune ? void 0 : box ? { lat: box.lat, lon: box.lon, radiusKm: Math.min(maxRadiusKm, box.radiusM / 1e3) } : { lat: target.lat, lon: target.lon, radiusKm: (target.radiusM ?? 1e3) / 1e3 };
+    const result = await fetchSirene(
       {
         // A commune code searches the real boundary; a radius is the fallback
         // when the geocoder gave us a point rather than an administrative area.
-        codeCommune: target.codeCommune && !target.radiusM ? [target.codeCommune] : void 0,
-        point: target.radiusM || !target.codeCommune ? { lat: target.lat, lon: target.lon, radiusKm: (target.radiusM ?? 1e3) / 1e3 } : void 0,
+        codeCommune: byCommune && target.codeCommune ? [target.codeCommune] : void 0,
+        point,
         sections: filters.sections,
         activitePrincipale: filters.activityCodes,
         tranchesEffectif: filters.sizeBands,
@@ -13707,6 +13721,32 @@ var frSirene = {
       },
       { maxResults: filters.maxResults, onNote: ctx.onNote, onProgress: ctx.onProgress }
     );
+    if (!box) return result;
+    const records = result.records.filter((r) => typeof r.lat !== "number" || typeof r.lon !== "number" || insideBbox(target.bbox, r.lat, r.lon));
+    const dropped = result.records.length - records.length;
+    const notes = [...result.notes];
+    const reasons = [];
+    let truncated = result.coverage.truncated;
+    if (dropped > 0) {
+      const line = `sirene: ${dropped} establishment${dropped === 1 ? "" : "s"} inside the search disc but outside the box ${dropped === 1 ? "was" : "were"} dropped so both lanes cover the same box`;
+      notes.push(line);
+      ctx.onNote?.(line);
+    }
+    const radiusKm = box.radiusM / 1e3;
+    if (radiusKm > maxRadiusKm) {
+      truncated = true;
+      reasons.push(
+        `the box reaches ${radiusKm.toFixed(1)} km from its centre and the register's point search stops at ${maxRadiusKm} km, so the parts of the box beyond that disc were NOT swept`
+      );
+      const line = `sirene: the box is larger than the ${maxRadiusKm} km the register can search around a point \u2014 the lane is INCOMPLETE`;
+      notes.push(line);
+      ctx.onNote?.(line);
+    }
+    if (target.osmType === "relation") {
+      reasons.push("swept the bounding box of the place, not its administrative boundary \u2014 the geocoder gave no commune code for it");
+    }
+    const reason = [result.coverage.reason, ...reasons].filter(Boolean).join("; ") || void 0;
+    return { records, notes, coverage: { ...result.coverage, returned: records.length, truncated, reason } };
   },
   async lookup(query) {
     const name = query.names.find((n) => n?.trim());
@@ -27139,7 +27179,9 @@ TARGETING (scan, where)
   --radius <dist>        Search radius: 800, 800m, 2km. Point searches only. A disc:
                          Overpass is asked for the bounding box, then the OSM lane is
                          trimmed to the circle so both lanes cover the same ground.
-  --bbox <s,w,n,e>       Explicit bounding box, skipping the geocoder.
+  --bbox <s,w,n,e>       Explicit bounding box, skipping the geocoder. The French register
+                         has no box search: it is asked for the disc that covers the box
+                         (50 km at most, declared truncated beyond) and trimmed to the box.
   --country <cc>         ISO-3166-1 alpha-2 hint for the geocoder, e.g. fr.
   --lang <code>          Preferred language for geocoder labels.
   --pick <n>             Take the Nth candidate instead of refusing an ambiguous query.
