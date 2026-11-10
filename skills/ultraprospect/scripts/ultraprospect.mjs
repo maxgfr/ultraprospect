@@ -21974,6 +21974,24 @@ function runCheck(input) {
       if (existsSync15(file)) pageText.set(id, readFileSync15(file, "utf8"));
     }
   }
+  const searchableText = /* @__PURE__ */ new Map();
+  const searchable = (pageId, text3) => {
+    let folded = searchableText.get(pageId);
+    if (folded === void 0) {
+      folded = normalizeForSearch(text3);
+      searchableText.set(pageId, folded);
+    }
+    return folded;
+  };
+  const strippedText = /* @__PURE__ */ new Map();
+  const strippedForIds = (pageId, text3) => {
+    let stripped = strippedText.get(pageId);
+    if (stripped === void 0) {
+      stripped = stripLegalId(text3);
+      strippedText.set(pageId, stripped);
+    }
+    return stripped;
+  };
   const osmKeyOf = (place) => {
     if (place.osm) return `${place.osm.osmType[0]}${place.osm.osmId}`;
     return OSM_SOURCE.exec(place.id)?.[1];
@@ -22054,7 +22072,7 @@ function runCheck(input) {
         );
         continue;
       }
-      if (!normalizeForSearch(text3).includes(normalizeForSearch(item.value))) {
+      if (!searchable(item.from, text3).includes(normalizeForSearch(item.value))) {
         err(
           "contact-not-on-page",
           `${place.id} \xB7 ${item.kind} ${item.value}`,
@@ -22111,7 +22129,7 @@ function runCheck(input) {
         );
         continue;
       }
-      const haystack = stripLegalId(text3);
+      const haystack = strippedForIds(id.from, text3);
       if (!haystack.includes(stripLegalId(id.value))) {
         err(
           "legal-id-not-on-page",

@@ -210,6 +210,29 @@ export function runCheck(input: CheckInput): CheckReport {
     }
   }
 
+  // Each page is folded ONCE, however many values cite it. Every contact, term
+  // mention and legal identifier re-reads the page it names, and folding the
+  // page per VALUE made the gate's cost contacts × page size: a company with
+  // fifteen contacts off one legal notice normalised that notice fifteen times.
+  const searchableText = new Map<string, string>();
+  const searchable = (pageId: string, text: string): string => {
+    let folded = searchableText.get(pageId);
+    if (folded === undefined) {
+      folded = normalizeForSearch(text);
+      searchableText.set(pageId, folded);
+    }
+    return folded;
+  };
+  const strippedText = new Map<string, string>();
+  const strippedForIds = (pageId: string, text: string): string => {
+    let stripped = strippedText.get(pageId);
+    if (stripped === undefined) {
+      stripped = stripLegalId(text);
+      strippedText.set(pageId, stripped);
+    }
+    return stripped;
+  };
+
   // ---- Whose evidence is this? -----------------------------------------------
   //
   // A stored page and an OSM feature are evidence about ONE company. Re-reading
@@ -319,7 +342,7 @@ export function runCheck(input: CheckInput): CheckReport {
         );
         continue;
       }
-      if (!normalizeForSearch(text).includes(normalizeForSearch(item.value))) {
+      if (!searchable(item.from, text).includes(normalizeForSearch(item.value))) {
         err(
           "contact-not-on-page",
           `${place.id} · ${item.kind} ${item.value}`,
@@ -398,7 +421,7 @@ export function runCheck(input: CheckInput): CheckReport {
       // failed this rule over a colon. A gate that rejects true evidence is not
       // strict, it is broken — people route around it, and then it stops
       // catching the fabricated ones it exists for.
-      const haystack = stripLegalId(text);
+      const haystack = strippedForIds(id.from, text);
       if (!haystack.includes(stripLegalId(id.value))) {
         err(
           "legal-id-not-on-page",
