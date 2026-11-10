@@ -15,7 +15,7 @@ import { boampWhere, kindOfNature, toTender as boampToTender } from "../src/tend
 import { tenderConnectorsFor, TENDER_CONNECTORS } from "../src/tenders/index.js";
 import { packageToTenders, releaseToTender } from "../src/tenders/ocds.js";
 import { cfUrl } from "../src/tenders/ocds-sources.js";
-import { profileCitations, validateProfile } from "../src/tenders/profile.js";
+import { profileCitations, profileMarkdown, validateProfile } from "../src/tenders/profile.js";
 import { emptyTenderManifest } from "../src/tenders/run.js";
 import type { Tender, TenderQuery } from "../src/tenders/types.js";
 import { cpvPrefix, deadlinePassed, durationMonths, keepByQuery, readEforms, sinceToDate } from "../src/tenders/util.js";
@@ -362,6 +362,25 @@ describe("verdicts", () => {
     expect(outcome.invalid).toEqual(["a"]);
   });
 
+  it("never drops a notice because a pair named it twice, or named a pair both ways round", () => {
+    const self = applyTenderVerdicts([tender({ id: "x" }), tender({ id: "y" })], [{ pair: ["x", "x"], same: true, why: "?" }], NOW);
+    expect(self.tenders.map((t) => t.id)).toEqual(["x", "y"]);
+    expect(self.outcome.merged).toBe(0);
+    expect(self.outcome.invalid).toHaveLength(1);
+
+    const both = applyTenderVerdicts(
+      [tender({ id: "a" }), tender({ id: "b" })],
+      [
+        { pair: ["a", "b"], same: true, why: "same call" },
+        { pair: ["b", "a"], same: true, why: "same call" },
+      ],
+      NOW,
+    );
+    expect(both.tenders.map((t) => t.id)).toEqual(["a"]);
+    expect(both.outcome.merged).toBe(1);
+    expect(both.outcome.invalid).toHaveLength(1);
+  });
+
   it("merges a look-alike pair only on same: true", () => {
     const { tenders, outcome } = applyTenderVerdicts(
       [tender({ id: "a" }), tender({ id: "b" })],
@@ -420,6 +439,46 @@ describe("awards", () => {
     expect(a.upcoming[0]!.retenderWindow).toMatchObject({ from: "2026-06-01", to: "2026-12-01" });
     expect(a.withoutDuration).toBe(2);
     expect(awardsMarkdown(a, { truncated: true, gaps: [], title: "t" })).toContain(FORECAST_LABEL);
+  });
+});
+
+describe("awards in more than one currency", () => {
+  const award = (id: string, amount: number | undefined, currency: string): Tender =>
+    tender({
+      id,
+      kind: "award",
+      status: "awarded",
+      awards: [
+        {
+          supplier: { name: "ACME SAS", legalId: "12345678900011", country: "fr" },
+          date: "2025-01-01",
+          value: amount ? { amount, currency, estimated: false } : undefined,
+        },
+      ],
+    });
+
+  it("totals one currency, even when the supplier's first award published no value", () => {
+    // The first row has no value, so it used to leave the currency unset — and
+    // every later amount, euros and pounds alike, went into one bare number.
+    const a = analyseAwards([award("n1", undefined, "EUR"), award("n2", 100_000, "EUR"), award("n3", 50_000, "GBP")], { now: NOW });
+    expect(a.suppliers[0]!.total).toBe(100_000);
+    expect(a.suppliers[0]!.currency).toBe("EUR");
+    expect(a.buyers[0]!.total).toBe(100_000);
+    expect(a.buyers[0]!.currency).toBe("EUR");
+  });
+});
+
+describe("a profile that is not complete", () => {
+  it("names the problem instead of crashing, and can still be printed", () => {
+    const { problems, profile } = validateProfile({ offer: "Software" });
+    expect(problems.map((p) => p.field)).toContain("company.name");
+    expect(() => profileMarkdown(profile!)).not.toThrow();
+    expect(profileMarkdown(profile!)).toContain("no legal name");
+  });
+
+  it("reports a name that is not text as a missing name, not as broken JSON", () => {
+    const { problems } = validateProfile({ company: { name: 42 }, offer: 7 });
+    expect(problems.map((p) => p.field)).toEqual(expect.arrayContaining(["company.name", "offer"]));
   });
 });
 

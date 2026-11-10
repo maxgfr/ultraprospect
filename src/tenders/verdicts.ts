@@ -60,6 +60,14 @@ export function applyTenderVerdicts(tenders: Tender[], input: unknown, now = new
         outcome.unknown.push(`${a}|${b}`);
         continue;
       }
+      // A pair names two notices that are both still in the run. `[x, x]` used
+      // to "merge" a notice into itself and then drop it, and `[a, b]` followed
+      // by `[b, a]` dropped both — each time a call for tenders removed from
+      // the run by a line that looked like housekeeping.
+      if (a === b || drop.has(a) || drop.has(b)) {
+        outcome.invalid.push(`${a}|${b}: ${a === b ? "a notice cannot be paired with itself" : "one of the two was already merged away by an earlier pair"}`);
+        continue;
+      }
       if (v.same === true) {
         const keep = byId.get(a)!;
         const gone = byId.get(b)!;

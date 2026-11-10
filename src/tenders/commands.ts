@@ -21,7 +21,7 @@ import { emptyTenderManifest, newTenderRun, readTenders, recount, requireTenderM
 import { recordFixture, runTenderSearch } from "./search.js";
 import type { NoticeKind, Tender, TenderLane, TenderQuery } from "./types.js";
 import { EU27, sinceToDate, today } from "./util.js";
-import { applyTenderVerdicts, buildTendersTodo, type ApplyOutcome } from "./verdicts.js";
+import { applyTenderVerdicts, buildTendersTodo, rankTenders, type ApplyOutcome } from "./verdicts.js";
 import { diffTenderRuns, tenderDeltaMarkdown, type TenderDelta } from "./watch.js";
 import { buildWebTodo, engineSearchWeb, foldWebHits, type WebFoldOutcome, type WebHit, type WebTodo } from "./web.js";
 
@@ -250,7 +250,7 @@ export function renderTenderRun(runDir: string): string[] {
   manifest.tenderCounts.bids = existsSync(join(runDir, "bids")) ? readdirSync(join(runDir, "bids")).length : 0;
   const files = [
     ["TENDERS.csv", tendersCsv(tenders)],
-    ["tenders-ranked.json", JSON.stringify(tenders, null, 2) + "\n"],
+    ["tenders-ranked.json", JSON.stringify(rankTenders(tenders), null, 2) + "\n"],
     ["REPORT.md", tendersReport(tenders, manifest)],
     ["index.html", tendersHtml(tenders, manifest)],
   ] as const;

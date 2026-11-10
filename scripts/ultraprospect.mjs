@@ -23554,7 +23554,10 @@ function analyseAwards(tenders, opts = {}) {
     const first = !s.notices.includes(r.tenderId);
     if (first) s.notices.push(r.tenderId);
     s.wins = s.notices.length;
-    if (first && r.value && (!s.currency || s.currency === r.currency)) s.total += r.value;
+    if (first && r.value) {
+      if (!s.total) s.currency = r.currency;
+      if (s.currency === r.currency) s.total += r.value;
+    }
     if (r.buyer && !s.buyers.includes(r.buyer)) s.buyers.push(r.buyer);
     if (!s.countries.includes(r.country)) s.countries.push(r.country);
     if (r.awardedAt && (!s.lastWin || r.awardedAt > s.lastWin)) s.lastWin = r.awardedAt;
@@ -23567,7 +23570,10 @@ function analyseAwards(tenders, opts = {}) {
     const firstForBuyer = !b.notices.includes(r.tenderId);
     if (firstForBuyer) b.notices.push(r.tenderId);
     b.awards = b.notices.length;
-    if (firstForBuyer && r.value && (!b.currency || b.currency === r.currency)) b.total += r.value;
+    if (firstForBuyer && r.value) {
+      if (!b.total) b.currency = r.currency;
+      if (b.currency === r.currency) b.total += r.value;
+    }
     if (!b.suppliers.includes(r.supplier)) b.suppliers.push(r.supplier);
     if (r.awardedAt && (!b.lastAward || r.awardedAt > b.lastAward)) b.lastAward = r.awardedAt;
     buyers.set(key, b);
@@ -23816,8 +23822,10 @@ function validateProfile(raw) {
   const problems = [];
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { problems: [{ field: "(root)", message: "a profile is a JSON object" }] };
   const p = raw;
-  if (!p.company?.name || p.company.name.startsWith("<")) problems.push({ field: "company.name", message: "the bidder's legal name is required" });
-  if (!p.offer || p.offer.startsWith("<")) problems.push({ field: "offer", message: "describe what you sell \u2014 the qualifier judges every notice against it" });
+  const name = p.company?.name;
+  if (typeof name !== "string" || !name || name.startsWith("<")) problems.push({ field: "company.name", message: "the bidder's legal name is required" });
+  if (typeof p.offer !== "string" || !p.offer || p.offer.startsWith("<"))
+    problems.push({ field: "offer", message: "describe what you sell \u2014 the qualifier judges every notice against it" });
   const ids = /* @__PURE__ */ new Set();
   for (const [list3, prefix] of [
     [p.references ?? [], "R"],
@@ -23859,7 +23867,10 @@ function profileCitations(p) {
 }
 function profileMarkdown(p) {
   const lines = ["## The bidder (cite these ids for any claim about yourselves)", ""];
-  lines.push(`- [profile.company] ${p.company.name}${p.company.legalId ? ` \u2014 ${p.company.legalId}` : ""}${p.company.country ? ` (${p.company.country})` : ""}`);
+  const company = p.company ?? {};
+  lines.push(
+    `- [profile.company] ${company.name ?? "(no legal name in the profile \u2014 nothing may be claimed under one)"}${company.legalId ? ` \u2014 ${company.legalId}` : ""}${company.country ? ` (${company.country})` : ""}`
+  );
   lines.push(`- [profile.offer] ${p.offer}`);
   if (p.capacity) lines.push(`- [profile.capacity] ${p.capacity}`);
   if (p.staff) lines.push(`- [profile.staff] ${p.staff} staff`);
@@ -24386,6 +24397,10 @@ function applyTenderVerdicts(tenders, input, now = /* @__PURE__ */ new Date()) {
       const [a, b] = v.pair;
       if (!a || !b || !byId.has(a) || !byId.has(b)) {
         outcome.unknown.push(`${a}|${b}`);
+        continue;
+      }
+      if (a === b || drop.has(a) || drop.has(b)) {
+        outcome.invalid.push(`${a}|${b}: ${a === b ? "a notice cannot be paired with itself" : "one of the two was already merged away by an earlier pair"}`);
         continue;
       }
       if (v.same === true) {
@@ -25283,7 +25298,7 @@ function renderTenderRun(runDir) {
   manifest.tenderCounts.bids = existsSync22(join30(runDir, "bids")) ? readdirSync12(join30(runDir, "bids")).length : 0;
   const files = [
     ["TENDERS.csv", tendersCsv(tenders)],
-    ["tenders-ranked.json", JSON.stringify(tenders, null, 2) + "\n"],
+    ["tenders-ranked.json", JSON.stringify(rankTenders(tenders), null, 2) + "\n"],
     ["REPORT.md", tendersReport(tenders, manifest)],
     ["index.html", tendersHtml(tenders, manifest)]
   ];

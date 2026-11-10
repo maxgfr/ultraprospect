@@ -172,7 +172,14 @@ export function analyseAwards(tenders: readonly Tender[], opts: { horizonMonths?
     const first = !s.notices.includes(r.tenderId);
     if (first) s.notices.push(r.tenderId);
     s.wins = s.notices.length;
-    if (first && r.value && (!s.currency || s.currency === r.currency)) s.total += r.value;
+    // The total's currency is that of the first award that HAS a value. Taken
+    // from the supplier's first row regardless, a row with no published value
+    // left it unset, and every later amount — euros, pounds — was then summed
+    // into one number printed with no currency at all.
+    if (first && r.value) {
+      if (!s.total) s.currency = r.currency;
+      if (s.currency === r.currency) s.total += r.value;
+    }
     if (r.buyer && !s.buyers.includes(r.buyer)) s.buyers.push(r.buyer);
     if (!s.countries.includes(r.country)) s.countries.push(r.country);
     if (r.awardedAt && (!s.lastWin || r.awardedAt > s.lastWin)) s.lastWin = r.awardedAt;
@@ -186,7 +193,10 @@ export function analyseAwards(tenders: readonly Tender[], opts: { horizonMonths?
     const firstForBuyer = !b.notices.includes(r.tenderId);
     if (firstForBuyer) b.notices.push(r.tenderId);
     b.awards = b.notices.length;
-    if (firstForBuyer && r.value && (!b.currency || b.currency === r.currency)) b.total += r.value;
+    if (firstForBuyer && r.value) {
+      if (!b.total) b.currency = r.currency;
+      if (b.currency === r.currency) b.total += r.value;
+    }
     if (!b.suppliers.includes(r.supplier)) b.suppliers.push(r.supplier);
     if (r.awardedAt && (!b.lastAward || r.awardedAt > b.lastAward)) b.lastAward = r.awardedAt;
     buyers.set(key, b);

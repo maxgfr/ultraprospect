@@ -87,8 +87,12 @@ export function validateProfile(raw: unknown): { profile?: BidderProfile; proble
   const problems: ProfileProblem[] = [];
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { problems: [{ field: "(root)", message: "a profile is a JSON object" }] };
   const p = raw as BidderProfile;
-  if (!p.company?.name || p.company.name.startsWith("<")) problems.push({ field: "company.name", message: "the bidder's legal name is required" });
-  if (!p.offer || p.offer.startsWith("<")) problems.push({ field: "offer", message: "describe what you sell — the qualifier judges every notice against it" });
+  // `typeof`, not truthiness: a profile is a file somebody edited by hand, and
+  // `"name": 42` used to reach `.startsWith` and surface as "not valid JSON".
+  const name = p.company?.name;
+  if (typeof name !== "string" || !name || name.startsWith("<")) problems.push({ field: "company.name", message: "the bidder's legal name is required" });
+  if (typeof p.offer !== "string" || !p.offer || p.offer.startsWith("<"))
+    problems.push({ field: "offer", message: "describe what you sell — the qualifier judges every notice against it" });
   const ids = new Set<string>();
   for (const [list, prefix] of [
     [p.references ?? [], "R"],
@@ -135,7 +139,12 @@ export function profileCitations(p: BidderProfile | undefined): Set<string> {
 /** The profile as the packet prints it: every citable fact under its id. */
 export function profileMarkdown(p: BidderProfile): string {
   const lines: string[] = ["## The bidder (cite these ids for any claim about yourselves)", ""];
-  lines.push(`- [profile.company] ${p.company.name}${p.company.legalId ? ` — ${p.company.legalId}` : ""}${p.company.country ? ` (${p.company.country})` : ""}`);
+  // A profile with problems is still copied into the run, so that the packet can
+  // show what it holds; it must then be printable without a company block.
+  const company: Partial<BidderProfile["company"]> = p.company ?? {};
+  lines.push(
+    `- [profile.company] ${company.name ?? "(no legal name in the profile — nothing may be claimed under one)"}${company.legalId ? ` — ${company.legalId}` : ""}${company.country ? ` (${company.country})` : ""}`,
+  );
   lines.push(`- [profile.offer] ${p.offer}`);
   if (p.capacity) lines.push(`- [profile.capacity] ${p.capacity}`);
   if (p.staff) lines.push(`- [profile.staff] ${p.staff} staff`);
