@@ -22,7 +22,7 @@
 import { awaitHostSlot, httpJson } from "./engine.js";
 import { politeUa } from "./net.js";
 import type { GeoCandidate, GeoTarget } from "./types.js";
-import { firstText, haversineM } from "./util.js";
+import { firstText, haversineM, insideBbox } from "./util.js";
 
 const NOMINATIM = "https://nominatim.openstreetmap.org/search";
 const BAN = "https://api-adresse.data.gouv.fr/search/";
@@ -167,7 +167,7 @@ async function toTarget(query: string, hit: NominatimHit, opts: GeocodeOptions):
   };
 
   if (countryCode === "fr") {
-    const insee = await banCityCode(query);
+    const insee = await banCityCode(query, bbox);
     if (insee) {
       target.codeCommune = insee.citycode;
       target.postcode ??= insee.postcode;
@@ -176,19 +176,44 @@ async function toTarget(query: string, hit: NominatimHit, opts: GeocodeOptions):
   return target;
 }
 
+interface BanFeature {
+  /** GeoJSON order: longitude first. */
+  geometry?: { coordinates?: unknown[] };
+  properties?: { type?: string; citycode?: string; postcode?: string };
+}
+
 /**
- * The INSEE commune code for a French query, via the Base Adresse Nationale.
+ * The INSEE commune code of the place that was PICKED, via the Base Adresse
+ * Nationale.
  *
- * Best-effort: a missing citycode costs the SIRENE lane its sharpest filter but
- * never blocks the run — it falls back to a radius search around the centroid.
+ * BAN is asked the same words Nominatim was and answers on its own: it knows
+ * nothing of which candidate was chosen. Taking its first answer as it came put
+ * one commune's register beside another commune's map. "Saint-Denis" is the
+ * Seine-Saint-Denis town first for Nominatim and the Réunion prefecture first
+ * for BAN; "Le Marais, Paris" is a quarter for one and a street of the 16th
+ * arrondissement for the other; and a street or an address came back with the
+ * code of the whole commune around it, so the register swept a town while the
+ * map searched one building. An answer is accepted only when it is a commune
+ * and its point lies inside the bounding box of the candidate that was picked.
+ *
+ * Best-effort: without a code the register lane sweeps the candidate's bounding
+ * box instead of a commune boundary, and says so.
  */
-async function banCityCode(query: string): Promise<{ citycode?: string; postcode?: string } | undefined> {
+async function banCityCode(query: string, bbox: readonly [number, number, number, number]): Promise<{ citycode?: string; postcode?: string } | undefined> {
   const url = new URL(BAN);
   url.searchParams.set("q", query);
-  url.searchParams.set("limit", "1");
+  // As many answers as Nominatim is asked for, so the candidate picked there
+  // can still be found here when the two services rank a name differently.
+  url.searchParams.set("limit", "5");
   await awaitHostSlot(url.href);
   const res = await httpJson("GET", url.href, undefined, { timeoutMs: 15_000, userAgent: politeUa() });
-  const props = res.ok ? res.data?.features?.[0]?.properties : undefined;
-  if (!props) return undefined;
-  return { citycode: props.citycode, postcode: props.postcode };
+  const features: BanFeature[] = res.ok && Array.isArray(res.data?.features) ? res.data.features : [];
+  for (const feature of features) {
+    const props = feature?.properties;
+    if (props?.type !== "municipality" || !props.citycode) continue;
+    const [lon, lat] = feature.geometry?.coordinates ?? [];
+    if (typeof lat !== "number" || typeof lon !== "number" || !insideBbox(bbox, lat, lon)) continue;
+    return { citycode: props.citycode, postcode: props.postcode };
+  }
+  return undefined;
 }

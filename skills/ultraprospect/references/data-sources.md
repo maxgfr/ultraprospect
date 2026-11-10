@@ -40,6 +40,13 @@ the two are not interchangeable: 75015 is an arrondissement, 80021 is Amiens,
 and the register indexes on the latter. Best-effort; a missing citycode costs
 the register lane its sharpest filter but never blocks the run.
 
+BAN is asked the same words and ranks them its own way ("Saint-Denis" is the
+Réunion prefecture first there), so an answer is taken only when it is a
+`municipality` whose point lies inside the bounding box of the candidate
+Nominatim returned or `--pick` chose. A street or an address gets no commune
+code: the register lane then sweeps the candidate's bounding box, as it does
+for `--bbox`, and says so in its `reason`.
+
 ## Overpass — places, worldwide
 
 `POST|GET /api/interpreter`, ODbL.

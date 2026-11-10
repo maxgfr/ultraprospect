@@ -19150,7 +19150,7 @@ async function toTarget(query, hit, opts) {
     radiusM: opts.radiusM
   };
   if (countryCode === "fr") {
-    const insee = await banCityCode(query);
+    const insee = await banCityCode(query, bbox);
     if (insee) {
       target.codeCommune = insee.citycode;
       target.postcode ??= insee.postcode;
@@ -19158,15 +19158,21 @@ async function toTarget(query, hit, opts) {
   }
   return target;
 }
-async function banCityCode(query) {
+async function banCityCode(query, bbox) {
   const url = new URL(BAN);
   url.searchParams.set("q", query);
-  url.searchParams.set("limit", "1");
+  url.searchParams.set("limit", "5");
   await awaitHostSlot(url.href);
   const res = await httpJson("GET", url.href, void 0, { timeoutMs: 15e3, userAgent: politeUa() });
-  const props = res.ok ? res.data?.features?.[0]?.properties : void 0;
-  if (!props) return void 0;
-  return { citycode: props.citycode, postcode: props.postcode };
+  const features = res.ok && Array.isArray(res.data?.features) ? res.data.features : [];
+  for (const feature of features) {
+    const props = feature?.properties;
+    if (props?.type !== "municipality" || !props.citycode) continue;
+    const [lon, lat] = feature.geometry?.coordinates ?? [];
+    if (typeof lat !== "number" || typeof lon !== "number" || !insideBbox(bbox, lat, lon)) continue;
+    return { citycode: props.citycode, postcode: props.postcode };
+  }
+  return void 0;
 }
 
 // src/match.ts
