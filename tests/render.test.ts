@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CSV_COLUMNS, toCsv } from "../src/csv.js";
 import { collectEvidence } from "../src/excerpts.js";
-import { buildHtml, buildPrivacyNote, buildReport, HTML_ROW_CAP } from "../src/render.js";
+import { buildAll, buildHtml, buildPrivacyNote, buildReport, HTML_ROW_CAP } from "../src/render.js";
 import { buildDelta, diffRuns, identityOf } from "../src/watch.js";
 import type { Place, RunManifest } from "../src/types.js";
 import { rec } from "./factories.js";
@@ -127,6 +127,29 @@ describe("CSV", () => {
     const csv = toCsv([place({ name: 'Dupont, Fils & Cie "Le Vrai"' })]);
     expect(csv.split("\n")).toHaveLength(3); // header, row, trailing newline
     expect(csv).toContain('"Dupont, Fils & Cie ""Le Vrai"""');
+  });
+
+  it("--no-people keeps named individuals out of EVERY deliverable, not only the CSV", () => {
+    const p = place({
+      registry: rec({ officers: [{ nom: "MARTIN", prenoms: "JEAN", qualite: "Président" }] }),
+      contacts: {
+        emails: [],
+        phones: [],
+        socials: [],
+        people: [{ value: "Claire Dubosc", role: "Gérante", from: "P1", lane: "web" }],
+      },
+    });
+    const named = buildAll([p], manifest()).files;
+    expect(named.some((f) => f.content.includes("MARTIN"))).toBe(true);
+    expect(named.some((f) => f.content.includes("Claire Dubosc"))).toBe(true);
+
+    for (const file of buildAll([p], manifest(), { noPeople: true }).files) {
+      expect(file.content, file.path).not.toContain("MARTIN");
+      expect(file.content, file.path).not.toContain("Claire Dubosc");
+    }
+    // The caller's rows are untouched: stripping is for the handover only.
+    expect(p.registry?.officers).toHaveLength(1);
+    expect(p.contacts.people).toHaveLength(1);
   });
 
   it("drops officers under --no-people", () => {

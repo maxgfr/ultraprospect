@@ -64,6 +64,23 @@ describe("fixture identifier fusion", () => {
     ).toBe(true);
   });
 
+  it("--no-people strips officers from the raw register lane, not only from the places", async () => {
+    const source = loadFixture(fixture);
+    expect(source.registry.some((r) => r.officers.length > 0)).toBe(true);
+    const surname = source.registry.find((r) => r.officers.length > 0)!.officers[0]!.nom!;
+
+    const outcome = await runScan(source.target, { fixture, noPeople: true });
+    expect(outcome.registry.every((r) => r.officers.length === 0)).toBe(true);
+    expect(outcome.places.every((p) => !p.registry?.officers.length && p.contacts.people.length === 0)).toBe(true);
+
+    const run = outDir();
+    writeScan(run, outcome);
+    expect(readFileSync(join(run, "registry.json"), "utf8")).not.toContain(surname);
+    expect(readFileSync(join(run, "places.json"), "utf8")).not.toContain(surname);
+    // The fixture the caller handed in is theirs: stripping must not reach back into it.
+    expect(loadFixture(fixture).registry.some((r) => r.officers.length > 0)).toBe(true);
+  });
+
   it("writes byte-identical places.json when the same fixture runs twice", async () => {
     const target = loadFixture(fixture).target;
     const first = await runScan(target, { fixture });

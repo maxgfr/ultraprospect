@@ -442,6 +442,11 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
       }
       p.contacts.people = [];
     }
+    // The raw lane goes to disk too — `registry.json`, and the fixture under
+    // `--record` — so the names have to leave the records themselves, not only
+    // the places built from them. Copies, because a replayed fixture hands us
+    // the caller's own objects.
+    records = records.map((r) => (r.officers.length ? { ...r, officers: [] } : r));
     note(`--no-people: removed ${stripped} named individual(s); the run holds organisation data only`);
   }
 

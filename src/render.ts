@@ -102,10 +102,23 @@ function readDossiers(runDir: string, places: readonly Place[]): Map<string, str
   return out;
 }
 
+/** A copy of the place with no named individual on it: no officers, no people read off a page. */
+function withoutPeople(place: Place): Place {
+  return {
+    ...place,
+    registry: place.registry ? { ...place.registry, officers: [] } : place.registry,
+    contacts: { ...place.contacts, people: [] },
+  };
+}
+
 /** Everything a run hands over, built from the same places and manifest. */
 export function buildAll(places: readonly Place[], manifest: RunManifest, opts: RenderOptions = {}): RenderOutcome {
   const feedback = opts.runDir ? readFeedback(opts.runDir) : undefined;
   if (feedback) places = feedbackSelection(places, feedback);
+  // `--no-people` is a promise about the HANDOVER, not about one column of one
+  // file. Every deliverable below is built from the same stripped rows, so none
+  // of them can be the one that remembered the names.
+  if (opts.noPeople) places = places.map(withoutPeople);
   // Only the rows the page will show are worth reading evidence for: a quote
   // attached to a company nobody can scroll to is bytes with no reader.
   const visible = ranked(places).slice(0, HTML_ROW_CAP);

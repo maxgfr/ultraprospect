@@ -19537,6 +19537,7 @@ async function runScan(target, opts = {}) {
       }
       p.contacts.people = [];
     }
+    records = records.map((r) => r.officers.length ? { ...r, officers: [] } : r);
     note(`--no-people: removed ${stripped} named individual(s); the run holds organisation data only`);
   }
   const registryOnlyFilterWasSet = Boolean(
@@ -23189,9 +23190,17 @@ function readDossiers(runDir, places) {
   }
   return out2;
 }
+function withoutPeople(place) {
+  return {
+    ...place,
+    registry: place.registry ? { ...place.registry, officers: [] } : place.registry,
+    contacts: { ...place.contacts, people: [] }
+  };
+}
 function buildAll(places, manifest, opts = {}) {
   const feedback = opts.runDir ? readFeedback(opts.runDir) : void 0;
   if (feedback) places = feedbackSelection(places, feedback);
+  if (opts.noPeople) places = places.map(withoutPeople);
   const visible = ranked(places).slice(0, HTML_ROW_CAP);
   const ctx = opts.runDir ? { ...collectEvidence(opts.runDir, visible), dossiers: readDossiers(opts.runDir, visible) } : {};
   const files = [
