@@ -431,6 +431,12 @@ async function drain(
   for (let p = 2; p <= lastPage; p++) pages.push(p);
 
   let stopped = false;
+  // A page that fails AFTER the first is still a partition that was not read to
+  // its end. It used to stop the walk and return as if it had finished: a 500
+  // on page 7 of 40 came back as six pages and no flag, a short list claiming
+  // the whole commune. The caller already knows what to do with `error` — keep
+  // the records, mark the lane truncated — so it is handed one.
+  let pageError: string | undefined;
   await mapLimit(pages, PAGE_CONCURRENCY, async (page) => {
     if (stopped) return;
     if (budget.left <= 0) {
@@ -440,6 +446,7 @@ async function drain(
     }
     const outcome = await fetchPage(query, page);
     if (outcome.error) {
+      pageError ??= `page ${page} of ${lastPage} failed (${outcome.error}); ${collected.length} of about ${Math.min(first.total, HARD_CAP)} records were read`;
       stopped = true;
       return;
     }
@@ -451,7 +458,7 @@ async function drain(
     }
   });
 
-  return { records: collected, total: first.total, limited };
+  return { records: collected, total: first.total, limited, error: pageError };
 }
 
 /** Spread an integer result budget across sections, carrying unused capacity forward. */

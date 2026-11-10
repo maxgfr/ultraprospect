@@ -20,6 +20,8 @@ let perPageRecords = 25;
 let establishmentsPerEntity = 1;
 /** When set, the fake register answers every call with this error. */
 let apiError: string | undefined;
+/** When set, the fake register fails exactly the calls this accepts. */
+let failOn: ((url: URL) => boolean) | undefined;
 
 vi.mock("../src/engine.js", () => ({
   awaitHostSlot: async () => 0,
@@ -32,6 +34,7 @@ vi.mock("../src/engine.js", () => ({
     calls.push(raw);
     if (apiError) return { ok: false, status: 503, data: { erreur: apiError } };
     const url = new URL(raw);
+    if (failOn?.(url)) return { ok: false, status: 500, data: { erreur: "internal error" } };
     const total = totals(url);
     const page = Number(url.searchParams.get("page") ?? "1");
     const perPage = Number(url.searchParams.get("per_page") ?? "25");
@@ -63,6 +66,7 @@ beforeEach(() => {
   perPageRecords = 25;
   establishmentsPerEntity = 1;
   apiError = undefined;
+  failOn = undefined;
   totals = () => 10;
 });
 
@@ -217,6 +221,26 @@ describe("the split ladder", () => {
     expect(result.records).toHaveLength(0);
     expect(result.coverage.truncated).toBe(true);
     expect(result.coverage.reason).toContain("service unavailable");
+  });
+});
+
+describe("a partition that is not read to its end", () => {
+  it("reports a page that fails after the first as TRUNCATION, and keeps what it had read", async () => {
+    // 100 results, 25 a page: pages 1 and 2 answer, page 3 is a 500.
+    totals = () => 100;
+    failOn = (url) => url.searchParams.get("page") === "3";
+    const result = await fetchSirene({ codeCommune: ["94080"] });
+    expect(result.records.length).toBeGreaterThan(0);
+    expect(result.records.length).toBeLessThan(100);
+    expect(result.coverage.truncated).toBe(true);
+    expect(result.coverage.reason).toContain("page 3");
+  });
+
+  it("does not call a clean walk truncated", async () => {
+    totals = () => 100;
+    const result = await fetchSirene({ codeCommune: ["94080"] });
+    expect(result.records).toHaveLength(100);
+    expect(result.coverage.truncated).toBe(false);
   });
 });
 

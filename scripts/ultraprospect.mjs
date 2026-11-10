@@ -13411,6 +13411,7 @@ async function drain(query, budget, label, opts, existing) {
   const pages = [];
   for (let p = 2; p <= lastPage; p++) pages.push(p);
   let stopped = false;
+  let pageError;
   await mapLimit(pages, PAGE_CONCURRENCY, async (page2) => {
     if (stopped) return;
     if (budget.left <= 0) {
@@ -13420,6 +13421,7 @@ async function drain(query, budget, label, opts, existing) {
     }
     const outcome = await fetchPage(query, page2);
     if (outcome.error) {
+      pageError ??= `page ${page2} of ${lastPage} failed (${outcome.error}); ${collected2.length} of about ${Math.min(first.total, HARD_CAP)} records were read`;
       stopped = true;
       return;
     }
@@ -13430,7 +13432,7 @@ async function drain(query, budget, label, opts, existing) {
       stopped = true;
     }
   });
-  return { records: collected2, total: first.total, limited };
+  return { records: collected2, total: first.total, limited, error: pageError };
 }
 function allocateBudget(totals, budget) {
   const allocations = Object.fromEntries(Object.keys(totals).map((section2) => [section2, 0]));
