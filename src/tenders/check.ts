@@ -7,7 +7,7 @@
 // deadline that differs from the notice's, a "go" on a closed call: each is the
 // kind of error a buyer finds, and finds fatal.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { citationRe, factualParagraphs, type CheckReport, type Finding } from "../check.js";
 import { readPageText } from "../run.js";
 import { FORECAST_LABEL } from "./awards.js";
@@ -62,7 +62,11 @@ export function runTenderCheck(input: {
 
   const ownerOf = new Map<string, string>();
   for (const t of tenders) for (const p of t.pages ?? []) ownerOf.set(p.id, t.id);
-  const byDir = new Map(tenders.map((t) => [bidDirFor(t).split("/")[1]!, t]));
+  // `basename`, not a split on "/": bidDirFor builds its path with `join`, which
+  // writes "bids\\<id>" on Windows. Split on a slash, that has no second part,
+  // so every notice was filed under `undefined` and every bid directory in the
+  // run was reported as an orphan.
+  const byDir = new Map(tenders.map((t) => [basename(bidDirFor(t)), t]));
 
   // Verdicts first: a go on a closed call is refused wherever it sits.
   for (const t of tenders) {

@@ -24179,7 +24179,7 @@ function qualifySummary(t) {
 
 // src/tenders/check.ts
 import { existsSync as existsSync19, readFileSync as readFileSync19, readdirSync as readdirSync10 } from "fs";
-import { join as join26 } from "path";
+import { basename as basename5, join as join26 } from "path";
 var PROFILE_CITE = /\[((?:R|C)\d+|profile\.[a-zA-Z0-9_.]+)\]/g;
 var MODEL_MARK2 = /\[M\]/;
 var FIRST_PERSON = /\b(we|our|us|nous|notre|nos|wir|unser[e]?|nosotros|nuestr[oa]s?|noi|nostr[oaie]|wij|onze|my|nasz[aey]?)\b/i;
@@ -24213,7 +24213,7 @@ function runTenderCheck(input) {
   let bids = 0;
   const ownerOf = /* @__PURE__ */ new Map();
   for (const t of tenders) for (const p of t.pages ?? []) ownerOf.set(p.id, t.id);
-  const byDir = new Map(tenders.map((t) => [bidDirFor(t).split("/")[1], t]));
+  const byDir = new Map(tenders.map((t) => [basename5(bidDirFor(t)), t]));
   for (const t of tenders) {
     if (t.verdict?.decision === "go" && deadlinePassed(t.deadline, input.now)) {
       err("deadline-passed", t.id, `judged "go" but the published deadline ${t.deadline} has passed.`);
