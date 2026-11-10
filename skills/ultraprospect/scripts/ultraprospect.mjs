@@ -19395,7 +19395,7 @@ function verdictKey(v, known) {
   const suffixed = [...known].filter((k) => k.endsWith(`:${raw}`));
   return suffixed.length === 1 ? suffixed[0] : void 0;
 }
-function applyVerdicts(places, verdicts) {
+function applyVerdicts(places, verdicts, todo = []) {
   const byOsm = /* @__PURE__ */ new Map();
   const byRecord = /* @__PURE__ */ new Map();
   for (const p of places) {
@@ -19403,12 +19403,21 @@ function applyVerdicts(places, verdicts) {
     if (p.registry) byRecord.set(recordKey(p.registry), p);
   }
   const known = new Set(byRecord.keys());
+  const candidateKey = (c) => `${c.connectorId}:${c.registryId}`;
+  const pairKey = (osmId, key) => `${osmId} ${key}`;
+  const scores = new Map(todo.map((c) => [pairKey(c.osmId, candidateKey(c)), c.score]));
+  const listed = /* @__PURE__ */ new Set([...known, ...todo.map(candidateKey)]);
+  const answered3 = /* @__PURE__ */ new Set();
+  const takenOsm = /* @__PURE__ */ new Set();
+  const takenRecords = /* @__PURE__ */ new Set();
   let mergedCount = 0;
   let skipped = 0;
   const unknown = [];
   for (const v of verdicts) {
     if (!v.merge) {
       skipped++;
+      const apart = verdictKey(v, listed);
+      if (apart) answered3.add(pairKey(v.osmId, apart));
       continue;
     }
     const key = verdictKey(v, known);
@@ -19422,13 +19431,20 @@ function applyVerdicts(places, verdicts) {
     osmPlace.registryEvidence = { ...recPlace.registryEvidence ?? { mode: "sweep" }, how: "agent-adjudicated" };
     osmPlace.matchedBy = "agent";
     osmPlace.sources = [.../* @__PURE__ */ new Set([...osmPlace.sources, "registry"])];
-    osmPlace.matchConfidence = 1;
+    const score = key ? scores.get(pairKey(v.osmId, key)) : void 0;
+    osmPlace.matchConfidence = typeof score === "number" ? Number(score.toFixed(3)) : void 0;
     osmPlace.address = { ...recPlace.address, ...osmPlace.address };
     recPlace.id = "";
     mergedCount++;
+    if (key) {
+      answered3.add(pairKey(v.osmId, key));
+      takenRecords.add(key);
+    }
+    takenOsm.add(v.osmId);
   }
   for (let i = places.length - 1; i >= 0; i--) if (places[i].id === "") places.splice(i, 1);
-  return { merged: mergedCount, skipped, unknown };
+  const remaining = todo.filter((c) => !answered3.has(pairKey(c.osmId, candidateKey(c))) && !takenOsm.has(c.osmId) && !takenRecords.has(candidateKey(c)));
+  return { merged: mergedCount, skipped, unknown, remaining };
 }
 
 // src/fixture.ts
@@ -27303,6 +27319,8 @@ USER FEEDBACK (feedback)
 
 ADJUDICATION (match)
   --apply <file>         A JSON array of {osmId, registryId, connectorId?, merge, why}. "-" reads stdin.
+                         Answered pairs leave MATCH.todo.json, which then lists only what is
+                         still undecided. A merge keeps its pair's score as match_confidence.
 
 BULK OPEN DATA (ingest)
   --country <cc>         Which country's export to ingest: gb (Companies House, 470 MB),
@@ -27724,16 +27742,20 @@ async function cmdMatch(values, bools) {
   }
   const places = readPlaces(runDir);
   const before = places.length;
-  const result = applyVerdicts(places, verdicts);
+  const todo = readJsonSafe(join33(runDir, "MATCH.todo.json"));
+  const listed = Array.isArray(todo?.pairs) ? todo.pairs : void 0;
+  const { remaining, ...result } = applyVerdicts(places, verdicts, listed ?? []);
   writePlaces(runDir, places);
+  if (listed) writeJson2(runDir, "MATCH.todo.json", buildMatchTodo(remaining));
   const manifest = requireManifest(runDir);
   manifest.counts.places = places.length;
   manifest.counts.merged += result.merged;
-  manifest.counts.undecided = Math.max(0, manifest.counts.undecided - result.merged - result.skipped);
+  manifest.counts.undecided = listed ? remaining.length : Math.max(0, manifest.counts.undecided - result.merged - result.skipped);
   manifest.notes.push(`match: folded ${verdicts.length} adjudication(s) \u2014 ${result.merged} merged, ${result.skipped} kept apart`);
   writeRunManifest(runDir, manifest);
-  if (bools.has("json")) out(jsonLine({ run: runDir, ...result, places: places.length }));
+  if (bools.has("json")) out(jsonLine({ run: runDir, ...result, places: places.length, undecided: manifest.counts.undecided }));
   say(`match: ${result.merged} merged, ${result.skipped} kept apart, ${before} -> ${places.length} places`);
+  if (listed) say(`match: ${remaining.length} of ${listed.length} pair(s) are still undecided in ${join33(runDir, "MATCH.todo.json")}`);
   if (result.unknown.length) {
     say(`match: ${result.unknown.length} verdict(s) named a pair this run does not have:`);
     for (const u of result.unknown.slice(0, 10)) say(`    ${u}`);

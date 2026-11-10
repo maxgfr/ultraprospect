@@ -410,13 +410,30 @@ export function verdictKey(v: MatchVerdict, known: ReadonlySet<string>): string 
   return suffixed.length === 1 ? suffixed[0] : undefined;
 }
 
+export interface VerdictOutcome {
+  merged: number;
+  skipped: number;
+  unknown: string[];
+  /**
+   * The pairs of the worklist nobody has answered yet: the ones handed in,
+   * minus those a verdict settled either way, minus those a merge made moot by
+   * taking their shopfront or their record.
+   */
+  remaining: MatchCandidate[];
+}
+
 /**
  * Fold the agent's verdicts into an existing place list.
  *
  * Only merges are acted on — a "keep apart" verdict is already the state of the
  * world, and recording it as a change would make the run non-idempotent.
+ *
+ * `todo` is the worklist the verdicts answer (`MATCH.todo.json`'s pairs). It is
+ * what an adjudicated merge takes its confidence from, and what comes back in
+ * `remaining` with the answered pairs removed. Without it a merge carries no
+ * confidence at all, which is the honest value for a score nobody has.
  */
-export function applyVerdicts(places: Place[], verdicts: readonly MatchVerdict[]): { merged: number; skipped: number; unknown: string[] } {
+export function applyVerdicts(places: Place[], verdicts: readonly MatchVerdict[], todo: readonly MatchCandidate[] = []): VerdictOutcome {
   const byOsm = new Map<string, Place>();
   const byRecord = new Map<string, Place>();
   for (const p of places) {
@@ -425,6 +442,16 @@ export function applyVerdicts(places: Place[], verdicts: readonly MatchVerdict[]
   }
   const known = new Set(byRecord.keys());
 
+  // The worklist, indexed the way a verdict names a pair. An OSM id holds no
+  // space, so one is a safe separator.
+  const candidateKey = (c: MatchCandidate) => `${c.connectorId}:${c.registryId}`;
+  const pairKey = (osmId: string, key: string) => `${osmId} ${key}`;
+  const scores = new Map(todo.map((c) => [pairKey(c.osmId, candidateKey(c)), c.score]));
+  const listed = new Set([...known, ...todo.map(candidateKey)]);
+  const answered = new Set<string>();
+  const takenOsm = new Set<string>();
+  const takenRecords = new Set<string>();
+
   let mergedCount = 0;
   let skipped = 0;
   const unknown: string[] = [];
@@ -432,6 +459,9 @@ export function applyVerdicts(places: Place[], verdicts: readonly MatchVerdict[]
   for (const v of verdicts) {
     if (!v.merge) {
       skipped++;
+      // Kept apart is an answer too: the pair leaves the worklist.
+      const apart = verdictKey(v, listed);
+      if (apart) answered.add(pairKey(v.osmId, apart));
       continue;
     }
     const key = verdictKey(v, known);
@@ -462,15 +492,32 @@ export function applyVerdicts(places: Place[], verdicts: readonly MatchVerdict[]
     osmPlace.registryEvidence = { ...(recPlace.registryEvidence ?? { mode: "sweep" as const }), how: "agent-adjudicated" };
     osmPlace.matchedBy = "agent";
     osmPlace.sources = [...new Set([...osmPlace.sources, "registry" as const])];
-    osmPlace.matchConfidence = 1;
+    // The pair's own score, as the worklist printed it. This was a flat 1: the
+    // pairs sent to adjudication are exactly the ones the scorer put between
+    // 0.40 and 0.72, so every one of them came back more certain than an exact
+    // name on the same doorstep. The agent's answer says the pair is one
+    // company; it does not change how much the evidence weighed, and that
+    // number is what somebody re-reads when a row looks wrong. A verdict whose
+    // pair has no recorded score carries none rather than an invented one.
+    const score = key ? scores.get(pairKey(v.osmId, key)) : undefined;
+    osmPlace.matchConfidence = typeof score === "number" ? Number(score.toFixed(3)) : undefined;
     osmPlace.address = { ...recPlace.address, ...osmPlace.address };
     recPlace.id = "";
     mergedCount++;
+    if (key) {
+      answered.add(pairKey(v.osmId, key));
+      takenRecords.add(key);
+    }
+    takenOsm.add(v.osmId);
   }
 
   // Dropping the absorbed entries in place keeps the caller's array identity,
   // which matters because it is the same array the run writes back out.
   for (let i = places.length - 1; i >= 0; i--) if (places[i]!.id === "") places.splice(i, 1);
 
-  return { merged: mergedCount, skipped, unknown };
+  // One record onto one shopfront: a merge also closes every other pair that
+  // named either side, since a verdict on it could only be refused now.
+  const remaining = todo.filter((c) => !answered.has(pairKey(c.osmId, candidateKey(c))) && !takenOsm.has(c.osmId) && !takenRecords.has(candidateKey(c)));
+
+  return { merged: mergedCount, skipped, unknown, remaining };
 }

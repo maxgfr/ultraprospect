@@ -271,7 +271,9 @@ ultraprospect awards --country fr --cpv 72 --since 2y         # who wins, who bu
    name that *actually scored* (`matchedName` — often an enseigne, not the legal
    name), the distance in metres and the component scores. Answer with a JSON
    array of `{osmId, registryId, connectorId, merge, why}` and fold it back with
-   `match --apply`.
+   `match --apply`. Answered pairs leave `MATCH.todo.json`, so the file always
+   lists what is still undecided, and a merge keeps its pair's score as
+   `matchConfidence` beside `matchedBy: "agent"` — never a flat 1.
    Judge on evidence: same trade name, same street number, a brand the register
    files under an enseigne. When you cannot tell, say `merge: false` — two rows
    are recoverable, one wrong merge is not.

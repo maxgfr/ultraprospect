@@ -143,10 +143,18 @@ ultraprospect match --run <dir> --apply verdicts.json
 [{ "osmId": "n123", "siret": "21940080100136", "merge": true, "why": "same school, same address, enseigne matches" }]
 ```
 
-Only merges change anything — a "keep apart" verdict is already the state of the
-world, and recording it as a change would make the run non-idempotent. A verdict
-naming a pair this run does not have is reported and exits 1: it almost always
-means the file came from a different run.
+Only merges change `places.json` — a "keep apart" verdict is already the state
+of the world, and recording it as a change would make the run non-idempotent. A
+verdict naming a pair this run does not have is reported and exits 1: it almost
+always means the file came from a different run.
+
+An adjudicated merge reads `matchedBy: "agent"` and keeps the score its pair was
+listed with as `matchConfidence` — 0.679 above, not 1: your answer settles
+whether it is one company, not how much the evidence weighed. Every answered
+pair, merged or kept apart, then leaves `MATCH.todo.json`, along with any other
+pair naming a shopfront or a record a merge has just used. What the file lists
+afterwards is what is still undecided, and `manifest.counts.undecided` is its
+length.
 
 **When you cannot tell, answer `false`.** Two rows are recoverable by anyone
 looking at the list. One wrong merge produces a single plausible company holding

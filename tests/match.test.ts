@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MAX_DISTANCE_M, MERGE_HIGH, MERGE_LOW, applyVerdicts, buildMatchTodo, matchLanes, scorePair } from "../src/match.js";
 import { frSirene } from "../src/registry/fr-sirene.js";
-import type { OsmPoi, Place } from "../src/types.js";
+import type { MatchCandidate, OsmPoi, Place } from "../src/types.js";
 import { rec } from "./factories.js";
 
 function poi(over: Partial<OsmPoi> = {}): OsmPoi {
@@ -338,5 +338,72 @@ describe("applyVerdicts", () => {
     expect(result.merged).toBe(0);
     expect(result.unknown).toHaveLength(1);
     expect(list).toHaveLength(2);
+  });
+
+  /** A worklist entry, as `MATCH.todo.json` holds it. */
+  const pair = (osmId: string, registryId: string, score: number): MatchCandidate => ({
+    osmId,
+    connectorId: "fr-sirene",
+    registryId,
+    score,
+    parts: { distance: 0.9, name: 0.4, enseigne: 0, address: 0 },
+    distanceM: 12,
+  });
+
+  it("gives an adjudicated merge the score its pair was listed with, never certainty", () => {
+    // The pairs sent to adjudication are the ones scored between 0.40 and 0.72.
+    // Stamped 1, each came back more certain than an exact name on the doorstep.
+    const list = places();
+    applyVerdicts(list, [{ osmId: "n1", registryId: "A", connectorId: "fr-sirene", merge: true }], [pair("n1", "A", 0.5512)]);
+    expect(list[0]!.matchConfidence).toBe(0.551);
+    expect(list[0]!.matchedBy).toBe("agent");
+  });
+
+  it("finds the pair's score whichever spelling of the register id the verdict copied", () => {
+    const list = places();
+    applyVerdicts(list, [{ osmId: "n1", registryId: "fr-sirene:A", merge: true }], [pair("n1", "A", 0.61)]);
+    expect(list[0]!.matchConfidence).toBe(0.61);
+  });
+
+  it("carries no confidence when the pair's score is not known, rather than inventing one", () => {
+    const list = places();
+    applyVerdicts(list, [{ osmId: "n1", registryId: "A", connectorId: "fr-sirene", merge: true }]);
+    expect(list[0]!.registry?.establishmentId).toBe("A");
+    expect(list[0]!.matchConfidence).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(list[0]))).not.toHaveProperty("matchConfidence");
+  });
+
+  it("hands back the worklist without the pairs that were answered", () => {
+    const list = places();
+    list.push({ ...places()[0]!, id: "osm:n2", name: "Naturalia Bio", osm: { ...poi(), id: "n2", osmId: 2 } });
+    list.push({ ...places()[0]!, id: "osm:n3", name: "Bio c' Bon", osm: { ...poi(), id: "n3", osmId: 3 } });
+    list.push({ ...places()[1]!, id: "fr-sirene:B", name: "AUTRE SOCIETE", registry: rec({ establishmentId: "B" }) });
+    list.push({ ...places()[1]!, id: "fr-sirene:C", name: "TROISIEME", registry: rec({ establishmentId: "C" }) });
+    const todo = [
+      pair("n1", "A", 0.7), // merged below
+      pair("n2", "A", 0.5), // the same record: a merge took it
+      pair("n1", "B", 0.45), // the same shopfront: it has its identity now
+      pair("n2", "B", 0.6), // answered "keep apart"
+      pair("n3", "C", 0.55), // nobody answered this one
+    ];
+    const result = applyVerdicts(
+      list,
+      [
+        { osmId: "n1", registryId: "A", connectorId: "fr-sirene", merge: true },
+        { osmId: "n2", registryId: "B", connectorId: "fr-sirene", merge: false },
+      ],
+      todo,
+    );
+    expect(result.merged).toBe(1);
+    expect(result.skipped).toBe(1);
+    expect(result.remaining).toEqual([pair("n3", "C", 0.55)]);
+  });
+
+  it("keeps a pair in the worklist when its verdict could not be applied", () => {
+    const list = places();
+    const todo = [pair("n1", "A", 0.5)];
+    const result = applyVerdicts(list, [{ osmId: "n999", registryId: "A", connectorId: "fr-sirene", merge: true }], todo);
+    expect(result.unknown).toHaveLength(1);
+    expect(result.remaining).toEqual(todo);
   });
 });

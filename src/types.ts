@@ -208,7 +208,11 @@ export interface Place {
   name: string;
   /** Which lanes contributed. Order is discovery order, not precedence. */
   sources: Lane[];
-  /** 0-1. The pair's actual score, never rounded up to certainty. */
+  /**
+   * 0-1. The pair's actual score, never rounded up to certainty. An adjudicated
+   * merge keeps the score its pair had in `MATCH.todo.json`, and carries none
+   * when that score is not known: `matchedBy: "agent"` says who decided.
+   */
   matchConfidence?: number;
   /** Which signal carried the merge: an identifier, the name, a brand, or the street address. */
   matchedBy?: string;

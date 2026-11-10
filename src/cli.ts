@@ -29,6 +29,7 @@ import {
   isInvokedDirectly,
   jsonLine,
   parseArgs,
+  readJsonSafe,
   positionalText,
   setNoWrite,
   writeArtifact,
@@ -38,7 +39,7 @@ import { runDoctor } from "./doctor.js";
 import { resolveWhere } from "./geocode.js";
 import { runScan, writeScan } from "./scan.js";
 import { loadFixture, recordFixture } from "./fixture.js";
-import { applyVerdicts, type MatchVerdict } from "./match.js";
+import { applyVerdicts, buildMatchTodo, type MatchVerdict } from "./match.js";
 import { needsConfirming, persistConfirm, runConfirm } from "./confirm.js";
 import { CONNECTORS, servesCountry } from "./registry/index.js";
 import {
@@ -68,7 +69,7 @@ import { cmdAwards, cmdBid, cmdTender, cmdTenders, tenderCheckCmd, tenderOrchest
 import { isTenderManifest } from "./tenders/run.js";
 import { readManifest } from "./engine.js";
 import { runStdioServer, startHttpServer } from "./engine.js";
-import type { FitVerdict, PageRole } from "./types.js";
+import type { FitVerdict, MatchTodo, PageRole } from "./types.js";
 import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, shortLabel, writeJson, writePlaces, writeRunManifest } from "./run.js";
 import { clampInt, parseBbox, parseDistanceM } from "./util.js";
 import { VERSION } from "./version.js";
@@ -323,6 +324,8 @@ USER FEEDBACK (feedback)
 
 ADJUDICATION (match)
   --apply <file>         A JSON array of {osmId, registryId, connectorId?, merge, why}. "-" reads stdin.
+                         Answered pairs leave MATCH.todo.json, which then lists only what is
+                         still undecided. A merge keeps its pair's score as match_confidence.
 
 BULK OPEN DATA (ingest)
   --country <cc>         Which country's export to ingest: gb (Companies House, 470 MB),
@@ -853,21 +856,30 @@ async function cmdMatch(values: Record<string, string>, bools: ReadonlySet<strin
 
   const places = readPlaces(runDir);
   const before = places.length;
-  const result = applyVerdicts(places, verdicts);
+  // The worklist the verdicts answer. It gives an adjudicated merge the score
+  // its pair was listed with, and it is rewritten below without the pairs that
+  // were answered: it used to be left as `scan` wrote it, so a second pass, or
+  // a fan-out re-emitted from it, was handed every settled pair again.
+  const todo = readJsonSafe(join(runDir, "MATCH.todo.json")) as MatchTodo | undefined;
+  const listed = Array.isArray(todo?.pairs) ? todo.pairs : undefined;
+  const { remaining, ...result } = applyVerdicts(places, verdicts, listed ?? []);
   writePlaces(runDir, places);
+  if (listed) writeJson(runDir, "MATCH.todo.json", buildMatchTodo(remaining));
 
   const manifest = requireManifest(runDir);
   manifest.counts.places = places.length;
   manifest.counts.merged += result.merged;
-  // Only the verdicts that named a pair this run has. Subtracting the whole
-  // file let one stray entry — or the same file applied twice — report pairs as
-  // settled that nobody had looked at.
-  manifest.counts.undecided = Math.max(0, manifest.counts.undecided - result.merged - result.skipped);
+  // What the worklist still holds, when there is one to count. Without it, only
+  // the verdicts that named a pair this run has: subtracting the whole file let
+  // one stray entry — or the same file applied twice — report pairs as settled
+  // that nobody had looked at.
+  manifest.counts.undecided = listed ? remaining.length : Math.max(0, manifest.counts.undecided - result.merged - result.skipped);
   manifest.notes.push(`match: folded ${verdicts.length} adjudication(s) — ${result.merged} merged, ${result.skipped} kept apart`);
   writeRunManifest(runDir, manifest);
 
-  if (bools.has("json")) out(jsonLine({ run: runDir, ...result, places: places.length }));
+  if (bools.has("json")) out(jsonLine({ run: runDir, ...result, places: places.length, undecided: manifest.counts.undecided }));
   say(`match: ${result.merged} merged, ${result.skipped} kept apart, ${before} -> ${places.length} places`);
+  if (listed) say(`match: ${remaining.length} of ${listed.length} pair(s) are still undecided in ${join(runDir, "MATCH.todo.json")}`);
   if (result.unknown.length) {
     // A verdict naming a pair that is not in this run is a mistake worth
     // surfacing loudly: it usually means the file came from a different run.
