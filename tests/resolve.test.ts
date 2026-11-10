@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { newPageStore } from "../src/pages.js";
-import { classifyHost, corroborate, groupHits, needsResolving, queriesFor, resolveTargets, runResolve, searchLocaleFor } from "../src/resolve.js";
+import {
+  candidateUrlsFor,
+  classifyHost,
+  corroborate,
+  groupHits,
+  needsResolving,
+  queriesFor,
+  resolveTargets,
+  runResolve,
+  searchLocaleFor,
+} from "../src/resolve.js";
 import type { Place } from "../src/types.js";
 import { rec } from "./factories.js";
 
@@ -418,5 +428,49 @@ describe("queriesFor, per country", () => {
 
   it("adds nothing for a country with no modelled legal-notice obligation", () => {
     expect(queriesFor(german(), "Tokyo", "jp").some((q) => q.includes("Impressum"))).toBe(false);
+  });
+});
+
+describe("candidateUrlsFor", () => {
+  const sagemcom = place({
+    id: "osm:n6482335530",
+    name: "SAGEMCOM Dr. Neuhaus GmbH",
+    osm: { id: "n6482335530", osmType: "node", osmId: 6482335530, name: "SAGEMCOM Dr. Neuhaus GmbH", lat: 53.6, lon: 9.99, tags: {} },
+    address: { libelleVoie: "Papenreye", codePostal: "22453", commune: "Hamburg" },
+  });
+  // The order a live search returned them in: the ranking site first, the company's own domain fourth.
+  const hits = [
+    { url: "https://example-ranking.de/unternehmen/sagemcom-dr-neuhaus-gmbh-hamburg/" },
+    { url: "https://www.bsi.bund.de/SharedDocs/Kontaktinformationen/Sagemcom_Dr_Neuhaus_GmbH.html" },
+    { url: "https://de.wikipedia.org/wiki/Dr._Neuhaus" },
+    { url: "https://www.sagemcom.com/de/energie-telekommunikation/sagemcom-dr-neuhaus/kontakt-service/anfahrt-hamburg" },
+  ];
+
+  it("tries the domain that carries the company's name before one that merely lists it", () => {
+    const urls = candidateUrlsFor(sagemcom, hits, "de", "Hamburg");
+    expect(urls[0]).toContain("sagemcom.com");
+    // The rest keep their rank, and the budget is unchanged.
+    expect(urls).toHaveLength(3);
+    expect(urls[1]).toContain("example-ranking.de");
+  });
+
+  it("does not let the town's own name promote a city portal", () => {
+    const logistik = place({
+      name: "Hamburg Hafenkontor",
+      osm: { id: "n1", osmType: "node", osmId: 1, name: "Hamburg Hafenkontor", lat: 53.5, lon: 10, tags: {} },
+      address: { commune: "Hamburg" },
+    });
+    const urls = candidateUrlsFor(
+      logistik,
+      [{ url: "https://www.hamburg.de/branchenbuch/eintrag/1/" }, { url: "https://hafenkontor.example/" }],
+      "de",
+      "Hamburg",
+    );
+    expect(urls[0]).toBe("https://hafenkontor.example/");
+  });
+
+  it("still tries a website the place already declares first", () => {
+    const declared = place({ ...sagemcom, website: { url: "https://declared.example/", confidence: "declared", evidence: ["osm"] } });
+    expect(candidateUrlsFor(declared, hits, "de", "Hamburg")[0]).toBe("https://declared.example/");
   });
 });

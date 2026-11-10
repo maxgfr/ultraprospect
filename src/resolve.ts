@@ -173,6 +173,12 @@ const DIRECTORY_HOSTS_BY_COUNTRY: Record<string, string[]> = {
     "jameda.de",
     "kununu.com",
     "stepstone.de",
+    // Each of these was filed as a company's own site on a live Hamburg run.
+    "die-deutsche-wirtschaft.de",
+    "implisense.com",
+    "branchen-info.net",
+    "marktplatz-mittelstand.de",
+    "firma-24.de",
   ],
   es: ["paginasamarillas.es", "einforma.com", "axesor.es", "empresite.eleconomista.es", "infoempresa.com", "cylex.es", "11870.com", "infojobs.net"],
   gb: ["yell.com", "companycheck.co.uk", "endole.co.uk", "checkatrade.com", "thomsonlocal.com", "cylex-uk.co.uk", "192.com", "reed.co.uk", "totaljobs.com"],
@@ -635,6 +641,29 @@ export function skipOutcomeFor(places: readonly Place[], opts: ResolveSelection 
   return partitionSkipped(targets, opts.skip);
 }
 
+/**
+ * A test for "this URL's host spells the company's name".
+ *
+ * The same rule `groupHits` attributes a hit by: a distinctive name token as a
+ * substring of the host, because that is how domains spell a company
+ * (matchtune.com for MATCH TUNE). The town's own words are not distinctive —
+ * hamburg.de carries the name of every "… Hamburg GmbH" there is.
+ */
+function nameOnHost(place: Place, town?: string): (url: string) => boolean {
+  const local = new Set([...tokenSet(normalizeName(town ?? "")), ...tokenSet(normalizeName(place.address.commune ?? ""))]);
+  const names = [place.osm?.name, ...namesOf(place)].filter((n): n is string => Boolean(n));
+  const tokens = [...new Set(names.flatMap((n) => [...tokenSet(normalizeName(n))]))].filter((t) => t.length >= 4 && !local.has(t));
+  return (url) => {
+    if (tokens.length === 0) return false;
+    try {
+      const host = foldAccents(new URL(url).hostname).toLowerCase();
+      return tokens.some((t) => host.includes(t));
+    } catch {
+      return false;
+    }
+  };
+}
+
 /** How many fetchable candidates one place is worth. Each costs a request. */
 const MAX_FETCHED_CANDIDATES = 3;
 
@@ -664,10 +693,22 @@ const MAX_SOCIAL_CANDIDATES = 5;
  * small and rank-ordered, and being crowded out by a known directory is the
  * cheap failure rather than the expensive one.
  */
-function candidateUrlsFor(place: Place, hits: readonly WebHit[], countryCode?: string): string[] {
+export function candidateUrlsFor(place: Place, hits: readonly WebHit[], countryCode?: string, town?: string): string[] {
   const urls: string[] = [];
   if (place.website?.url) urls.push(place.website.url);
-  for (const h of hits) urls.push(h.url);
+  // A DOMAIN THAT CARRIES THE COMPANY'S NAME IS TRIED BEFORE ONE THAT MERELY
+  // LISTS IT. Search rank alone put the directories first, and every one of
+  // them corroborates — it prints the name, usually the address too. Measured
+  // on a live Hamburg run: five of the seven companies found by search were
+  // filed under hamburg.de/branchenbuch, wlw.com, die-deutsche-wirtschaft.de or
+  // github.com as their own corroborated site, while bss-systemtechnik.com,
+  // light-control.de, sagemcom.com and uniberg.com sat further down the same
+  // pool. One of them then inherited the directory's own legal representative
+  // as its managing director. The order within each group is still the rank.
+  const carriesName = nameOnHost(place, town);
+  const ranked = hits.map((h) => h.url);
+  for (const url of ranked.filter(carriesName)) urls.push(url);
+  for (const url of ranked) urls.push(url);
 
   const socials: string[] = [];
   const rest: string[] = [];
@@ -833,7 +874,7 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
       hits = await keylessHits(queriesFor(place, opts.town, opts.countryCode, opts.queriesPerPlace), locale, engineNote);
     }
 
-    const candidates = candidateUrlsFor(place, hits, opts.countryCode);
+    const candidates = candidateUrlsFor(place, hits, opts.countryCode, opts.town);
     if (candidates.length === 0) {
       outcome.unchanged++;
       continue;

@@ -20124,7 +20124,13 @@ var DIRECTORY_HOSTS_BY_COUNTRY = {
     "werkenntdenbesten.de",
     "jameda.de",
     "kununu.com",
-    "stepstone.de"
+    "stepstone.de",
+    // Each of these was filed as a company's own site on a live Hamburg run.
+    "die-deutsche-wirtschaft.de",
+    "implisense.com",
+    "branchen-info.net",
+    "marktplatz-mittelstand.de",
+    "firma-24.de"
   ],
   es: ["paginasamarillas.es", "einforma.com", "axesor.es", "empresite.eleconomista.es", "infoempresa.com", "cylex.es", "11870.com", "infojobs.net"],
   gb: ["yell.com", "companycheck.co.uk", "endole.co.uk", "checkatrade.com", "thomsonlocal.com", "cylex-uk.co.uk", "192.com", "reed.co.uk", "totaljobs.com"],
@@ -20305,12 +20311,29 @@ function skipOutcomeFor(places, opts = {}) {
   if (!opts.skip?.length) return { kept: targets, skipped: /* @__PURE__ */ new Map(), counts: {} };
   return partitionSkipped(targets, opts.skip);
 }
+function nameOnHost(place, town) {
+  const local2 = /* @__PURE__ */ new Set([...tokenSet(normalizeName(town ?? "")), ...tokenSet(normalizeName(place.address.commune ?? ""))]);
+  const names = [place.osm?.name, ...namesOf2(place)].filter((n) => Boolean(n));
+  const tokens = [...new Set(names.flatMap((n) => [...tokenSet(normalizeName(n))]))].filter((t) => t.length >= 4 && !local2.has(t));
+  return (url) => {
+    if (tokens.length === 0) return false;
+    try {
+      const host = foldAccents(new URL(url).hostname).toLowerCase();
+      return tokens.some((t) => host.includes(t));
+    } catch {
+      return false;
+    }
+  };
+}
 var MAX_FETCHED_CANDIDATES = 3;
 var MAX_SOCIAL_CANDIDATES = 5;
-function candidateUrlsFor(place, hits, countryCode) {
+function candidateUrlsFor(place, hits, countryCode, town) {
   const urls = [];
   if (place.website?.url) urls.push(place.website.url);
-  for (const h of hits) urls.push(h.url);
+  const carriesName = nameOnHost(place, town);
+  const ranked2 = hits.map((h) => h.url);
+  for (const url of ranked2.filter(carriesName)) urls.push(url);
+  for (const url of ranked2) urls.push(url);
   const socials = [];
   const rest = [];
   for (const url of new Set(urls)) {
@@ -20402,7 +20425,7 @@ async function runResolve(runDir, places, store, opts = {}) {
     if (hits.length === 0 && opts.useEngineSearch) {
       hits = await keylessHits(queriesFor(place, opts.town, opts.countryCode, opts.queriesPerPlace), locale, engineNote);
     }
-    const candidates2 = candidateUrlsFor(place, hits, opts.countryCode);
+    const candidates2 = candidateUrlsFor(place, hits, opts.countryCode, opts.town);
     if (candidates2.length === 0) {
       outcome.unchanged++;
       continue;
