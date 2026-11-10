@@ -35,7 +35,7 @@ import { buildMatchTodo } from "./match.js";
 import { licencesFor, writeJson, writePlaces, writeRunManifest } from "./run.js";
 import { readPageText } from "./run.js";
 import type { LaneCoverage, MatchCandidate, MatchTodo, Place, RunManifest } from "./types.js";
-import { nameSimilarity, normalizeName, tokenSet } from "./util.js";
+import { foldAccents, nameSimilarity, normalizeName, shortLabel, tokenSet } from "./util.js";
 
 export interface ConfirmOptions {
   /** The run's country, from the geocoded target. Decides which connectors apply. */
@@ -61,7 +61,10 @@ export interface ConfirmOutcome {
   verified: number;
   /** Merged from a name lookup the scorer was confident about. */
   matched: number;
-  /** Name lookups that landed in the middle band; they join MATCH.todo.json. */
+  /**
+   * Name lookups left for adjudication; they join MATCH.todo.json. The middle
+   * band, and the confident names whose record is filed in another town.
+   */
   undecided: MatchCandidate[];
   /** Places that were asked about and came back with nothing. A finding, not a gap. */
   notFound: number;
@@ -143,6 +146,54 @@ function scoreLookup(place: Place, rec: RegistryRecord): { score: number; matche
   // rule the sweep matcher applies to a street address.
   const postcodeAgrees = Boolean(place.address.codePostal && rec.address.codePostal && place.address.codePostal === rec.address.codePostal);
   return { score: postcodeAgrees ? Math.min(1, best + 0.1) : best, matchedName };
+}
+
+/** A locality as a set of words: accent-folded, lowercased, punctuation dropped. */
+function localityWords(raw: string | undefined): Set<string> {
+  return tokenSet(
+    foldAccents(raw ?? "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim(),
+  );
+}
+
+/**
+ * Do the place and the register record sit in the same postcode or town?
+ *
+ * `undefined` when the two publish nothing comparable, which is neither answer.
+ *
+ * This is what `scoreLookup` cannot say. Its score is the NAME's, and a name
+ * contained in a longer one scores 0.88 wherever the longer one is filed: on a
+ * live Hamburg run "AM GmbH" was handed "AM Holding GmbH", and "Transcargo
+ * GmbH" (TCO Transcargo, in the port) "TRANSCARGO Internat. Speditions-GmbH".
+ * The agreeing postcode only ever ADDS to that score, so a record filed in
+ * another town lost nothing for it.
+ *
+ * Towns are compared as word sets, one contained in the other, because the two
+ * sides spell them differently: OSM says "Berlin", the German register "Berlin
+ * (Charlottenburg)", VIES "MILANO MI". The run's territory stands in when the
+ * place carries no city of its own — the place was found inside it.
+ */
+function sameLocality(place: Place, rec: RegistryRecord, town?: string): boolean | undefined {
+  const compact = (raw: string | undefined) => (raw ?? "").replace(/\s+/g, "").toUpperCase();
+  let comparable = false;
+
+  const myPostcode = compact(place.address.codePostal);
+  const theirPostcode = compact(rec.address.codePostal);
+  if (myPostcode && theirPostcode) {
+    if (myPostcode === theirPostcode) return true;
+    comparable = true;
+  }
+
+  const mine = localityWords(place.address.commune ?? (town ? shortLabel(town) : undefined));
+  const theirs = localityWords(rec.address.commune);
+  if (mine.size && theirs.size) {
+    const [small, large] = mine.size <= theirs.size ? [mine, theirs] : [theirs, mine];
+    if ([...small].every((word) => large.has(word))) return true;
+    comparable = true;
+  }
+  return comparable ? false : undefined;
 }
 
 /** A name-lookup near-miss, in the same shape the sweep matcher produces. */
@@ -396,7 +447,7 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
         }
         anyAnswer = true;
         usedConnectors.add(connector.id);
-        let best: { rec: RegistryRecord; score: number; matchedName?: string } | undefined;
+        let best: { rec: RegistryRecord; score: number; matchedName?: string; nearby?: boolean } | undefined;
         for (const rec of hits) {
           // A name search returns dissolved companies too, and a shopfront that
           // is trading today is not the struck-off company that once shared its
@@ -404,13 +455,25 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
           // name is only a resemblance.
           if (rec.status === "ceased") continue;
           const { score, matchedName } = scoreLookup(place, rec);
-          if (!best || score > best.score) best = { rec, score, matchedName };
+          const nearby = sameLocality(place, rec, opts.town);
+          // Between two hits the name cannot separate, the one filed here wins:
+          // a register returns every branch of a name, in its own order.
+          if (!best || score > best.score || (score === best.score && nearby === true && best.nearby !== true)) best = { rec, score, matchedName, nearby };
         }
         if (!best) continue;
         // The same three bands the sweep matcher uses, and for the same reason:
         // one wrong merge produces a plausible company holding somebody else's
         // registration, and that is invisible downstream forever.
-        if (best.score >= MERGE_HIGH) {
+        if (best.score >= MERGE_HIGH && best.nearby === false) {
+          // A confident NAME, filed somewhere else. Both sides published where
+          // they are and they disagree, so the resemblance is all there is —
+          // which is a question for adjudication, not an identity.
+          const filedAt = [best.rec.address.codePostal, best.rec.address.commune].filter(Boolean).join(" ");
+          note(
+            `confirm: ${place.name} resembles "${best.rec.legalName ?? best.rec.names[0]}" by name, but ${best.rec.connectorId} files it at ${filedAt} — not attached, left in MATCH.todo.json`,
+          );
+          outcome.undecided.push(toCandidate(place, best.rec, best.score, best.matchedName));
+        } else if (best.score >= MERGE_HIGH) {
           attached = { rec: best.rec, how: "name-lookup" };
         } else if (best.score >= MERGE_LOW) {
           outcome.undecided.push(toCandidate(place, best.rec, best.score, best.matchedName));

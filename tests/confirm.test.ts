@@ -248,6 +248,79 @@ describe("runConfirm — the name-lookup route", () => {
     const outcome = await runConfirm(mkdtempSync(join(tmpdir(), "up-")), [place()], { countryCode: "de" });
     expect(outcome.matched).toBe(1);
   });
+
+  // Both pairs are from a live Hamburg run. A name contained in a longer one
+  // scores 0.88 wherever the longer one is filed, and GLEIF's search is narrowed
+  // by country, not by town.
+  it.each([
+    ["AM GmbH", "AM Holding GmbH", { codePostal: "80331", commune: "München" }],
+    ["Transcargo GmbH", "TRANSCARGO Internat. Speditions-GmbH", { codePostal: "28195", commune: "Bremen" }],
+  ])("does not attach %s to %s, filed in another town", async (mine, theirs, filed) => {
+    selection.confirm = [
+      lookupReturning(rec({ connectorId: "fake", id: "LEI1", establishmentId: undefined, legalName: theirs, names: [theirs], address: filed })),
+    ];
+    const p = place({ name: mine, address: { commune: "Hamburg", codePostal: "20457" } });
+    const outcome = await runConfirm(mkdtempSync(join(tmpdir(), "up-")), [p], { countryCode: "de" });
+
+    expect(p.registry).toBeUndefined();
+    expect(outcome.matched).toBe(0);
+    // Not dropped either: the resemblance is real, and it is the agent's to judge.
+    expect(outcome.undecided).toHaveLength(1);
+    expect(outcome.undecided[0]).toMatchObject({ osmId: p.id, registryId: "LEI1", registryName: theirs });
+    expect(outcome.notes.join("\n")).toContain(`files it at ${filed.codePostal} ${filed.commune}`);
+  });
+
+  it("still attaches a namesake filed in the same town under another postcode", async () => {
+    // A registered office is often not the door OSM mapped. The town agreeing is
+    // enough; demanding the postcode would refuse most correct answers.
+    selection.confirm = [
+      lookupReturning(
+        rec({ connectorId: "fake", legalName: "Transcargo GmbH", names: ["Transcargo GmbH"], address: { codePostal: "20095", commune: "Hamburg" } }),
+      ),
+    ];
+    const p = place({ name: "Transcargo GmbH", address: { commune: "Hamburg", codePostal: "20457" } });
+    const outcome = await runConfirm(mkdtempSync(join(tmpdir(), "up-")), [p], { countryCode: "de" });
+    expect(outcome.matched).toBe(1);
+    expect(outcome.undecided).toHaveLength(0);
+  });
+
+  it("reads a town the two sides spell differently as one town", async () => {
+    // OSM says "Berlin"; the German register files "Berlin (Charlottenburg)".
+    selection.confirm = [
+      lookupReturning(
+        rec({ connectorId: "fake", legalName: "Bäckerei Siebert GmbH", names: ["Bäckerei Siebert GmbH"], address: { commune: "Berlin (Charlottenburg)" } }),
+      ),
+    ];
+    const outcome = await runConfirm(mkdtempSync(join(tmpdir(), "up-")), [place()], { countryCode: "de" });
+    expect(outcome.matched).toBe(1);
+  });
+
+  it("uses the run's territory when the place carries no city of its own", async () => {
+    // Most OSM places have no addr:city. They were found inside the territory,
+    // so that is where they are — and without it nothing could be compared and
+    // the namesake from another town would be attached exactly as before.
+    const elsewhere = rec({ connectorId: "fake", legalName: "AM Holding GmbH", names: ["AM Holding GmbH"], address: { commune: "München" } });
+    selection.confirm = [lookupReturning(elsewhere)];
+    const p = place({ name: "AM GmbH", address: {} });
+    const refused = await runConfirm(mkdtempSync(join(tmpdir(), "up-")), [p], { countryCode: "de", town: "Hamburg, Deutschland" });
+    expect(p.registry).toBeUndefined();
+    expect(refused.undecided).toHaveLength(1);
+
+    selection.confirm = [lookupReturning({ ...elsewhere, address: { commune: "Hamburg" } })];
+    const q = place({ name: "AM GmbH", address: {} });
+    const attached = await runConfirm(mkdtempSync(join(tmpdir(), "up-")), [q], { countryCode: "de", town: "Hamburg, Deutschland" });
+    expect(attached.matched).toBe(1);
+  });
+
+  it("prefers, between two hits the name cannot separate, the one filed in the place's town", async () => {
+    const munich = rec({ connectorId: "fake", id: "M", legalName: "Transcargo GmbH", names: ["Transcargo GmbH"], address: { commune: "München" } });
+    const hamburg = rec({ connectorId: "fake", id: "H", legalName: "Transcargo GmbH", names: ["Transcargo GmbH"], address: { commune: "Hamburg" } });
+    selection.confirm = [lookupReturning(munich, hamburg)];
+    const p = place({ name: "Transcargo GmbH", address: { commune: "Hamburg" } });
+    const outcome = await runConfirm(mkdtempSync(join(tmpdir(), "up-")), [p], { countryCode: "de" });
+    expect(outcome.matched).toBe(1);
+    expect(p.registry?.id).toBe("H");
+  });
 });
 
 describe("runConfirm — coverage honesty", () => {

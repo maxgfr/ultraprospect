@@ -19821,6 +19821,29 @@ function scoreLookup(place, rec) {
   const postcodeAgrees = Boolean(place.address.codePostal && rec.address.codePostal && place.address.codePostal === rec.address.codePostal);
   return { score: postcodeAgrees ? Math.min(1, best + 0.1) : best, matchedName };
 }
+function localityWords(raw) {
+  return tokenSet(
+    foldAccents(raw ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+  );
+}
+function sameLocality(place, rec, town) {
+  const compact = (raw) => (raw ?? "").replace(/\s+/g, "").toUpperCase();
+  let comparable = false;
+  const myPostcode = compact(place.address.codePostal);
+  const theirPostcode = compact(rec.address.codePostal);
+  if (myPostcode && theirPostcode) {
+    if (myPostcode === theirPostcode) return true;
+    comparable = true;
+  }
+  const mine = localityWords(place.address.commune ?? (town ? shortLabel(town) : void 0));
+  const theirs = localityWords(rec.address.commune);
+  if (mine.size && theirs.size) {
+    const [small, large] = mine.size <= theirs.size ? [mine, theirs] : [theirs, mine];
+    if ([...small].every((word) => large.has(word))) return true;
+    comparable = true;
+  }
+  return comparable ? false : void 0;
+}
 function toCandidate3(place, rec, score, matchedName) {
   return {
     osmId: place.id,
@@ -19998,10 +20021,17 @@ async function runConfirm(runDir, places, opts = {}) {
         for (const rec of hits) {
           if (rec.status === "ceased") continue;
           const { score, matchedName } = scoreLookup(place, rec);
-          if (!best || score > best.score) best = { rec, score, matchedName };
+          const nearby2 = sameLocality(place, rec, opts.town);
+          if (!best || score > best.score || score === best.score && nearby2 === true && best.nearby !== true) best = { rec, score, matchedName, nearby: nearby2 };
         }
         if (!best) continue;
-        if (best.score >= MERGE_HIGH) {
+        if (best.score >= MERGE_HIGH && best.nearby === false) {
+          const filedAt = [best.rec.address.codePostal, best.rec.address.commune].filter(Boolean).join(" ");
+          note(
+            `confirm: ${place.name} resembles "${best.rec.legalName ?? best.rec.names[0]}" by name, but ${best.rec.connectorId} files it at ${filedAt} \u2014 not attached, left in MATCH.todo.json`
+          );
+          outcome.undecided.push(toCandidate3(place, best.rec, best.score, best.matchedName));
+        } else if (best.score >= MERGE_HIGH) {
           attached = { rec: best.rec, how: "name-lookup" };
         } else if (best.score >= MERGE_LOW) {
           outcome.undecided.push(toCandidate3(place, best.rec, best.score, best.matchedName));
