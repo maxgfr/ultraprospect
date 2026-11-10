@@ -391,14 +391,26 @@ export async function runEnrich(runDir: string, places: Place[], store: PageStor
   // host on its own, so this parallelises ACROSS companies without ever putting
   // two simultaneous requests on one server.
   await mapLimit(targets, opts.concurrency ?? 4, async (place) => {
-    const result = await enrichOne(runDir, place, store, opts).catch(() => ({
+    // A throw from in here is a fault in READING the site, not a fact about the
+    // site. It is named as such: the old catch-all filed it as "unreachable"
+    // and wrote `siteReachable: false` onto a company whose pages had already
+    // been fetched and stored.
+    const result = await enrichOne(runDir, place, store, opts).catch((e: unknown) => ({
       pages: [] as PageRecord[],
       jobs: 0,
       reachable: false,
-      why: "unreachable" as const,
+      why: "failed" as const,
+      error: e instanceof Error ? e.message : String(e),
     }));
     done++;
     opts.onProgress?.(done, targets.length, place.name);
+    if (!result.reachable && result.why === "failed") {
+      outcome.unreachable++;
+      note(
+        `enrich: ${place.name} — reading ${place.website?.url} failed (${"error" in result ? result.error : "unknown error"}). This says nothing about whether the site is up.`,
+      );
+      return;
+    }
     if (!result.reachable) {
       outcome.unreachable++;
       if (result.why === "no-readable-text") {

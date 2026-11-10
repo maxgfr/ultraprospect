@@ -291,6 +291,21 @@ export function streetLine(a: PostalAddress): string {
 }
 
 /**
+ * Percent-decode a value read off somebody else's page, or hand it back as it was.
+ *
+ * `decodeURIComponent` THROWS on a malformed escape, and a page is under no
+ * obligation to be well formed: one `mailto:contact%zz@…` used to abort the
+ * whole site's enrichment and file a live website as unreachable.
+ */
+export function decodeLoose(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
  * Whether a spreadsheet would EXECUTE this cell instead of displaying it.
  *
  * Excel, LibreOffice and Sheets treat a cell that opens with `=`, `@`, `+` or

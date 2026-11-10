@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { cachedFetchAndExtract, fetchAndExtract, isNoWrite, writeArtifact } from "./engine.js";
 import { politeUa } from "./net.js";
 import type { PageRecord, PageRole } from "./types.js";
+import { decodeLoose } from "./util.js";
 
 /** Where a place's pages live inside the run, relative to its root. */
 export function pageDirFor(placeId: string): string {
@@ -189,7 +190,7 @@ function markupEvidence(html: string | undefined): string {
     if (!lines.includes(entry)) lines.push(entry);
   };
 
-  for (const m of html.matchAll(/mailto:([^"'?>\s]+@[^"'?>\s]+)/gi)) add("mailto", decodeURIComponent(m[1]!));
+  for (const m of html.matchAll(/mailto:([^"'?>\s]+@[^"'?>\s]+)/gi)) add("mailto", decodeLoose(m[1]!));
   for (const m of html.matchAll(/tel:([+0-9().\s-]{6,})/gi)) add("tel", m[1]!.trim());
   for (const m of html.matchAll(/https?:\/\/(?:[a-z]{2,3}\.)?(?:www\.)?(?:facebook|instagram|linkedin|twitter|x|youtube|tiktok)\.com\/[^\s"'<>)]+/gi)) {
     add("social", m[0].replace(/[)"'<>]+$/, ""));

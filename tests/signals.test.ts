@@ -39,6 +39,25 @@ describe("pickByRole", () => {
   });
 });
 
+describe("extractEmails on a page that is not well formed", () => {
+  it("keeps going past a mailto with a malformed escape", () => {
+    // decodeURIComponent throws on `%zz`; that used to abort the whole site.
+    const found = extractEmails("", '<a href="mailto:a%zz@x.fr">x</a><a href="mailto:contact%40ok@x.fr">y</a><a href="mailto:hello@x.fr">z</a>', "P1");
+    expect(found.map((e) => e.value)).toContain("hello@x.fr");
+  });
+
+  it("reads a 200 KB token with no @ in linear time", () => {
+    const started = performance.now();
+    expect(extractEmails("a".repeat(200_000), "", "P1")).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it("still finds an address at the start of a token, after punctuation and inside a sentence", () => {
+    const found = extractEmails("Schreiben Sie uns: info@beispiel.de oder (vertrieb@beispiel.de).", "", "P1");
+    expect(found.map((e) => e.value)).toEqual(["info@beispiel.de", "vertrieb@beispiel.de"]);
+  });
+});
+
 describe("extractEmails", () => {
   it("reads a mailto link, which survives text obfuscation", () => {
     const found = extractEmails("", '<a href="mailto:contact@x.fr">nous écrire</a>', "P1");

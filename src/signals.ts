@@ -12,6 +12,7 @@
 // homepage.
 import { extractJsonLd, htmlToText } from "./engine.js";
 import type { JobPosting, PageRecord, PageRole, Signals, SourcedValue } from "./types.js";
+import { decodeLoose } from "./util.js";
 
 /**
  * Path fragments that identify a page's job.
@@ -116,10 +117,15 @@ export function extractEmails(text: string, html: string, pageId: string): Sourc
   // `mailto:` first: it survives the obfuscation that hides an address from the
   // rendered text, and it is unambiguous.
   for (const m of html.matchAll(/mailto:([^"'?>\s]+@[^"'?>\s]+)/gi)) {
-    const value = decodeURIComponent(m[1]!).toLowerCase();
+    const value = decodeLoose(m[1]!).toLowerCase();
     if (isPlausibleEmail(value)) out.set(value, { value, from: pageId, lane: "web", note: "mailto link" });
   }
-  for (const m of text.matchAll(/[\w.+-]+@[\w-]+\.[\w.-]{2,}/g)) {
+  // Anchored on the START of a token and bounded at the 64 characters a local
+  // part may have. Unanchored, every position inside a long run of word
+  // characters is a fresh attempt that reads to the end of the run before
+  // failing: quadratic, and a single 200 KB token on a hostile page stalled the
+  // whole enrichment for minutes.
+  for (const m of text.matchAll(/(?<![\w.+-])[\w.+-]{1,64}@[\w-]+\.[\w.-]{2,}/g)) {
     const value = m[0].toLowerCase().replace(/[.,;:]$/, "");
     if (isPlausibleEmail(value) && !out.has(value)) out.set(value, { value, from: pageId, lane: "web", note: "in the page text" });
   }

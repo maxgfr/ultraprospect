@@ -13124,6 +13124,13 @@ function streetLine(a) {
   const prefixed = type ? new RegExp(`^${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name) : false;
   return [a.numero, prefixed ? void 0 : type, name].filter(Boolean).join(" ");
 }
+function decodeLoose(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
 function isSpreadsheetFormula(s) {
   const first = s[0];
   if (first === "=" || first === "@" || first === "	" || first === "\r") return true;
@@ -18274,10 +18281,10 @@ function fingerprints(html, table) {
 function extractEmails(text3, html, pageId) {
   const out2 = /* @__PURE__ */ new Map();
   for (const m of html.matchAll(/mailto:([^"'?>\s]+@[^"'?>\s]+)/gi)) {
-    const value = decodeURIComponent(m[1]).toLowerCase();
+    const value = decodeLoose(m[1]).toLowerCase();
     if (isPlausibleEmail(value)) out2.set(value, { value, from: pageId, lane: "web", note: "mailto link" });
   }
-  for (const m of text3.matchAll(/[\w.+-]+@[\w-]+\.[\w.-]{2,}/g)) {
+  for (const m of text3.matchAll(/(?<![\w.+-])[\w.+-]{1,64}@[\w-]+\.[\w.-]{2,}/g)) {
     const value = m[0].toLowerCase().replace(/[.,;:]$/, "");
     if (isPlausibleEmail(value) && !out2.has(value)) out2.set(value, { value, from: pageId, lane: "web", note: "in the page text" });
   }
@@ -19987,7 +19994,7 @@ function markupEvidence(html) {
     const entry = `- ${label}: ${value}`;
     if (!lines.includes(entry)) lines.push(entry);
   };
-  for (const m of html.matchAll(/mailto:([^"'?>\s]+@[^"'?>\s]+)/gi)) add2("mailto", decodeURIComponent(m[1]));
+  for (const m of html.matchAll(/mailto:([^"'?>\s]+@[^"'?>\s]+)/gi)) add2("mailto", decodeLoose(m[1]));
   for (const m of html.matchAll(/tel:([+0-9().\s-]{6,})/gi)) add2("tel", m[1].trim());
   for (const m of html.matchAll(/https?:\/\/(?:[a-z]{2,3}\.)?(?:www\.)?(?:facebook|instagram|linkedin|twitter|x|youtube|tiktok)\.com\/[^\s"'<>)]+/gi)) {
     add2("social", m[0].replace(/[)"'<>]+$/, ""));
@@ -21170,14 +21177,22 @@ async function runEnrich(runDir, places, store, opts) {
   note(`enrich: tier ${opts.tier} over ${targets.length} site(s)`);
   let done = 0;
   await mapLimit(targets, opts.concurrency ?? 4, async (place) => {
-    const result = await enrichOne(runDir, place, store, opts).catch(() => ({
+    const result = await enrichOne(runDir, place, store, opts).catch((e) => ({
       pages: [],
       jobs: 0,
       reachable: false,
-      why: "unreachable"
+      why: "failed",
+      error: e instanceof Error ? e.message : String(e)
     }));
     done++;
     opts.onProgress?.(done, targets.length, place.name);
+    if (!result.reachable && result.why === "failed") {
+      outcome.unreachable++;
+      note(
+        `enrich: ${place.name} \u2014 reading ${place.website?.url} failed (${"error" in result ? result.error : "unknown error"}). This says nothing about whether the site is up.`
+      );
+      return;
+    }
     if (!result.reachable) {
       outcome.unreachable++;
       if (result.why === "no-readable-text") {
