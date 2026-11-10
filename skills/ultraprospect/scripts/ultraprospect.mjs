@@ -15912,9 +15912,16 @@ function identityOf(place) {
   if (place.osm) return `osm:${place.osm.id}`;
   return place.id;
 }
+function identityKeys(place) {
+  const keys = [];
+  if (place.registry) keys.push(`${place.registry.connectorId}:${place.registry.establishmentId ?? place.registry.id}`);
+  if (place.osm) keys.push(`osm:${place.osm.id}`);
+  return keys.length ? keys : [place.id];
+}
 function diffRuns(before, after) {
-  const prev = new Map(before.map((p) => [identityOf(p), p]));
-  const next = new Map(after.map((p) => [identityOf(p), p]));
+  const prevByKey = /* @__PURE__ */ new Map();
+  for (const p of before) for (const key of identityKeys(p)) if (!prevByKey.has(key)) prevByKey.set(key, p);
+  const matched = /* @__PURE__ */ new Set();
   const delta = {
     appeared: [],
     disappeared: [],
@@ -15926,12 +15933,13 @@ function diffRuns(before, after) {
     siteChanged: [],
     wentDark: []
   };
-  for (const [key, place] of next) {
-    const old = prev.get(key);
+  for (const place of after) {
+    const old = identityKeys(place).map((key) => prevByKey.get(key)).find((candidate) => candidate !== void 0 && !matched.has(candidate));
     if (!old) {
       delta.appeared.push(place);
       continue;
     }
+    matched.add(old);
     if (old.registry?.status === "active" && place.registry?.status === "ceased") delta.closed.push(place);
     const wasHiring = old.signals?.isHiring === true;
     const isHiring = place.signals?.isHiring === true;
@@ -15948,7 +15956,7 @@ function diffRuns(before, after) {
     else if (oldSite && newSite && oldSite !== newSite) delta.siteChanged.push({ place, before: oldSite, after: newSite });
     if (old.signals?.siteReachable === true && place.signals?.siteReachable === false) delta.wentDark.push(place);
   }
-  for (const [key, place] of prev) if (!next.has(key)) delta.disappeared.push(place);
+  for (const place of before) if (!matched.has(place)) delta.disappeared.push(place);
   return delta;
 }
 function section(title, lines) {

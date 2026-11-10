@@ -871,6 +871,26 @@ describe("watch", () => {
     expect(d.disappeared).toHaveLength(0);
   });
 
+  it("does not report a place that gained a register record through confirm as a closure plus an opening", () => {
+    // The common case outside France: OSM-only on the first run, confirmed on the second.
+    const osm = { id: "n1", osmType: "node" as const, osmId: 1, lat: 0, lon: 0, tags: {} };
+    const before = place({ id: "osm:n1", osm });
+    const after = place({ id: "osm:n1", osm, sources: ["osm", "registry"], registry: { ...reg("HRB 88429"), connectorId: "gleif" } });
+    const d = diffRuns([before], [after]);
+    expect(d.appeared).toHaveLength(0);
+    expect(d.disappeared).toHaveLength(0);
+  });
+
+  it("still reports a genuinely new place and a genuinely vanished one", () => {
+    const osm = (n: number) => ({ id: `n${n}`, osmType: "node" as const, osmId: n, lat: 0, lon: 0, tags: {} });
+    const stays = place({ id: "osm:n1", osm: osm(1) });
+    const goes = place({ id: "osm:n2", name: "Gone", osm: osm(2) });
+    const comes = place({ id: "osm:n3", name: "New", osm: osm(3) });
+    const d = diffRuns([stays, goes], [stays, comes]);
+    expect(d.appeared.map((p) => p.name)).toEqual(["New"]);
+    expect(d.disappeared.map((p) => p.name)).toEqual(["Gone"]);
+  });
+
   it("reports a company that started hiring", () => {
     const before = place({ signals: { ...base, isHiring: false } });
     const after = place({ signals: { ...base, isHiring: true, openRoles: 3 }, jobs: [{ title: "Dev", via: "lever" }] });

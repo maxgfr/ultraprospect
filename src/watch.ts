@@ -40,9 +40,27 @@ export function identityOf(place: Place): string {
   return place.id;
 }
 
+/**
+ * Every key one place can be recognised by across two runs.
+ *
+ * `identityOf` picks ONE of them, register first — which is right for a
+ * register-only row that later gains a shopfront, and wrong the other way
+ * round: an OSM-only place that `confirm` attaches a register record to moves
+ * from `osm:n1` to `gleif:…`, and was reported as one company disappearing and
+ * another appearing. Outside France that is every confirmed company in the
+ * run, so two runs are joined on ANY key they share.
+ */
+function identityKeys(place: Place): string[] {
+  const keys: string[] = [];
+  if (place.registry) keys.push(`${place.registry.connectorId}:${place.registry.establishmentId ?? place.registry.id}`);
+  if (place.osm) keys.push(`osm:${place.osm.id}`);
+  return keys.length ? keys : [place.id];
+}
+
 export function diffRuns(before: readonly Place[], after: readonly Place[]): Delta {
-  const prev = new Map(before.map((p) => [identityOf(p), p]));
-  const next = new Map(after.map((p) => [identityOf(p), p]));
+  const prevByKey = new Map<string, Place>();
+  for (const p of before) for (const key of identityKeys(p)) if (!prevByKey.has(key)) prevByKey.set(key, p);
+  const matched = new Set<Place>();
 
   const delta: Delta = {
     appeared: [],
@@ -56,12 +74,15 @@ export function diffRuns(before: readonly Place[], after: readonly Place[]): Del
     wentDark: [],
   };
 
-  for (const [key, place] of next) {
-    const old = prev.get(key);
+  for (const place of after) {
+    const old = identityKeys(place)
+      .map((key) => prevByKey.get(key))
+      .find((candidate): candidate is Place => candidate !== undefined && !matched.has(candidate));
     if (!old) {
       delta.appeared.push(place);
       continue;
     }
+    matched.add(old);
 
     if (old.registry?.status === "active" && place.registry?.status === "ceased") delta.closed.push(place);
 
@@ -87,7 +108,7 @@ export function diffRuns(before: readonly Place[], after: readonly Place[]): Del
     if (old.signals?.siteReachable === true && place.signals?.siteReachable === false) delta.wentDark.push(place);
   }
 
-  for (const [key, place] of prev) if (!next.has(key)) delta.disappeared.push(place);
+  for (const place of before) if (!matched.has(place)) delta.disappeared.push(place);
 
   return delta;
 }
