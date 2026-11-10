@@ -15887,15 +15887,17 @@ var LICENCES = [
   "Places and tags: \xA9 OpenStreetMap contributors, ODbL (https://www.openstreetmap.org/copyright)",
   "Geocoding: Nominatim (ODbL) and Base Adresse Nationale (Licence Ouverte 2.0)"
 ];
-function licencesFor(lanes) {
+function licencesFor(lanes, held = []) {
   const out2 = [...LICENCES];
+  const owe = (id) => {
+    const licence = connectorById(id.trim())?.licence;
+    if (licence && !out2.includes(licence)) out2.push(licence);
+  };
   for (const lane of lanes) {
     if (lane.lane !== "registry" || !lane.connectorId || lane.returned <= 0) continue;
-    for (const id of lane.connectorId.split(",")) {
-      const licence = connectorById(id.trim())?.licence;
-      if (licence && !out2.includes(licence)) out2.push(licence);
-    }
+    for (const id of lane.connectorId.split(",")) owe(id);
   }
+  for (const id of new Set(held.map((record2) => record2.connectorId))) owe(id);
   return out2;
 }
 function emptyManifest(label) {
@@ -19940,6 +19942,7 @@ async function runConfirm(runDir, places, opts = {}) {
         usedConnectors.add(connector.id);
         let best;
         for (const rec of hits) {
+          if (rec.status === "ceased") continue;
           const { score, matchedName } = scoreLookup(place, rec);
           if (!best || score > best.score) best = { rec, score, matchedName };
         }
@@ -19995,17 +19998,18 @@ function sharesToken(place, rec) {
 }
 function persistConfirm(runDir, places, manifest, outcome) {
   writePlaces(runDir, places);
-  writeJson2(runDir, "registry.json", mergeRegistryRecords(runDir, outcome.records));
+  const held = mergeRegistryRecords(runDir, outcome.records);
+  writeJson2(runDir, "registry.json", held);
   if (outcome.undecided.length) {
     const existing = readJsonSafe(join15(runDir, "MATCH.todo.json"))?.pairs ?? [];
     writeJson2(runDir, "MATCH.todo.json", buildMatchTodo([...existing, ...outcome.undecided]));
   }
   manifest.lanes = [...manifest.lanes.filter((l) => l.lane !== "registry" || l.mode === "sweep"), outcome.coverage];
   manifest.counts.registry += outcome.records.length;
-  manifest.counts.confirmed = outcome.verified + outcome.matched;
+  manifest.counts.confirmed += outcome.verified + outcome.matched;
   manifest.counts.undecided += outcome.undecided.length;
   for (const rec of outcome.records) manifest.counts.byConnector[rec.connectorId] = (manifest.counts.byConnector[rec.connectorId] ?? 0) + 1;
-  manifest.licences = licencesFor(manifest.lanes);
+  manifest.licences = licencesFor(manifest.lanes, held);
   manifest.notes.push(...outcome.notes);
   writeRunManifest(runDir, manifest);
 }

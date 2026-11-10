@@ -374,6 +374,11 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
         usedConnectors.add(connector.id);
         let best: { rec: RegistryRecord; score: number; matchedName?: string } | undefined;
         for (const rec of hits) {
+          // A name search returns dissolved companies too, and a shopfront that
+          // is trading today is not the struck-off company that once shared its
+          // name. Route 1 can attach one — a published number is a fact — but a
+          // name is only a resemblance.
+          if (rec.status === "ceased") continue;
           const { score, matchedName } = scoreLookup(place, rec);
           if (!best || score > best.score) best = { rec, score, matchedName };
         }
@@ -458,7 +463,8 @@ function sharesToken(place: Place, rec: RegistryRecord): boolean {
  */
 export function persistConfirm(runDir: string, places: Place[], manifest: RunManifest, outcome: ConfirmOutcome): void {
   writePlaces(runDir, places);
-  writeJson(runDir, "registry.json", mergeRegistryRecords(runDir, outcome.records));
+  const held = mergeRegistryRecords(runDir, outcome.records);
+  writeJson(runDir, "registry.json", held);
   if (outcome.undecided.length) {
     const existing = (readJsonSafe(join(runDir, "MATCH.todo.json")) as MatchTodo | undefined)?.pairs ?? [];
     writeJson(runDir, "MATCH.todo.json", buildMatchTodo([...existing, ...outcome.undecided]));
@@ -467,10 +473,16 @@ export function persistConfirm(runDir: string, places: Place[], manifest: RunMan
   // Keep a sweep lane (France ran one before this) and replace the non-sweep one.
   manifest.lanes = [...manifest.lanes.filter((l) => l.lane !== "registry" || l.mode === "sweep"), outcome.coverage];
   manifest.counts.registry += outcome.records.length;
-  manifest.counts.confirmed = outcome.verified + outcome.matched;
+  // Added, like every other count here: a second `confirm --limit` pass used to
+  // overwrite this with its own total while `registry` above accumulated.
+  manifest.counts.confirmed += outcome.verified + outcome.matched;
   manifest.counts.undecided += outcome.undecided.length;
   for (const rec of outcome.records) manifest.counts.byConnector[rec.connectorId] = (manifest.counts.byConnector[rec.connectorId] ?? 0) + 1;
-  manifest.licences = licencesFor(manifest.lanes);
+  // From the records the run HOLDS, not only from this pass's lane. The lane is
+  // replaced each time, so a later pass that attached nothing dropped the
+  // attribution owed for records an earlier pass had written — including the
+  // CC-BY notice the German export requires.
+  manifest.licences = licencesFor(manifest.lanes, held);
   manifest.notes.push(...outcome.notes);
   writeRunManifest(runDir, manifest);
 }

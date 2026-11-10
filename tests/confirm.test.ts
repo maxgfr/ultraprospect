@@ -345,3 +345,25 @@ describe("runConfirm — which authority is asked, and how often", () => {
     expect(p.legalIds?.[0]?.authority).toBe("eu-vies");
   });
 });
+
+describe("runConfirm — the name route", () => {
+  it("does not attach a dissolved company because it shares the name", async () => {
+    // No pages, so only a name lookup is possible — and the register's name
+    // search returns struck-off companies alongside live ones.
+    const dissolved = {
+      ...rec({ connectorId: "fake", id: "1", legalName: "Bäckerei Siebert GmbH", names: ["Bäckerei Siebert GmbH"], countryCode: "de" }),
+      status: "ceased" as const,
+    };
+    selection.confirm = [fake({ lookup: async () => [dissolved] })];
+    const p = place();
+    const dir = mkdtempSync(join(tmpdir(), "ultraprospect-confirm-"));
+    const outcome = await runConfirm(dir, [p], { countryCode: "de" });
+    expect(p.registry).toBeUndefined();
+    expect(outcome.matched).toBe(0);
+
+    selection.confirm = [fake({ lookup: async () => [{ ...dissolved, status: "active" as const }] })];
+    const q = place();
+    await runConfirm(dir, [q], { countryCode: "de" });
+    expect(q.registry?.legalName).toBe("Bäckerei Siebert GmbH");
+  });
+});

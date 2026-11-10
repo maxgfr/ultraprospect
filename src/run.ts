@@ -146,15 +146,18 @@ export const LICENCES = [
  * A single-connector lane resolved fine, which is why this survived: the broken
  * case and the working case look identical in the manifest apart from a comma.
  */
-export function licencesFor(lanes: readonly LaneCoverage[]): string[] {
+export function licencesFor(lanes: readonly LaneCoverage[], held: readonly { connectorId: string }[] = []): string[] {
   const out = [...LICENCES];
+  const owe = (id: string) => {
+    const licence = connectorById(id.trim())?.licence;
+    if (licence && !out.includes(licence)) out.push(licence);
+  };
   for (const lane of lanes) {
     if (lane.lane !== "registry" || !lane.connectorId || lane.returned <= 0) continue;
-    for (const id of lane.connectorId.split(",")) {
-      const licence = connectorById(id.trim())?.licence;
-      if (licence && !out.includes(licence)) out.push(licence);
-    }
+    for (const id of lane.connectorId.split(",")) owe(id);
   }
+  // …and for every record the run still holds, whichever pass wrote it.
+  for (const id of new Set(held.map((record) => record.connectorId))) owe(id);
   return out;
 }
 

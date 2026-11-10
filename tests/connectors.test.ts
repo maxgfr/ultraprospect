@@ -457,6 +457,16 @@ describe("the connector table", () => {
     expect(empty.some((l) => l.includes("VIES"))).toBe(false);
   });
 
+  it("still owes the attribution for records an earlier pass wrote, when a later pass attached nothing", () => {
+    // `confirm --limit` twice: the lane is replaced by the second pass, which
+    // returned 0, while registry.json still holds the first pass's records.
+    const lanes = [{ lane: "registry" as const, mode: "confirm" as const, connectorId: "eu-vies,gleif", requested: 5, returned: 0, truncated: false }];
+    const held = [{ connectorId: "de-offeneregister" }, { connectorId: "gleif" }];
+    const licences = licencesFor(lanes, held);
+    expect(licences.some((l) => /CC.BY/i.test(l))).toBe(true);
+    expect(licencesFor(lanes).some((l) => /CC.BY/i.test(l))).toBe(false);
+  });
+
   it("declares a bulk snapshot only where the register publishes one", () => {
     // The two registers with no queryable API and a file instead. `ingest` reads
     // this rather than a list of its own, so a new bulk source is a connector edit.
