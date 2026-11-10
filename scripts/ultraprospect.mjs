@@ -15152,7 +15152,11 @@ var gbCompaniesHouse = {
       const hits = await snapshotByLocality(
         CONNECTOR_ID7,
         query.locality,
-        (r) => r.status !== "ceased" && r.names.some((n) => nameSimilarity(n, name) >= 0.6 || normalizeName(n).includes(needle)),
+        // The substring test needs something to look for. A name made only of
+        // legal forms and stop words ("Ltd", "The Company Limited") normalises
+        // to "", every string contains "", and the first five companies in town
+        // came back as candidates for it.
+        (r) => r.status !== "ceased" && r.names.some((n) => nameSimilarity(n, name) >= 0.6 || needle.length >= 3 && normalizeName(n).includes(needle)),
         limit
       );
       if (hits.length) return hits;

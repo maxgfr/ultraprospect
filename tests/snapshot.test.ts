@@ -207,6 +207,12 @@ describe("ingest — Companies House", () => {
     expect(withCeased.records.find((r) => r.id === "09999999")!.status).toBe("ceased");
   });
 
+  it("does not answer a name made only of legal forms with the first companies in town", async () => {
+    // "Ltd" normalises to nothing, and every name contains nothing.
+    expect(await gbCompaniesHouse.lookup!({ names: ["Ltd"], countryCode: "gb", locality: "Hebden Bridge" }, {})).toEqual([]);
+    expect(await gbCompaniesHouse.lookup!({ names: ["The Company Limited"], countryCode: "gb", locality: "Hebden Bridge" }, {})).toEqual([]);
+  });
+
   it("declares itself truncated when it hits --max-results", async () => {
     const target = {
       query: "Hebden Bridge",
