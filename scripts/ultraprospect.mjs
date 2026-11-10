@@ -13508,17 +13508,26 @@ async function fetchSirene(query, opts = {}) {
     if (probe.total >= HARD_CAP && depth < maxDepth) {
       const sectionName = part.sections?.[0];
       if (sectionName) {
-        const divisions = divisionsOfSection(sectionName);
-        opts.onNote?.(`sirene: ${label} still at the cap \u2014 splitting into ${divisions.length} NAF divisions`);
-        notes.push(`sirene: ${label} is at or above the ${HARD_CAP} cap; split into ${divisions.length} NAF divisions`);
-        for (const codes of divisions) {
-          if (partBudget.left <= 0) {
-            if (section2) sectionSpreadLimited = true;
-            break;
-          }
-          await walk({ ...part, activitePrincipale: codes }, `${label} / division ${codes[0]?.slice(0, 2)}`, depth + 1, partBudget, void 0, section2);
+        const wanted = part.activitePrincipale?.length ? new Set(part.activitePrincipale) : void 0;
+        let divisions = divisionsOfSection(sectionName);
+        if (wanted) {
+          divisions = divisions.map((codes) => codes.filter((code) => wanted.has(code))).filter((codes) => codes.length > 0);
+          if (divisions.length === 1 && divisions[0].length > 1) divisions = divisions[0].map((code) => [code]);
         }
-        return;
+        const narrows = !wanted || divisions.length > 1;
+        if (narrows) {
+          opts.onNote?.(`sirene: ${label} still at the cap \u2014 splitting into ${divisions.length} NAF ${wanted ? "code group(s)" : "divisions"}`);
+          notes.push(`sirene: ${label} is at or above the ${HARD_CAP} cap; split into ${divisions.length} NAF ${wanted ? "code group(s)" : "divisions"}`);
+          for (const codes of divisions) {
+            if (partBudget.left <= 0) {
+              if (section2) sectionSpreadLimited = true;
+              break;
+            }
+            const sub = wanted && codes.length === 1 ? `code ${codes[0]}` : `division ${codes[0]?.slice(0, 2)}`;
+            await walk({ ...part, activitePrincipale: codes }, `${label} / ${sub}`, depth + 1, partBudget, void 0, section2);
+          }
+          return;
+        }
       }
     }
     if (probe.total >= HARD_CAP) {

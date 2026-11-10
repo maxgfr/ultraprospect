@@ -566,17 +566,35 @@ export async function fetchSirene(query: SireneQuery, opts: SireneOptions = {}):
     if (probe.total >= HARD_CAP && depth < maxDepth) {
       const sectionName = part.sections?.[0];
       if (sectionName) {
-        const divisions = divisionsOfSection(sectionName);
-        opts.onNote?.(`sirene: ${label} still at the cap — splitting into ${divisions.length} NAF divisions`);
-        notes.push(`sirene: ${label} is at or above the ${HARD_CAP} cap; split into ${divisions.length} NAF divisions`);
-        for (const codes of divisions) {
-          if (partBudget.left <= 0) {
-            if (section) sectionSpreadLimited = true;
-            break;
-          }
-          await walk({ ...part, activitePrincipale: codes }, `${label} / division ${codes[0]?.slice(0, 2)}`, depth + 1, partBudget, undefined, section);
+        // THE CALLER'S OWN ACTIVITY CODES SURVIVE THE SPLIT. A division is a list
+        // of codes, and handing that list to the API in place of the caller's
+        // widened the question: `--activity 68.20B` in a commune large enough
+        // to hit the cap came back with every code of division 68. So each
+        // division is narrowed to the codes that were asked for, and a single
+        // division holding all of them is split code by code instead.
+        const wanted = part.activitePrincipale?.length ? new Set(part.activitePrincipale) : undefined;
+        let divisions = divisionsOfSection(sectionName);
+        if (wanted) {
+          divisions = divisions.map((codes) => codes.filter((code) => wanted.has(code))).filter((codes) => codes.length > 0);
+          if (divisions.length === 1 && divisions[0]!.length > 1) divisions = divisions[0]!.map((code) => [code]);
         }
-        return;
+        // Splitting has to make the question SMALLER. One group identical to
+        // what was asked is the same question again, so it falls through to the
+        // truncation below rather than recursing to the depth limit.
+        const narrows = !wanted || divisions.length > 1;
+        if (narrows) {
+          opts.onNote?.(`sirene: ${label} still at the cap — splitting into ${divisions.length} NAF ${wanted ? "code group(s)" : "divisions"}`);
+          notes.push(`sirene: ${label} is at or above the ${HARD_CAP} cap; split into ${divisions.length} NAF ${wanted ? "code group(s)" : "divisions"}`);
+          for (const codes of divisions) {
+            if (partBudget.left <= 0) {
+              if (section) sectionSpreadLimited = true;
+              break;
+            }
+            const sub = wanted && codes.length === 1 ? `code ${codes[0]}` : `division ${codes[0]?.slice(0, 2)}`;
+            await walk({ ...part, activitePrincipale: codes }, `${label} / ${sub}`, depth + 1, partBudget, undefined, section);
+          }
+          return;
+        }
       }
     }
 

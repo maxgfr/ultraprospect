@@ -244,6 +244,35 @@ describe("a partition that is not read to its end", () => {
   });
 });
 
+describe("splitting a capped section when the caller named activity codes", () => {
+  const codesAsked = () => [
+    ...new Set(
+      calls
+        .map((c) => new URL(c).searchParams.get("activite_principale"))
+        .filter((v): v is string => Boolean(v))
+        .flatMap((v) => v.split(",")),
+    ),
+  ];
+
+  it("never asks the register for a code the caller did not name", async () => {
+    // Everything is at the cap until the question is down to one code.
+    totals = (url) => ((url.searchParams.get("activite_principale") ?? "").split(",").length === 1 ? 25 : HARD_CAP);
+    const result = await fetchSirene({ codeCommune: ["75056"], sections: ["L"], activitePrincipale: ["68.20B", "68.31Z"] }, { maxResults: 200 });
+    expect(codesAsked().sort()).toEqual(["68.20B", "68.31Z"]);
+    expect(result.records.length).toBeGreaterThan(0);
+    expect(result.coverage.truncated).toBe(false);
+  });
+
+  it("declares truncation when a single code is still at the cap, instead of asking the same question again", async () => {
+    totals = () => HARD_CAP;
+    const result = await fetchSirene({ codeCommune: ["75056"], sections: ["L"], activitePrincipale: ["68.20B"] }, { maxResults: 50 });
+    expect(codesAsked()).toEqual(["68.20B"]);
+    expect(result.coverage.truncated).toBe(true);
+    // One probe and the pages of one drain — not the same partition walked to the depth limit.
+    expect(calls.length).toBeLessThan(10);
+  });
+});
+
 describe("the point endpoint's silent filters", () => {
   it("applies etat_administratif client-side, because the endpoint drops it", async () => {
     // Measured against the live API: /near_point ignores filters it does not
