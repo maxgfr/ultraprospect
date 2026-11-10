@@ -227,23 +227,36 @@ export function extractLanguages(html: string): string[] {
  * page it came from so the gate can re-read it. What to look for, and in which
  * language, comes in from outside.
  *
- * Matching tolerates up to three trailing letters, which carries the suffixing
+ * Matching tolerates a few trailing letters, which carries the suffixing
  * inflections (German -n/-ern, French -s, Spanish -os) without swallowing a
  * compound: `Freiberuflern` yes, `Freelancerschutzgesetzgebung` no. Languages
  * that inflect by REPLACING an ending need a stem, and the caller supplies one.
+ *
+ * HOW MANY letters depends on the term, because an ending cannot be longer than
+ * the word it ends. Three letters after `Freiberufler` is an inflection; three
+ * letters after `KI` is a different word. Measured on a live Hamburg run asked
+ * for `KI` and `AI`: the hits were Kiste, Kiel, Kiez, Kind, Kick, Kilo, kiosk,
+ * Air, ainsi and aider, a publisher was credited with three AI mentions for
+ * "Kiste, KINK, Kilo", and every one of them passed the gate — which re-reads
+ * the same loose match and so agrees with it.
+ *
+ * An ACRONYM (all capitals, five letters at most) is also matched in its own
+ * case: `AI` is not the French "ai", and `KI` is not the first syllable of
+ * anything.
  */
 export function extractTermMentions(text: string, pageId: string, terms: readonly string[]): SourcedValue[] {
   if (!terms.length) return [];
-  const re = new RegExp(
-    `(?<!\\p{L})(?:${[...terms]
-      .sort((a, b) => b.length - a.length)
-      .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-      .join("|")})\\p{L}{0,3}(?!\\p{L})`,
-    "giu",
-  );
+  const ordered = [...new Set(terms)].filter(Boolean).sort((a, b) => b.length - a.length);
+  if (!ordered.length) return [];
+  const literal = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // One capture group per term, so a match says which term it is a match OF.
+  const re = new RegExp(`(?<!\\p{L})(?:${ordered.map((t) => `(${literal(t)}${termTail(t)})`).join("|")})(?!\\p{L})`, "giu");
   const out: SourcedValue[] = [];
   const seen = new Set<string>();
   for (const m of text.matchAll(re)) {
+    const term = ordered[m.slice(1).findIndex((group) => group !== undefined)];
+    // The pattern is case-insensitive as a whole; an acronym is held to its case here.
+    if (term && isAcronym(term) && !m[0].startsWith(term)) continue;
     const key = m[0].toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -255,6 +268,20 @@ export function extractTermMentions(text: string, pageId: string, terms: readonl
     out.push({ value: m[0], from: pageId, lane: "web", note: line });
   }
   return out;
+}
+
+/** All capitals and short: `KI`, `AI`, `LLM`, `ZZP`. Digits and a hyphen are allowed inside. */
+function isAcronym(term: string): boolean {
+  return /^[\p{Lu}\d-]{2,5}$/u.test(term) && /\p{Lu}/u.test(term);
+}
+
+/** The trailing letters one term may carry: an ending, never a second word. */
+function termTail(term: string): string {
+  if (isAcronym(term)) return "s?";
+  const letters = [...term].filter((c) => /\p{L}/u.test(c)).length;
+  if (letters <= 3) return "\\p{L}{0,1}";
+  if (letters <= 5) return "\\p{L}{0,2}";
+  return "\\p{L}{0,3}";
 }
 
 export interface SignalInput {

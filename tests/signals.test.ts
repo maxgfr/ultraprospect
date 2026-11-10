@@ -359,6 +359,28 @@ describe("termMentions", () => {
     expect(miss.termMentions).toEqual([]);
   });
 
+  it("does not read a short term out of the longer words that begin with it", () => {
+    // Every one of these was recorded as a mention of KI or AI on a live Hamburg run.
+    const noise = "Kiste. Kiel. Kiez. Kind. Kick. Kilo. Am Kiosk. Air Cargo. AICPA. Ainsi, pour aider. J'ai lu. KINK.";
+    const s = buildSignals({ ...base, pages: [page("P2", "careers", noise)], termLexicon: ["KI", "AI"] });
+    expect(s.termMentions.map((m) => m.value)).toEqual([]);
+  });
+
+  it("still finds the acronym itself, its plural and its compounds", () => {
+    const text = "Wir setzen KI ein. Unsere KIs lernen. KI-Chat und AI-Agenten. Generative AI, erklärt.";
+    const s = buildSignals({ ...base, pages: [page("P2", "careers", text)], termLexicon: ["KI", "AI"] });
+    expect(s.termMentions.map((m) => m.value)).toEqual(["KI", "KIs", "AI"]);
+  });
+
+  it("scales the ending it tolerates to the length of the word", () => {
+    const find = (text: string, term: string) => buildSignals({ ...base, pages: [page("P2", "careers", text)], termLexicon: [term] }).termMentions.length;
+    expect(find("mit Freiberuflern", "Freiberufler")).toBe(1);
+    expect(find("unsere Daten", "Data")).toBe(0);
+    expect(find("big data and datasets", "data")).toBe(1);
+    expect(find("mehrere Bots", "Bot")).toBe(1);
+    expect(find("eine Botschaft", "Bot")).toBe(0);
+  });
+
   it("works in any language, because the language never reaches the engine", () => {
     // The agent translated these. The engine cannot tell them apart, which is
     // exactly the property that makes it work outside the languages one author

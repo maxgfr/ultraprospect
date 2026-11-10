@@ -389,10 +389,13 @@ ultraprospect awards --country fr --cpv 72 --since 2y         # who wins, who bu
      drives webindex's keyless search from inside this bundle, but prefer your
      own web search: the keyless engines block automated clients, and when they
      do the lane says so in words rather than reporting an empty web.
-   - **Mind the inflection.** Matching tolerates up to three trailing letters,
-     which carries German `-n`/`-ern`, French `-s` and Spanish `-os`. Languages
-     that inflect by REPLACING the ending — Polish, Czech — need a stem:
-     `samozatrudnieni`, not `samozatrudnienie`.
+   - **Mind the inflection.** Matching tolerates a few trailing letters, which
+     carries German `-n`/`-ern`, French `-s` and Spanish `-os`: up to three on a
+     word of six letters or more, two on a word of four or five, one on anything
+     shorter. An acronym in capitals (`KI`, `AI`, `LLM`) is matched in its own
+     case and takes a plural `s` only, so `KI` finds `KI`, `KIs` and `KI-Chat`
+     but never `Kiste` or `Kiel`. Languages that inflect by REPLACING the ending
+     — Polish, Czech — need a stem: `samozatrudnieni`, not `samozatrudnienie`.
    - **Refuse a term that means two things.** `B2B` means contractor in a Polish
      job ad and business-to-business in every English one. A term with two
      readings produces hits nobody can act on, and they will look measured.

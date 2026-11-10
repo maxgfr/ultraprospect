@@ -18335,13 +18335,15 @@ function extractLanguages(html) {
 }
 function extractTermMentions(text3, pageId, terms) {
   if (!terms.length) return [];
-  const re = new RegExp(
-    `(?<!\\p{L})(?:${[...terms].sort((a, b) => b.length - a.length).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\p{L}{0,3}(?!\\p{L})`,
-    "giu"
-  );
+  const ordered = [...new Set(terms)].filter(Boolean).sort((a, b) => b.length - a.length);
+  if (!ordered.length) return [];
+  const literal = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`(?<!\\p{L})(?:${ordered.map((t) => `(${literal(t)}${termTail(t)})`).join("|")})(?!\\p{L})`, "giu");
   const out2 = [];
   const seen = /* @__PURE__ */ new Set();
   for (const m of text3.matchAll(re)) {
+    const term = ordered[m.slice(1).findIndex((group) => group !== void 0)];
+    if (term && isAcronym(term) && !m[0].startsWith(term)) continue;
     const key = m[0].toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -18350,6 +18352,16 @@ function extractTermMentions(text3, pageId, terms) {
     out2.push({ value: m[0], from: pageId, lane: "web", note: line });
   }
   return out2;
+}
+function isAcronym(term) {
+  return /^[\p{Lu}\d-]{2,5}$/u.test(term) && new RegExp("\\p{Lu}", "u").test(term);
+}
+function termTail(term) {
+  if (isAcronym(term)) return "s?";
+  const letters = [...term].filter((c) => new RegExp("\\p{L}", "u").test(c)).length;
+  if (letters <= 3) return "\\p{L}{0,1}";
+  if (letters <= 5) return "\\p{L}{0,2}";
+  return "\\p{L}{0,3}";
 }
 function matchingJobs(input) {
   const terms = input.roleFilter ?? [];
