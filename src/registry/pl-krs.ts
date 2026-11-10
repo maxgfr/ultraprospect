@@ -19,15 +19,23 @@ import { naceSection } from "../classification/nace.js";
 import { politeUa } from "../net.js";
 import type { PostalAddress } from "../types.js";
 import type { Availability, CanaryCheck, LegalId, RegistryConnector, RegistryRecord } from "./types.js";
+import { registerAnswer } from "./upstream.js";
 
 const BASE = "https://api-krs.ms.gov.pl/api/krs";
 const CONNECTOR_ID = "pl-krs";
 const REQUEST_DELAY_MS = 500;
 
-async function get(krs: string, rejestr: "P" | "S"): Promise<any> {
+/**
+ * `strict` is for `verifyId`: a response that is not an answer throws, so
+ * `confirm` records that KRS could not be asked instead of reading an outage as
+ * a number it does not hold. The 404 of the wrong register is still an answer.
+ * See `./upstream.ts`.
+ */
+async function get(krs: string, rejestr: "P" | "S", strict = false): Promise<any> {
   const url = `${BASE}/OdpisAktualny/${krs}?rejestr=${rejestr}&format=json`;
   await awaitHostSlot(url, REQUEST_DELAY_MS);
   const res = await httpJson("GET", url, undefined, { timeoutMs: 25_000, retries: 1, userAgent: politeUa() });
+  if (strict) return registerAnswer(CONNECTOR_ID, res);
   return res.ok ? res.data : undefined;
 }
 
@@ -104,7 +112,7 @@ export const plKrs: RegistryConnector = {
     const digits = id.value.replace(/\D/g, "");
     if (!digits || digits.length > 10) return undefined;
     const krs = digits.padStart(10, "0");
-    return toRecord(await get(krs, "P")) ?? toRecord(await get(krs, "S"));
+    return toRecord(await get(krs, "P", true)) ?? toRecord(await get(krs, "S", true));
   },
 
   async canary(): Promise<CanaryCheck[]> {

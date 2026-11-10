@@ -226,11 +226,15 @@ async function verify(
   id: LegalId,
   connectors: readonly RegistryConnector[],
   ctx: ConnectorContext,
-): Promise<{ record?: RegistryRecord; asked: string[]; answered: number }> {
+): Promise<{ record?: RegistryRecord; asked: string[]; answered: number; silent: Array<{ id: string; why: string }> }> {
   const asked: string[] = [];
   // Asked and ANSWERED are different counts. "We put the question to VIES" is
   // not "VIES replied", and only the second one makes a silence into evidence.
   let answered = 0;
+  // The authorities that were asked and did not reply, with what went wrong.
+  // A connector THROWS when its upstream failed (see registry/upstream.ts);
+  // one that returns `undefined` answered that it holds nothing.
+  const silent: Array<{ id: string; why: string }> = [];
   for (const connector of connectors) {
     if (!connector.verifyId) continue;
     if (!connector.countries.includes("*") && !connector.countries.includes(id.countryCode)) continue;
@@ -239,14 +243,15 @@ async function verify(
     try {
       const record = await connector.verifyId(id, ctx);
       answered++;
-      if (record) return { record, asked, answered };
-    } catch {
+      if (record) return { record, asked, answered, silent };
+    } catch (e) {
       // One authority being down must not stop the next one being asked. The
       // lane's coverage records what was reached; a throw here would lose the
       // companies that came after.
+      silent.push({ id: connector.id, why: e instanceof Error ? e.message : String(e) });
     }
   }
-  return { asked, answered };
+  return { asked, answered, silent };
 }
 
 export async function runConfirm(runDir: string, places: Place[], opts: ConfirmOptions = {}): Promise<ConfirmOutcome> {
@@ -339,6 +344,19 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
     return pending;
   };
 
+  // An authority that failed to answer is named once, with what went wrong.
+  // The counts at the end say how many places it cost; without this line
+  // nothing says WHICH register was down, and an outage that hit one of three
+  // authorities left no trace at all.
+  const silentConnectors = new Set<string>();
+  const couldNotAsk = (connectorId: string, why: string) => {
+    if (silentConnectors.has(connectorId)) return;
+    silentConnectors.add(connectorId);
+    // A connector's own error already starts with its id; said once is enough.
+    const reason = why.startsWith(`${connectorId}: `) ? why.slice(connectorId.length + 2) : why;
+    note(`confirm: ${connectorId} failed to answer at least once (${reason}). What it was not asked is kept apart from what it did not find.`);
+  };
+
   for (const place of targets) {
     done++;
     opts.onProgress?.(done, targets.length, place.name);
@@ -364,21 +382,31 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
       if (!text) continue;
       for (const id of extractLegalIds(text, opts.countryCode, pageId)) {
         idsFound++;
-        const { record: rec, asked, answered } = await verifyOnce(id);
+        const { record: rec, asked, answered, silent } = await verifyOnce(id);
+        for (const failure of silent) couldNotAsk(failure.id, failure.why);
         if (answered > 0) anyAnswer = true;
         if (!rec) {
           // The number was read off a page this run holds, and no authority
           // named its holder. That is a real finding — the identifier is on the
           // record, sourced and re-readable — and it is NOT an identity.
+          //
+          // The row says who REPLIED, not who was asked. An authority that was
+          // down named no holder either, and writing it beside the ones that
+          // answered would turn its outage into a finding about the number.
+          const down = silent.map((failure) => failure.id);
+          const replied = asked.filter((connectorId) => !down.includes(connectorId));
+          const court = id.context ? ` (court: ${id.context})` : "";
           found.push({
             kind: id.kind,
             value: id.value,
             from: id.from,
             status: "unverified",
-            authority: asked.join(",") || undefined,
-            note: asked.length
-              ? `asked ${asked.join(", ")}; none named a holder${id.context ? ` (court: ${id.context})` : ""}`
-              : "no authority here can check this kind of identifier",
+            authority: replied.join(",") || undefined,
+            note: !asked.length
+              ? "no authority here can check this kind of identifier"
+              : !replied.length
+                ? `asked ${asked.join(", ")}; none answered, which says nothing about this number${court}`
+                : `asked ${replied.join(", ")}; none named a holder${court}${down.length ? `; ${down.join(", ")} did not answer` : ""}`,
           });
           continue;
         }
@@ -440,9 +468,10 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
         let hits: RegistryRecord[] = [];
         try {
           hits = await connector.lookup(query, ctx);
-        } catch {
+        } catch (e) {
           // Could not ask. Deliberately NOT counted as an answer, so the place
           // does not end up reported as absent from a register that never spoke.
+          couldNotAsk(connector.id, e instanceof Error ? e.message : String(e));
           continue;
         }
         anyAnswer = true;

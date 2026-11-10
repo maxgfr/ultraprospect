@@ -21,12 +21,21 @@ import { awaitHostSlot, httpJson } from "../engine.js";
 import { politeUa } from "../net.js";
 import type { PostalAddress } from "../types.js";
 import type { Availability, CanaryCheck, ConnectorContext, LegalId, LookupQuery, RegistryConnector, RegistryRecord } from "./types.js";
+import { registerAnswer } from "./upstream.js";
 
 const BASE = "https://api.gleif.org/api/v1";
 const CONNECTOR_ID = "gleif";
 const REQUEST_DELAY_MS = 400;
 
-async function get(path: string): Promise<any> {
+/**
+ * One GET, read one of two ways.
+ *
+ * `strict` is for `lookup` and `verifyId`: a response that is not an answer
+ * THROWS, so `confirm` records that GLEIF could not be asked instead of reading
+ * an outage as an entity with no LEI. The canary and the probe leave it off —
+ * "no answer" is the thing they report.
+ */
+async function get(path: string, strict = false): Promise<any> {
   const url = `${BASE}${path}`;
   await awaitHostSlot(url, REQUEST_DELAY_MS);
   const res = await httpJson("GET", url, undefined, {
@@ -36,6 +45,7 @@ async function get(path: string): Promise<any> {
     // GLEIF speaks JSON:API and answers `application/vnd.api+json`.
     headers: { accept: "application/vnd.api+json" },
   });
+  if (strict) return registerAnswer(CONNECTOR_ID, res);
   return res.ok ? res.data : undefined;
 }
 
@@ -97,9 +107,9 @@ function registeredAs(rec: RegistryRecord): string | undefined {
  * name the engine owns. Re-exporting is fine; a second implementation is the
  * regression that gate exists to catch.
  */
-async function queryRecords(params: Record<string, string>, limit: number): Promise<RegistryRecord[]> {
+async function queryRecords(params: Record<string, string>, limit: number, strict = false): Promise<RegistryRecord[]> {
   const qs = new URLSearchParams({ ...params, "page[size]": String(Math.min(50, Math.max(1, limit))) });
-  const data = await get(`/lei-records?${qs.toString()}`);
+  const data = await get(`/lei-records?${qs.toString()}`, strict);
   return (data?.data ?? []).map(toRecord).filter((r: RegistryRecord | undefined): r is RegistryRecord => Boolean(r));
 }
 
@@ -125,12 +135,12 @@ export const gleif: RegistryConnector = {
     // candidate rather than an answer — the caller scores it either way.
     const filters: Record<string, string> = { "filter[entity.legalName]": name };
     if (country) filters["filter[entity.legalAddress.country]"] = country;
-    const exact = await queryRecords(filters, query.limit ?? 5);
+    const exact = await queryRecords(filters, query.limit ?? 5, true);
     if (exact.length) return exact;
 
     const loose: Record<string, string> = { "filter[fulltext]": name };
     if (country) loose["filter[entity.legalAddress.country]"] = country;
-    return queryRecords(loose, query.limit ?? 5);
+    return queryRecords(loose, query.limit ?? 5, true);
   },
 
   // An LEI record files the entity's REGISTER number (`registeredAs`), never its
@@ -143,7 +153,7 @@ export const gleif: RegistryConnector = {
   async verifyId(id: LegalId): Promise<RegistryRecord | undefined> {
     if (id.kind === "vat") return undefined;
     if (id.kind === "lei") {
-      const data = await get(`/lei-records/${encodeURIComponent(id.value.toUpperCase())}`);
+      const data = await get(`/lei-records/${encodeURIComponent(id.value.toUpperCase())}`, true);
       return toRecord(data?.data);
     }
     // A national register number — a German HRB, most usefully. GLEIF indexes it
@@ -162,7 +172,7 @@ export const gleif: RegistryConnector = {
     if (!wanted) return undefined;
     const params: Record<string, string> = { "filter[fulltext]": id.value };
     if (id.countryCode) params["filter[entity.legalAddress.country]"] = id.countryCode.toUpperCase();
-    const hits = await queryRecords(params, 10);
+    const hits = await queryRecords(params, 10, true);
     return hits.find((rec) => registeredAs(rec) === wanted);
   },
 

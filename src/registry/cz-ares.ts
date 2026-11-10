@@ -14,15 +14,22 @@ import { naceSection } from "../classification/nace.js";
 import { politeUa } from "../net.js";
 import type { PostalAddress } from "../types.js";
 import type { Availability, CanaryCheck, LegalId, LookupQuery, RegistryConnector, RegistryRecord } from "./types.js";
+import { registerAnswer } from "./upstream.js";
 
 const BASE = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty";
 const CONNECTOR_ID = "cz-ares";
 const REQUEST_DELAY_MS = 400;
 
-async function call(method: "GET" | "POST", path: string, body?: unknown): Promise<any> {
+/**
+ * `strict` is for `lookup` and `verifyId`: a response that is not an answer
+ * throws, so `confirm` records that ARES could not be asked instead of reading
+ * an outage as a subject it does not hold. See `./upstream.ts`.
+ */
+async function call(method: "GET" | "POST", path: string, body?: unknown, strict = false): Promise<any> {
   const url = `${BASE}${path}`;
   await awaitHostSlot(url, REQUEST_DELAY_MS);
   const res = await httpJson(method, url, body, { timeoutMs: 25_000, retries: 1, userAgent: politeUa() });
+  if (strict) return registerAnswer(CONNECTOR_ID, res);
   return res.ok ? res.data : undefined;
 }
 
@@ -103,7 +110,7 @@ export const czAres: RegistryConnector = {
     const limit = Math.min(20, query.limit ?? 5);
     const body: Record<string, unknown> = { obchodniJmeno: name, start: 0, pocet: limit };
     if (query.locality) body.sidlo = { nazevObce: query.locality };
-    const data = await call("POST", "/vyhledat", body);
+    const data = await call("POST", "/vyhledat", body, true);
     return (data?.ekonomickeSubjekty ?? []).map(toRecord).filter((r: RegistryRecord | undefined): r is RegistryRecord => Boolean(r));
   },
 
@@ -113,7 +120,7 @@ export const czAres: RegistryConnector = {
     const digits = id.value.replace(/\D/g, "");
     if (!digits || digits.length > 8) return undefined;
     if (id.kind !== "vat" && id.kind !== "ico" && id.kind !== "company-number") return undefined;
-    return toRecord(await call("GET", `/${digits.padStart(8, "0")}`));
+    return toRecord(await call("GET", `/${digits.padStart(8, "0")}`, undefined, true));
   },
 
   async canary(): Promise<CanaryCheck[]> {

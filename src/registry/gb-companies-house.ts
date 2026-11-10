@@ -35,6 +35,7 @@ import { politeUa } from "../net.js";
 import { hasSnapshot, partialIngestNote, snapshotByLocality, snapshotById, snapshotMeta, type SnapshotSource } from "../snapshot.js";
 import { nameSimilarity, normalizeName, shortLabel } from "../util.js";
 import type { GeoTarget, PostalAddress } from "../types.js";
+import { registerAnswer } from "./upstream.js";
 import type {
   Availability,
   CanaryCheck,
@@ -74,7 +75,7 @@ function keyFrom(ctx: ConnectorContext): string | undefined {
   return key?.trim() || undefined;
 }
 
-async function get(path: string, key: string): Promise<{ ok: boolean; status: number; data: any }> {
+async function get(path: string, key: string): Promise<{ ok: boolean; status: number; data: any; error?: string }> {
   const url = `${BASE}${path}`;
   await awaitHostSlot(url, REQUEST_DELAY_MS);
   const res = await httpJson("GET", url, undefined, {
@@ -89,7 +90,8 @@ async function get(path: string, key: string): Promise<{ ok: boolean; status: nu
   // out so the rest of this run's queue waits rather than spending the next
   // forty requests discovering the same limit.
   if (res.status === 429) backOffHost(url, RATE_LIMIT_BACKOFF_MS);
-  return { ok: res.ok, status: res.status, data: res.data };
+  // `error` travels too: a timeout has no status, and it is all that says why.
+  return { ok: res.ok, status: res.status, data: res.data, error: res.error };
 }
 
 function addressOf(raw: any): PostalAddress {
@@ -455,14 +457,17 @@ export const gbCompaniesHouse: RegistryConnector = {
     // fill a record — so each hit is fetched by number.
     const basic = await get(`/search/companies?q=${encodeURIComponent(name)}&items_per_page=${limit}`, key);
     if (basic.status === 429) throw new RateLimited("companies-house rate limit");
-    const numbers: string[] = (basic.data?.items ?? [])
+    // The rate limit is not the only way of not being asked. A 5xx or a timeout
+    // on this last route used to fall out of the bottom as [], and the company
+    // was recorded as having no register entry because the service was down.
+    const numbers: string[] = (registerAnswer(CONNECTOR_ID, basic)?.items ?? [])
       .map((i: any) => i?.company_number)
       .filter(Boolean)
       .slice(0, limit);
     const out: RegistryRecord[] = [];
     for (const number of numbers) {
       const one = await get(`/company/${encodeURIComponent(number)}`, key);
-      const rec = toRecord(one.data);
+      const rec = toRecord(registerAnswer(CONNECTOR_ID, one));
       if (rec) out.push(rec);
     }
     return out;
@@ -498,7 +503,8 @@ export const gbCompaniesHouse: RegistryConnector = {
     // Not an answer about this number. `undefined` here would be indistinguishable
     // from "no such company", which is the one thing it must not be.
     if (res.status === 429) throw new RateLimited("companies-house rate limit");
-    return toRecord(res.data);
+    // Nor is a 5xx or a timeout: only a 404 says the number is not on the register.
+    return toRecord(registerAnswer(CONNECTOR_ID, res));
   },
 
   async canary(ctx: ConnectorContext): Promise<CanaryCheck[]> {

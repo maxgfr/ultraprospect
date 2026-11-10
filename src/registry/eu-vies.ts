@@ -31,6 +31,7 @@ import { awaitHostSlot, httpJson } from "../engine.js";
 import { politeUa } from "../net.js";
 import type { PostalAddress } from "../types.js";
 import type { Availability, CanaryCheck, ConnectorContext, LegalId, RegistryConnector, RegistryRecord } from "./types.js";
+import { RegisterUnreachable, registerAnswer } from "./upstream.js";
 
 const BASE = "https://ec.europa.eu/taxation_customs/vies/rest-api";
 const CONNECTOR_ID = "eu-vies";
@@ -146,14 +147,25 @@ export interface ViesAnswer {
   userError?: string;
 }
 
-export async function checkVat(countryCode: string, number: string): Promise<ViesAnswer | undefined> {
+/**
+ * Ask VIES about one number.
+ *
+ * `strict` is for `verifyId`: a response that is not an answer THROWS, so
+ * `confirm` records that VIES could not be asked instead of reading the 503 as
+ * a number nobody knows. The canary and the probe leave it off — "no answer" is
+ * the thing they report.
+ */
+export async function checkVat(countryCode: string, number: string, opts: { strict?: boolean } = {}): Promise<ViesAnswer | undefined> {
   const cc = vatPrefix(countryCode);
   const digits = number.replace(/^[A-Z]{2}/i, "").replace(/[\s.-]/g, "");
   if (!digits) return undefined;
   const url = `${BASE}/ms/${cc}/vat/${encodeURIComponent(digits)}`;
   await awaitHostSlot(url, REQUEST_DELAY_MS);
   const res = await httpJson("GET", url, undefined, { timeoutMs: 20_000, retries: 1, userAgent: politeUa() });
-  if (!res.ok) return undefined;
+  if (!res.ok) {
+    if (opts.strict) registerAnswer(CONNECTOR_ID, res);
+    return undefined;
+  }
   const name = disclosed(res.data?.name);
   const rawAddress = disclosed(res.data?.address);
   const userError = typeof res.data?.userError === "string" ? res.data.userError : undefined;
@@ -188,13 +200,16 @@ export const euVies: RegistryConnector = {
 
   async verifyId(id: LegalId, ctx: ConnectorContext): Promise<RegistryRecord | undefined> {
     if (id.kind !== "vat") return undefined;
-    const answer = await checkVat(id.countryCode, id.value);
+    const answer = await checkVat(id.countryCode, id.value, { strict: true });
     if (!answer) return undefined;
     if (answer.verdict === "inconclusive") {
       ctx.onNote?.(
         `vies: ${answer.vatNumber} could not be checked — ${answer.userError ?? "no answer"}. That is this member state's system, not a fact about the number.`,
       );
-      return undefined;
+      // Thrown, not returned. MS_UNAVAILABLE arrives as HTTP 200, so returning
+      // `undefined` here had `confirm` count Germany's system being down as VIES
+      // having answered that nobody holds the number.
+      throw new RegisterUnreachable(CONNECTOR_ID, answer.userError ?? "no verdict");
     }
     if (answer.verdict === "invalid") {
       // NOT the same as "made up". VIES only knows numbers enabled for

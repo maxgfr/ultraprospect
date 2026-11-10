@@ -17,15 +17,22 @@ import { naceSection } from "../classification/nace.js";
 import { politeUa } from "../net.js";
 import type { PostalAddress } from "../types.js";
 import type { Availability, CanaryCheck, LegalId, LookupQuery, RegistryConnector, RegistryRecord } from "./types.js";
+import { registerAnswer } from "./upstream.js";
 
 const BASE = "https://avoindata.prh.fi/opendata-ytj-api/v3";
 const CONNECTOR_ID = "fi-prh";
 const REQUEST_DELAY_MS = 400;
 
-async function get(path: string): Promise<any> {
+/**
+ * `strict` is for `lookup` and `verifyId`: a response that is not an answer
+ * throws, so `confirm` records that PRH could not be asked instead of reading
+ * an outage as a company it does not hold. See `./upstream.ts`.
+ */
+async function get(path: string, strict = false): Promise<any> {
   const url = `${BASE}${path}`;
   await awaitHostSlot(url, REQUEST_DELAY_MS);
   const res = await httpJson("GET", url, undefined, { timeoutMs: 25_000, retries: 1, userAgent: politeUa() });
+  if (strict) return registerAnswer(CONNECTOR_ID, res);
   return res.ok ? res.data : undefined;
 }
 
@@ -127,7 +134,7 @@ export const fiPrh: RegistryConnector = {
     const params = new URLSearchParams({ name });
     if (query.postcode) params.set("postCode", query.postcode);
     else if (query.locality) params.set("location", query.locality);
-    const data = await get(`/companies?${params.toString()}`);
+    const data = await get(`/companies?${params.toString()}`, true);
     const limit = query.limit ?? 5;
     return (data?.companies ?? [])
       .slice(0, limit)
@@ -146,7 +153,7 @@ export const fiPrh: RegistryConnector = {
       businessId = id.value.trim();
     }
     if (!businessId) return undefined;
-    const data = await get(`/companies?businessId=${encodeURIComponent(businessId)}`);
+    const data = await get(`/companies?businessId=${encodeURIComponent(businessId)}`, true);
     return toRecord(data?.companies?.[0]);
   },
 

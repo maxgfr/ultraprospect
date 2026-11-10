@@ -33,6 +33,7 @@ import { awaitHostSlot, httpJson } from "../engine.js";
 import { usSicDivision } from "../classification/us-sic.js";
 import type { PostalAddress } from "../types.js";
 import type { Availability, CanaryCheck, LegalId, LookupQuery, RegistryConnector, RegistryRecord } from "./types.js";
+import { RegisterUnreachable, registerAnswer } from "./upstream.js";
 
 const DATA = "https://data.sec.gov";
 const WWW = "https://www.sec.gov";
@@ -52,7 +53,13 @@ function secUa(): string {
   return process.env.ULTRAPROSPECT_SEC_CONTACT ? `ultraprospect ${process.env.ULTRAPROSPECT_SEC_CONTACT}` : "ultraprospect contact@ultraprospect.invalid";
 }
 
-async function get(url: string): Promise<any> {
+/**
+ * `strict` is for `lookup` and `verifyId`: a response that is not an answer
+ * throws, so `confirm` records that EDGAR could not be asked instead of reading
+ * an outage — or the 403 it gives an undeclared User-Agent — as a company that
+ * does not file. See `./upstream.ts`.
+ */
+async function get(url: string, strict = false): Promise<any> {
   await awaitHostSlot(url, REQUEST_DELAY_MS);
   const res = await httpJson("GET", url, undefined, {
     timeoutMs: 30_000,
@@ -60,15 +67,16 @@ async function get(url: string): Promise<any> {
     userAgent: secUa(),
     headers: { "accept-encoding": "gzip, deflate" },
   });
+  if (strict) return registerAnswer(CONNECTOR_ID, res);
   return res.ok ? res.data : undefined;
 }
 
 /** cik -> {name, ticker}, from the bulk file. Cached for the process; it is ~200 KB and changes daily. */
 let tickerIndex: Array<{ cik: string; name: string; ticker: string }> | undefined;
 
-export async function companyIndex(): Promise<Array<{ cik: string; name: string; ticker: string }>> {
+export async function companyIndex(strict = false): Promise<Array<{ cik: string; name: string; ticker: string }>> {
   if (tickerIndex) return tickerIndex;
-  const data = await get(`${WWW}/files/company_tickers.json`);
+  const data = await get(`${WWW}/files/company_tickers.json`, strict);
   if (!data || typeof data !== "object") return [];
   tickerIndex = Object.values(data as Record<string, any>)
     .map((e) => ({ cik: String(e?.cik_str ?? "").padStart(10, "0"), name: String(e?.title ?? ""), ticker: String(e?.ticker ?? "") }))
@@ -148,8 +156,10 @@ export const usEdgar: RegistryConnector = {
   async lookup(query: LookupQuery, ctx): Promise<RegistryRecord[]> {
     const name = query.names.find((n) => n?.trim());
     if (!name) return [];
-    const index = await companyIndex();
-    if (index.length === 0) return [];
+    const index = await companyIndex(true);
+    // No index is no way to ask, not an answer: every name would "match
+    // nothing" and each company be recorded as one EDGAR does not know.
+    if (index.length === 0) throw new RegisterUnreachable(CONNECTOR_ID, "company_tickers.json came back empty");
 
     // Substring match on the bulk index rather than EDGAR's full-text search:
     // full-text searches FILING CONTENTS, so "Whole Foods" returns every company
@@ -166,7 +176,7 @@ export const usEdgar: RegistryConnector = {
 
     const out: RegistryRecord[] = [];
     for (const hit of hits) {
-      const rec = toRecord(await get(`${DATA}/submissions/CIK${hit.cik}.json`));
+      const rec = toRecord(await get(`${DATA}/submissions/CIK${hit.cik}.json`, true));
       if (rec) out.push(rec);
     }
     return out;
@@ -176,7 +186,7 @@ export const usEdgar: RegistryConnector = {
     if (id.kind !== "cik") return undefined;
     const cik = id.value.replace(/\D/g, "").padStart(10, "0");
     if (cik === "0000000000") return undefined;
-    return toRecord(await get(`${DATA}/submissions/CIK${cik}.json`));
+    return toRecord(await get(`${DATA}/submissions/CIK${cik}.json`, true));
   },
 
   async canary(): Promise<CanaryCheck[]> {

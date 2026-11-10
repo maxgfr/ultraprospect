@@ -11821,14 +11821,30 @@ function politeUa() {
   return `ultraprospect/${VERSION} (+${CONTACT_URL})`;
 }
 
+// src/registry/upstream.ts
+var RegisterUnreachable = class extends Error {
+  constructor(connectorId, detail2) {
+    super(`${connectorId}: ${detail2}`);
+    this.connectorId = connectorId;
+    this.name = "RegisterUnreachable";
+  }
+  connectorId;
+};
+function registerAnswer(connectorId, res) {
+  if (res.ok) return res.data;
+  if (res.status === 404 || res.status === 410) return void 0;
+  throw new RegisterUnreachable(connectorId, res.status ? `HTTP ${res.status}` : res.error ?? "no response");
+}
+
 // src/registry/cz-ares.ts
 var BASE = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty";
 var CONNECTOR_ID = "cz-ares";
 var REQUEST_DELAY_MS = 400;
-async function call(method, path, body) {
+async function call(method, path, body, strict = false) {
   const url = `${BASE}${path}`;
   await awaitHostSlot(url, REQUEST_DELAY_MS);
   const res = await httpJson(method, url, body, { timeoutMs: 25e3, retries: 1, userAgent: politeUa() });
+  if (strict) return registerAnswer(CONNECTOR_ID, res);
   return res.ok ? res.data : void 0;
 }
 function addressOf(raw) {
@@ -11899,14 +11915,14 @@ var czAres = {
     const limit = Math.min(20, query.limit ?? 5);
     const body = { obchodniJmeno: name, start: 0, pocet: limit };
     if (query.locality) body.sidlo = { nazevObce: query.locality };
-    const data = await call("POST", "/vyhledat", body);
+    const data = await call("POST", "/vyhledat", body, true);
     return (data?.ekonomickeSubjekty ?? []).map(toRecord).filter((r) => Boolean(r));
   },
   async verifyId(id) {
     const digits = id.value.replace(/\D/g, "");
     if (!digits || digits.length > 8) return void 0;
     if (id.kind !== "vat" && id.kind !== "ico" && id.kind !== "company-number") return void 0;
-    return toRecord(await call("GET", `/${digits.padStart(8, "0")}`));
+    return toRecord(await call("GET", `/${digits.padStart(8, "0")}`, void 0, true));
   },
   async canary() {
     const one = await call("GET", "/00177041");
@@ -11994,14 +12010,17 @@ function viesVerdict(data) {
   if (data?.isValid === true) return "valid";
   return data?.userError === "INVALID" ? "invalid" : "inconclusive";
 }
-async function checkVat(countryCode, number) {
+async function checkVat(countryCode, number, opts = {}) {
   const cc = vatPrefix(countryCode);
   const digits = number.replace(/^[A-Z]{2}/i, "").replace(/[\s.-]/g, "");
   if (!digits) return void 0;
   const url = `${BASE2}/ms/${cc}/vat/${encodeURIComponent(digits)}`;
   await awaitHostSlot(url, REQUEST_DELAY_MS2);
   const res = await httpJson("GET", url, void 0, { timeoutMs: 2e4, retries: 1, userAgent: politeUa() });
-  if (!res.ok) return void 0;
+  if (!res.ok) {
+    if (opts.strict) registerAnswer(CONNECTOR_ID2, res);
+    return void 0;
+  }
   const name = disclosed(res.data?.name);
   const rawAddress = disclosed(res.data?.address);
   const userError = typeof res.data?.userError === "string" ? res.data.userError : void 0;
@@ -12032,13 +12051,13 @@ var euVies = {
   },
   async verifyId(id, ctx) {
     if (id.kind !== "vat") return void 0;
-    const answer = await checkVat(id.countryCode, id.value);
+    const answer = await checkVat(id.countryCode, id.value, { strict: true });
     if (!answer) return void 0;
     if (answer.verdict === "inconclusive") {
       ctx.onNote?.(
         `vies: ${answer.vatNumber} could not be checked \u2014 ${answer.userError ?? "no answer"}. That is this member state's system, not a fact about the number.`
       );
-      return void 0;
+      throw new RegisterUnreachable(CONNECTOR_ID2, answer.userError ?? "no verdict");
     }
     if (answer.verdict === "invalid") {
       ctx.onNote?.(
@@ -12106,10 +12125,11 @@ var euVies = {
 var BASE3 = "https://avoindata.prh.fi/opendata-ytj-api/v3";
 var CONNECTOR_ID3 = "fi-prh";
 var REQUEST_DELAY_MS3 = 400;
-async function get(path) {
+async function get(path, strict = false) {
   const url = `${BASE3}${path}`;
   await awaitHostSlot(url, REQUEST_DELAY_MS3);
   const res = await httpJson("GET", url, void 0, { timeoutMs: 25e3, retries: 1, userAgent: politeUa() });
+  if (strict) return registerAnswer(CONNECTOR_ID3, res);
   return res.ok ? res.data : void 0;
 }
 function pickText(list3, language = "3") {
@@ -12187,7 +12207,7 @@ var fiPrh = {
     const params = new URLSearchParams({ name });
     if (query.postcode) params.set("postCode", query.postcode);
     else if (query.locality) params.set("location", query.locality);
-    const data = await get(`/companies?${params.toString()}`);
+    const data = await get(`/companies?${params.toString()}`, true);
     const limit = query.limit ?? 5;
     return (data?.companies ?? []).slice(0, limit).map(toRecord2).filter((r) => Boolean(r));
   },
@@ -12200,7 +12220,7 @@ var fiPrh = {
       businessId = id.value.trim();
     }
     if (!businessId) return void 0;
-    const data = await get(`/companies?businessId=${encodeURIComponent(businessId)}`);
+    const data = await get(`/companies?businessId=${encodeURIComponent(businessId)}`, true);
     return toRecord2(data?.companies?.[0]);
   },
   async canary() {
@@ -13693,7 +13713,7 @@ var frSirene = {
     if (!name) return [];
     const q = query.locality ? `${name} ${query.locality}` : name;
     const page2 = await fetchPage({ q, etatAdministratif: "A" }, 1, Math.min(25, query.limit ?? 5));
-    if (page2.error) return [];
+    if (page2.error) throw new RegisterUnreachable(CONNECTOR_ID4, page2.error);
     return page2.results.flatMap((e) => expandRecord(e)).slice(0, query.limit ?? 5);
   },
   async verifyId(id) {
@@ -13704,7 +13724,7 @@ var frSirene = {
     else if (id.kind === "vat" && digits.length === 11) siren = digits.slice(2);
     if (!siren) return void 0;
     const page2 = await fetchPage({ q: siren }, 1, 5);
-    if (page2.error) return void 0;
+    if (page2.error) throw new RegisterUnreachable(CONNECTOR_ID4, page2.error);
     const entity = page2.results.find((e) => String(e?.siren) === siren);
     if (!entity) return void 0;
     const records = expandRecord(entity);
@@ -14959,7 +14979,7 @@ async function get3(path, key) {
     headers: { authorization: `Basic ${Buffer.from(`${key}:`).toString("base64")}` }
   });
   if (res.status === 429) backOffHost(url, RATE_LIMIT_BACKOFF_MS);
-  return { ok: res.ok, status: res.status, data: res.data };
+  return { ok: res.ok, status: res.status, data: res.data, error: res.error };
 }
 function addressOf3(raw) {
   if (!raw) return {};
@@ -15224,11 +15244,11 @@ var gbCompaniesHouse = {
     }
     const basic = await get3(`/search/companies?q=${encodeURIComponent(name)}&items_per_page=${limit}`, key);
     if (basic.status === 429) throw new RateLimited("companies-house rate limit");
-    const numbers = (basic.data?.items ?? []).map((i) => i?.company_number).filter(Boolean).slice(0, limit);
+    const numbers = (registerAnswer(CONNECTOR_ID7, basic)?.items ?? []).map((i) => i?.company_number).filter(Boolean).slice(0, limit);
     const out2 = [];
     for (const number of numbers) {
       const one = await get3(`/company/${encodeURIComponent(number)}`, key);
-      const rec = toRecord3(one.data);
+      const rec = toRecord3(registerAnswer(CONNECTOR_ID7, one));
       if (rec) out2.push(rec);
     }
     return out2;
@@ -15250,7 +15270,7 @@ var gbCompaniesHouse = {
       return void 0;
     }
     if (res.status === 429) throw new RateLimited("companies-house rate limit");
-    return toRecord3(res.data);
+    return toRecord3(registerAnswer(CONNECTOR_ID7, res));
   },
   async canary(ctx) {
     const checks = [];
@@ -15306,7 +15326,7 @@ var gbCompaniesHouse = {
 var BASE6 = "https://api.gleif.org/api/v1";
 var CONNECTOR_ID8 = "gleif";
 var REQUEST_DELAY_MS6 = 400;
-async function get4(path) {
+async function get4(path, strict = false) {
   const url = `${BASE6}${path}`;
   await awaitHostSlot(url, REQUEST_DELAY_MS6);
   const res = await httpJson("GET", url, void 0, {
@@ -15316,6 +15336,7 @@ async function get4(path) {
     // GLEIF speaks JSON:API and answers `application/vnd.api+json`.
     headers: { accept: "application/vnd.api+json" }
   });
+  if (strict) return registerAnswer(CONNECTOR_ID8, res);
   return res.ok ? res.data : void 0;
 }
 function addressOf4(raw) {
@@ -15366,9 +15387,9 @@ function registeredAs(rec) {
   const value = rec.national?.registeredAs;
   return typeof value === "string" ? value.replace(/[\s.]/g, "").toUpperCase() : void 0;
 }
-async function queryRecords(params, limit) {
+async function queryRecords(params, limit, strict = false) {
   const qs = new URLSearchParams({ ...params, "page[size]": String(Math.min(50, Math.max(1, limit))) });
-  const data = await get4(`/lei-records?${qs.toString()}`);
+  const data = await get4(`/lei-records?${qs.toString()}`, strict);
   return (data?.data ?? []).map(toRecord4).filter((r) => Boolean(r));
 }
 var gleif = {
@@ -15388,11 +15409,11 @@ var gleif = {
     const country = query.countryCode?.toUpperCase();
     const filters = { "filter[entity.legalName]": name };
     if (country) filters["filter[entity.legalAddress.country]"] = country;
-    const exact = await queryRecords(filters, query.limit ?? 5);
+    const exact = await queryRecords(filters, query.limit ?? 5, true);
     if (exact.length) return exact;
     const loose = { "filter[fulltext]": name };
     if (country) loose["filter[entity.legalAddress.country]"] = country;
-    return queryRecords(loose, query.limit ?? 5);
+    return queryRecords(loose, query.limit ?? 5, true);
   },
   // An LEI record files the entity's REGISTER number (`registeredAs`), never its
   // VAT number, so a full-text search for one cannot match. Asking anyway cost a
@@ -15403,14 +15424,14 @@ var gleif = {
   async verifyId(id) {
     if (id.kind === "vat") return void 0;
     if (id.kind === "lei") {
-      const data = await get4(`/lei-records/${encodeURIComponent(id.value.toUpperCase())}`);
+      const data = await get4(`/lei-records/${encodeURIComponent(id.value.toUpperCase())}`, true);
       return toRecord4(data?.data);
     }
     const wanted = id.value.replace(/[\s.]/g, "").toUpperCase();
     if (!wanted) return void 0;
     const params = { "filter[fulltext]": id.value };
     if (id.countryCode) params["filter[entity.legalAddress.country]"] = id.countryCode.toUpperCase();
-    const hits = await queryRecords(params, 10);
+    const hits = await queryRecords(params, 10, true);
     return hits.find((rec) => registeredAs(rec) === wanted);
   },
   async canary() {
@@ -15439,10 +15460,11 @@ var gleif = {
 var BASE7 = "https://data.brreg.no/enhetsregisteret/api";
 var CONNECTOR_ID9 = "no-brreg";
 var REQUEST_DELAY_MS7 = 300;
-async function get5(path) {
+async function get5(path, strict = false) {
   const url = `${BASE7}${path}`;
   await awaitHostSlot(url, REQUEST_DELAY_MS7);
   const res = await httpJson("GET", url, void 0, { timeoutMs: 2e4, retries: 1, userAgent: politeUa() });
+  if (strict) return registerAnswer(CONNECTOR_ID9, res);
   return res.ok ? res.data : void 0;
 }
 function addressOf5(raw) {
@@ -15509,7 +15531,7 @@ var noBrreg = {
     if (!name) return [];
     const params = new URLSearchParams({ navn: name, size: String(Math.min(20, query.limit ?? 5)) });
     if (query.postcode) params.set("postadresse.postnummer", query.postcode);
-    const data = await get5(`/enheter?${params.toString()}`);
+    const data = await get5(`/enheter?${params.toString()}`, true);
     return (data?._embedded?.enheter ?? []).map(toRecord5).filter((r) => Boolean(r));
   },
   async verifyId(id) {
@@ -15517,7 +15539,7 @@ var noBrreg = {
     const orgnr = digits.length >= 9 ? digits.slice(0, 9) : void 0;
     if (!orgnr) return void 0;
     if (id.kind !== "vat" && id.kind !== "orgnr" && id.kind !== "company-number") return void 0;
-    return toRecord5(await get5(`/enheter/${orgnr}`));
+    return toRecord5(await get5(`/enheter/${orgnr}`, true));
   },
   async canary() {
     const data = await get5("/enheter?navn=Equinor&size=1");
@@ -15548,10 +15570,11 @@ var noBrreg = {
 var BASE8 = "https://api-krs.ms.gov.pl/api/krs";
 var CONNECTOR_ID10 = "pl-krs";
 var REQUEST_DELAY_MS8 = 500;
-async function get6(krs, rejestr) {
+async function get6(krs, rejestr, strict = false) {
   const url = `${BASE8}/OdpisAktualny/${krs}?rejestr=${rejestr}&format=json`;
   await awaitHostSlot(url, REQUEST_DELAY_MS8);
   const res = await httpJson("GET", url, void 0, { timeoutMs: 25e3, retries: 1, userAgent: politeUa() });
+  if (strict) return registerAnswer(CONNECTOR_ID10, res);
   return res.ok ? res.data : void 0;
 }
 function addressOf6(raw) {
@@ -15621,7 +15644,7 @@ var plKrs = {
     const digits = id.value.replace(/\D/g, "");
     if (!digits || digits.length > 10) return void 0;
     const krs = digits.padStart(10, "0");
-    return toRecord6(await get6(krs, "P")) ?? toRecord6(await get6(krs, "S"));
+    return toRecord6(await get6(krs, "P", true)) ?? toRecord6(await get6(krs, "S", true));
   },
   async canary() {
     const payload = await get6("0000041581", "P");
@@ -15680,7 +15703,7 @@ var REQUEST_DELAY_MS9 = 500;
 function secUa() {
   return process.env.ULTRAPROSPECT_SEC_CONTACT ? `ultraprospect ${process.env.ULTRAPROSPECT_SEC_CONTACT}` : "ultraprospect contact@ultraprospect.invalid";
 }
-async function get7(url) {
+async function get7(url, strict = false) {
   await awaitHostSlot(url, REQUEST_DELAY_MS9);
   const res = await httpJson("GET", url, void 0, {
     timeoutMs: 3e4,
@@ -15688,12 +15711,13 @@ async function get7(url) {
     userAgent: secUa(),
     headers: { "accept-encoding": "gzip, deflate" }
   });
+  if (strict) return registerAnswer(CONNECTOR_ID11, res);
   return res.ok ? res.data : void 0;
 }
 var tickerIndex;
-async function companyIndex() {
+async function companyIndex(strict = false) {
   if (tickerIndex) return tickerIndex;
-  const data = await get7(`${WWW}/files/company_tickers.json`);
+  const data = await get7(`${WWW}/files/company_tickers.json`, strict);
   if (!data || typeof data !== "object") return [];
   tickerIndex = Object.values(data).map((e) => ({ cik: String(e?.cik_str ?? "").padStart(10, "0"), name: String(e?.title ?? ""), ticker: String(e?.ticker ?? "") })).filter((e) => e.cik && e.name);
   return tickerIndex;
@@ -15760,8 +15784,8 @@ var usEdgar = {
   async lookup(query, ctx) {
     const name = query.names.find((n) => n?.trim());
     if (!name) return [];
-    const index = await companyIndex();
-    if (index.length === 0) return [];
+    const index = await companyIndex(true);
+    if (index.length === 0) throw new RegisterUnreachable(CONNECTOR_ID11, "company_tickers.json came back empty");
     const needle = name.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").trim();
     if (needle.length < 3) return [];
     const hits = index.filter((e) => e.name.toLowerCase().includes(needle)).slice(0, Math.min(10, query.limit ?? 5));
@@ -15769,7 +15793,7 @@ var usEdgar = {
     ctx?.onNote?.(usEdgarCoverageNote());
     const out2 = [];
     for (const hit of hits) {
-      const rec = toRecord7(await get7(`${DATA}/submissions/CIK${hit.cik}.json`));
+      const rec = toRecord7(await get7(`${DATA}/submissions/CIK${hit.cik}.json`, true));
       if (rec) out2.push(rec);
     }
     return out2;
@@ -15778,7 +15802,7 @@ var usEdgar = {
     if (id.kind !== "cik") return void 0;
     const cik = id.value.replace(/\D/g, "").padStart(10, "0");
     if (cik === "0000000000") return void 0;
-    return toRecord7(await get7(`${DATA}/submissions/CIK${cik}.json`));
+    return toRecord7(await get7(`${DATA}/submissions/CIK${cik}.json`, true));
   },
   async canary() {
     const checks = [];
@@ -19864,6 +19888,7 @@ function toCandidate3(place, rec, score, matchedName) {
 async function verify(id, connectors, ctx) {
   const asked = [];
   let answered3 = 0;
+  const silent = [];
   for (const connector of connectors) {
     if (!connector.verifyId) continue;
     if (!connector.countries.includes("*") && !connector.countries.includes(id.countryCode)) continue;
@@ -19872,11 +19897,12 @@ async function verify(id, connectors, ctx) {
     try {
       const record2 = await connector.verifyId(id, ctx);
       answered3++;
-      if (record2) return { record: record2, asked, answered: answered3 };
-    } catch {
+      if (record2) return { record: record2, asked, answered: answered3, silent };
+    } catch (e) {
+      silent.push({ id: connector.id, why: e instanceof Error ? e.message : String(e) });
     }
   }
-  return { asked, answered: answered3 };
+  return { asked, answered: answered3, silent };
 }
 async function runConfirm(runDir, places, opts = {}) {
   const notes = [];
@@ -19944,6 +19970,13 @@ async function runConfirm(runDir, places, opts = {}) {
     }
     return pending;
   };
+  const silentConnectors = /* @__PURE__ */ new Set();
+  const couldNotAsk = (connectorId, why) => {
+    if (silentConnectors.has(connectorId)) return;
+    silentConnectors.add(connectorId);
+    const reason = why.startsWith(`${connectorId}: `) ? why.slice(connectorId.length + 2) : why;
+    note(`confirm: ${connectorId} failed to answer at least once (${reason}). What it was not asked is kept apart from what it did not find.`);
+  };
   for (const place of targets) {
     done++;
     opts.onProgress?.(done, targets.length, place.name);
@@ -19957,16 +19990,20 @@ async function runConfirm(runDir, places, opts = {}) {
       if (!text3) continue;
       for (const id of extractLegalIds(text3, opts.countryCode, pageId)) {
         idsFound++;
-        const { record: rec, asked, answered: answered3 } = await verifyOnce(id);
+        const { record: rec, asked, answered: answered3, silent } = await verifyOnce(id);
+        for (const failure of silent) couldNotAsk(failure.id, failure.why);
         if (answered3 > 0) anyAnswer = true;
         if (!rec) {
+          const down = silent.map((failure) => failure.id);
+          const replied = asked.filter((connectorId) => !down.includes(connectorId));
+          const court = id.context ? ` (court: ${id.context})` : "";
           found.push({
             kind: id.kind,
             value: id.value,
             from: id.from,
             status: "unverified",
-            authority: asked.join(",") || void 0,
-            note: asked.length ? `asked ${asked.join(", ")}; none named a holder${id.context ? ` (court: ${id.context})` : ""}` : "no authority here can check this kind of identifier"
+            authority: replied.join(",") || void 0,
+            note: !asked.length ? "no authority here can check this kind of identifier" : !replied.length ? `asked ${asked.join(", ")}; none answered, which says nothing about this number${court}` : `asked ${replied.join(", ")}; none named a holder${court}${down.length ? `; ${down.join(", ")} did not answer` : ""}`
           });
           continue;
         }
@@ -20012,7 +20049,8 @@ async function runConfirm(runDir, places, opts = {}) {
         let hits = [];
         try {
           hits = await connector.lookup(query, ctx);
-        } catch {
+        } catch (e) {
+          couldNotAsk(connector.id, e instanceof Error ? e.message : String(e));
           continue;
         }
         anyAnswer = true;

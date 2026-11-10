@@ -192,6 +192,51 @@ describe("runConfirm — the published-identifier route", () => {
     const vat = (p.legalIds ?? []).filter((x) => x.value === "DE811907980");
     expect(vat).toHaveLength(1);
   });
+
+  it("counts a place whose only authority was down as NOT ASKED, and names the authority", async () => {
+    // A connector throws when its upstream fails. The place is then one nobody
+    // could be asked about — not one the register had nothing on — and the row
+    // for the number must not credit the silent authority with an answer.
+    selection.confirm = [
+      fake({
+        id: "eu-vies",
+        verifyId: async () => {
+          throw new Error("eu-vies: HTTP 503");
+        },
+      }),
+    ];
+    const p = place({ pages: ["P1"] });
+    const dir = runWithPage(p.id, "P1", "Impressum\nUSt-IdNr. DE811907980");
+    const outcome = await runConfirm(dir, [p], { countryCode: "de" });
+
+    expect(outcome.notAsked).toBe(1);
+    expect(outcome.notFound).toBe(0);
+    expect(p.legalIds?.[0]).toMatchObject({ value: "DE811907980", status: "unverified", authority: undefined });
+    expect(p.legalIds?.[0]?.note).toContain("none answered");
+    // Said once, with the reason, however many numbers it cost.
+    expect(outcome.notes.filter((n) => n.includes("eu-vies failed to answer"))).toEqual([expect.stringContaining("(HTTP 503)")]);
+  });
+
+  it("credits only the authorities that replied when one of several was down", async () => {
+    selection.confirm = [
+      fake({
+        id: "pl-krs",
+        verifyId: async () => {
+          throw new Error("pl-krs: timed out after 25000 ms");
+        },
+      }),
+      fake({ id: "eu-vies", verifyId: async () => undefined }),
+    ];
+    const p = place({ pages: ["P1"] });
+    const dir = runWithPage(p.id, "P1", "Impressum\nUSt-IdNr. DE811907980");
+    const outcome = await runConfirm(dir, [p], { countryCode: "de" });
+
+    // One authority did answer, so this place was asked about.
+    expect(outcome.notFound).toBe(1);
+    expect(outcome.notAsked).toBe(0);
+    expect(p.legalIds?.[0]?.authority).toBe("eu-vies");
+    expect(p.legalIds?.[0]?.note).toBe("asked eu-vies; none named a holder; pl-krs did not answer");
+  });
 });
 
 describe("runConfirm — the name-lookup route", () => {

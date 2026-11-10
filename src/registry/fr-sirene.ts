@@ -38,6 +38,7 @@ import { NACE_SECTIONS, naceSection } from "../classification/nace.js";
 import { divisionsOfSection } from "../classification/naf-codes.js";
 import type { Dirigeant, GeoTarget, LaneCoverage, PostalAddress } from "../types.js";
 import { firstText, isGenericTradeName } from "../util.js";
+import { RegisterUnreachable } from "./upstream.js";
 import type {
   Availability,
   CanaryCheck,
@@ -737,7 +738,11 @@ export const frSirene: RegistryConnector = {
     // code we do not have when the caller only knows a town's name.
     const q = query.locality ? `${name} ${query.locality}` : name;
     const page = await fetchPage({ q, etatAdministratif: "A" }, 1, Math.min(25, query.limit ?? 5));
-    if (page.error) return [];
+    // Thrown, not answered with []. This endpoint says "no such company" with a
+    // 200 and an empty list, so an error here is never that: it is a 429, a 5xx
+    // or a timeout, and `confirm` must not record the place as absent from the
+    // register because of it.
+    if (page.error) throw new RegisterUnreachable(CONNECTOR_ID, page.error);
     return page.results.flatMap((e: any) => expandRecord(e)).slice(0, query.limit ?? 5);
   },
 
@@ -752,7 +757,9 @@ export const frSirene: RegistryConnector = {
     if (!siren) return undefined;
 
     const page = await fetchPage({ q: siren }, 1, 5);
-    if (page.error) return undefined;
+    // The same rule as `lookup`: an error is the request failing, not the
+    // register answering that nobody holds this SIREN.
+    if (page.error) throw new RegisterUnreachable(CONNECTOR_ID, page.error);
     const entity = page.results.find((e: any) => String(e?.siren) === siren);
     if (!entity) return undefined;
     const records = expandRecord(entity);

@@ -16,15 +16,22 @@ import { naceSection } from "../classification/nace.js";
 import { politeUa } from "../net.js";
 import type { PostalAddress } from "../types.js";
 import type { Availability, CanaryCheck, LegalId, LookupQuery, RegistryConnector, RegistryRecord } from "./types.js";
+import { registerAnswer } from "./upstream.js";
 
 const BASE = "https://data.brreg.no/enhetsregisteret/api";
 const CONNECTOR_ID = "no-brreg";
 const REQUEST_DELAY_MS = 300;
 
-async function get(path: string): Promise<any> {
+/**
+ * `strict` is for `lookup` and `verifyId`: a response that is not an answer
+ * throws, so `confirm` records that Brreg could not be asked instead of reading
+ * an outage as a company it does not hold. See `./upstream.ts`.
+ */
+async function get(path: string, strict = false): Promise<any> {
   const url = `${BASE}${path}`;
   await awaitHostSlot(url, REQUEST_DELAY_MS);
   const res = await httpJson("GET", url, undefined, { timeoutMs: 20_000, retries: 1, userAgent: politeUa() });
+  if (strict) return registerAnswer(CONNECTOR_ID, res);
   return res.ok ? res.data : undefined;
 }
 
@@ -102,7 +109,7 @@ export const noBrreg: RegistryConnector = {
     if (!name) return [];
     const params = new URLSearchParams({ navn: name, size: String(Math.min(20, query.limit ?? 5)) });
     if (query.postcode) params.set("postadresse.postnummer", query.postcode);
-    const data = await get(`/enheter?${params.toString()}`);
+    const data = await get(`/enheter?${params.toString()}`, true);
     return (data?._embedded?.enheter ?? []).map(toRecord).filter((r: RegistryRecord | undefined): r is RegistryRecord => Boolean(r));
   },
 
@@ -113,7 +120,7 @@ export const noBrreg: RegistryConnector = {
     const orgnr = digits.length >= 9 ? digits.slice(0, 9) : undefined;
     if (!orgnr) return undefined;
     if (id.kind !== "vat" && id.kind !== "orgnr" && id.kind !== "company-number") return undefined;
-    return toRecord(await get(`/enheter/${orgnr}`));
+    return toRecord(await get(`/enheter/${orgnr}`, true));
   },
 
   async canary(): Promise<CanaryCheck[]> {

@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /** Every request the connectors made, in order. */
 const calls: Array<{ method: string; url: string; body?: unknown; headers?: Record<string, string> }> = [];
 /** What the fake upstream answers next. Set per test. */
-let answer: { ok: boolean; status: number; data: unknown } = { ok: true, status: 200, data: {} };
+let answer: { ok: boolean; status: number; data: unknown; error?: string } = { ok: true, status: 200, data: {} };
 /** Hosts pushed back by a Retry-After-shaped signal, so a 429 is observable. */
 const backOffs: Array<{ url: string; ms: number }> = [];
 
@@ -46,6 +46,7 @@ vi.mock("../src/engine.js", async (importOriginal) => ({
 const { czAres } = await import("../src/registry/cz-ares.js");
 const { euVies } = await import("../src/registry/eu-vies.js");
 const { fiPrh } = await import("../src/registry/fi-prh.js");
+const { frSirene } = await import("../src/registry/fr-sirene.js");
 const { gbCompaniesHouse } = await import("../src/registry/gb-companies-house.js");
 const { gleif } = await import("../src/registry/gleif.js");
 const { noBrreg } = await import("../src/registry/no-brreg.js");
@@ -206,6 +207,104 @@ describe("gleif", () => {
       },
     };
     expect(await gleif.verifyId!({ kind: "hrb", value: "HRB 158855", countryCode: "de" }, ctx)).toBeUndefined();
+  });
+});
+
+// `confirm` counts a place a register answered nothing about as NOT FOUND and
+// a place no register could be asked about as NOT ASKED. Every connector but
+// one read a failed request as `undefined`, so an outage in the middle of a run
+// reported each company after it as absent from the register.
+describe("a register that did not answer is not a register that said no", () => {
+  const keyed = { keys: { "gb-companies-house": "secret" } };
+  const verifications: Array<[string, () => Promise<unknown>]> = [
+    ["eu-vies", () => euVies.verifyId!({ kind: "vat", value: "DE811907980", countryCode: "de" }, ctx)],
+    ["gleif (LEI)", () => gleif.verifyId!({ kind: "lei", value: "529900YRFFGH5AXU4S86", countryCode: "de" }, ctx)],
+    ["gleif (register number)", () => gleif.verifyId!({ kind: "hrb", value: "HRB 158855", countryCode: "de" }, ctx)],
+    ["no-brreg", () => noBrreg.verifyId!({ kind: "vat", value: "NO 923 609 016 MVA", countryCode: "no" }, ctx)],
+    ["fi-prh", () => fiPrh.verifyId!({ kind: "vat", value: "FI01120389", countryCode: "fi" }, ctx)],
+    ["cz-ares", () => czAres.verifyId!({ kind: "vat", value: "CZ00177041", countryCode: "cz" }, ctx)],
+    ["pl-krs", () => plKrs.verifyId!({ kind: "krs", value: "0000041581", countryCode: "pl" }, ctx)],
+    ["us-edgar", () => usEdgar.verifyId!({ kind: "cik", value: "320193", countryCode: "us" }, ctx)],
+    ["fr-sirene", () => frSirene.verifyId!({ kind: "siren", value: "794598813", countryCode: "fr" }, ctx)],
+    ["gb-companies-house", () => gbCompaniesHouse.verifyId!({ kind: "company-number", value: "00445790", countryCode: "gb" }, keyed)],
+  ];
+  const lookups: Array<[string, () => Promise<unknown>]> = [
+    ["gleif", () => gleif.lookup!({ names: ["Zalando SE"], countryCode: "de" }, ctx)],
+    ["no-brreg", () => noBrreg.lookup!({ names: ["Equinor"], countryCode: "no" }, ctx)],
+    ["fi-prh", () => fiPrh.lookup!({ names: ["Nokia"], countryCode: "fi" }, ctx)],
+    ["cz-ares", () => czAres.lookup!({ names: ["Škoda"], countryCode: "cz" }, ctx)],
+    ["us-edgar", () => usEdgar.lookup!({ names: ["Apple"], countryCode: "us" }, ctx)],
+    ["fr-sirene", () => frSirene.lookup!({ names: ["Doctolib"], countryCode: "fr", locality: "Levallois-Perret" }, ctx)],
+    ["gb-companies-house", () => gbCompaniesHouse.lookup!({ names: ["Tesco"], countryCode: "gb" }, keyed)],
+  ];
+
+  it.each(verifications)("%s verifyId THROWS on a 503 instead of answering that nobody holds the number", async (_name, ask) => {
+    answer = { ok: false, status: 503, data: undefined };
+    await expect(ask()).rejects.toThrow(/503/);
+  });
+
+  it.each(verifications)("%s verifyId THROWS on a timeout, which the engine reports as status 0", async (_name, ask) => {
+    answer = { ok: false, status: 0, data: undefined, error: "timed out after 20000 ms" };
+    await expect(ask()).rejects.toThrow(/timed out/);
+  });
+
+  it.each(lookups)("%s lookup THROWS on a 503 instead of answering that no such company exists", async (_name, ask) => {
+    answer = { ok: false, status: 503, data: undefined };
+    await expect(ask()).rejects.toThrow(/503/);
+  });
+
+  // The other half, or the fix would just relabel every miss as an outage: a
+  // 404 is the register's own way of saying nothing is filed under that. France
+  // is not in this list because its search never answers 404 — it says "no such
+  // company" with a 200 and an empty page, covered below.
+  it.each(verifications.filter(([name]) => name !== "fr-sirene"))("%s verifyId still reads a 404 as the register's answer", async (_name, ask) => {
+    answer = { ok: false, status: 404, data: { title: "Not Found" } };
+    await expect(ask()).resolves.toBeUndefined();
+  });
+
+  it("fr-sirene still reads an empty result page as the register's answer", async () => {
+    answer = { ok: true, status: 200, data: { results: [], total_results: 0 } };
+    await expect(frSirene.verifyId!({ kind: "siren", value: "794598813", countryCode: "fr" }, ctx)).resolves.toBeUndefined();
+    await expect(frSirene.lookup!({ names: ["Doctolib"], countryCode: "fr" }, ctx)).resolves.toEqual([]);
+  });
+
+  it("eu-vies THROWS when the member state's own system is down, which arrives as a 200", async () => {
+    // MEASURED: `isValid: false` beside `userError: "MS_UNAVAILABLE"`. Returning
+    // `undefined` for it had `confirm` count Germany's outage as VIES having
+    // answered that nobody holds the number.
+    const notes: string[] = [];
+    answer = { ok: true, status: 200, data: { isValid: false, userError: "MS_UNAVAILABLE", name: "---", address: "---" } };
+    await expect(euVies.verifyId!({ kind: "vat", value: "DE811907980", countryCode: "de" }, { onNote: (n) => notes.push(n) })).rejects.toThrow(
+      /MS_UNAVAILABLE/,
+    );
+    expect(notes.join(" ")).toContain("could not be checked");
+
+    // A number VIES does not know is still an answer.
+    answer = { ok: true, status: 200, data: { isValid: false, userError: "INVALID" } };
+    await expect(euVies.verifyId!({ kind: "vat", value: "DE000000000", countryCode: "de" }, ctx)).resolves.toBeUndefined();
+  });
+
+  it("us-edgar THROWS when the name index itself cannot be fetched", async () => {
+    // Without the index no name can match, so every company would be recorded
+    // as one EDGAR does not know. A 404 on the index is the same failure.
+    answer = { ok: false, status: 404, data: undefined };
+    await expect(usEdgar.lookup!({ names: ["Apple"], countryCode: "us" }, ctx)).rejects.toThrow(/company_tickers/);
+  });
+
+  it("leaves the probes and the canaries reporting a failure rather than throwing", async () => {
+    // `doctor` and the weekly canary REPORT "no answer" per check. A throw would
+    // collapse a connector's whole report into one line.
+    answer = { ok: false, status: 503, data: undefined };
+    for (const connector of [euVies, gleif, noBrreg, fiPrh, czAres, plKrs, usEdgar, frSirene]) {
+      const probe = await connector.probe(ctx);
+      expect(probe.ok, connector.id).toBe(false);
+      const checks = await connector.canary(ctx);
+      expect(checks.length, connector.id).toBeGreaterThan(0);
+      expect(
+        checks.some((c) => !c.ok || c.inconclusive),
+        connector.id,
+      ).toBe(true);
+    }
   });
 });
 
