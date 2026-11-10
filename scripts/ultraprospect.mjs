@@ -11986,6 +11986,9 @@ var euVies = {
   availability() {
     return { available: true };
   },
+  canVerify(id) {
+    return id.kind === "vat";
+  },
   async verifyId(id, ctx) {
     if (id.kind !== "vat") return void 0;
     const answer = await checkVat(id.countryCode, id.value);
@@ -15322,7 +15325,14 @@ var gleif = {
     if (country) loose["filter[entity.legalAddress.country]"] = country;
     return queryRecords(loose, query.limit ?? 5);
   },
+  // An LEI record files the entity's REGISTER number (`registeredAs`), never its
+  // VAT number, so a full-text search for one cannot match. Asking anyway cost a
+  // request per VAT number VIES declined to name — every German and Spanish one.
+  canVerify(id) {
+    return id.kind !== "vat";
+  },
   async verifyId(id) {
+    if (id.kind === "vat") return void 0;
     if (id.kind === "lei") {
       const data = await get4(`/lei-records/${encodeURIComponent(id.value.toUpperCase())}`);
       return toRecord4(data?.data);
@@ -19745,6 +19755,7 @@ async function verify(id, connectors, ctx) {
   for (const connector of connectors) {
     if (!connector.verifyId) continue;
     if (!connector.countries.includes("*") && !connector.countries.includes(id.countryCode)) continue;
+    if (connector.canVerify && !connector.canVerify(id)) continue;
     asked.push(connector.id);
     try {
       const record2 = await connector.verifyId(id, ctx);
@@ -19806,6 +19817,16 @@ async function runConfirm(runDir, places, opts = {}) {
   const usedConnectors = /* @__PURE__ */ new Set();
   let idsFound = 0;
   let done = 0;
+  const verified = /* @__PURE__ */ new Map();
+  const verifyOnce = (id) => {
+    const key = [id.kind, id.countryCode, id.value.replace(/[\s.]/g, "").toUpperCase(), id.context ?? ""].join("|");
+    let pending = verified.get(key);
+    if (!pending) {
+      pending = verify(id, selection.confirm, ctx);
+      verified.set(key, pending);
+    }
+    return pending;
+  };
   for (const place of targets) {
     done++;
     opts.onProgress?.(done, targets.length, place.name);
@@ -19818,7 +19839,7 @@ async function runConfirm(runDir, places, opts = {}) {
       if (!text3) continue;
       for (const id of extractLegalIds(text3, opts.countryCode, pageId)) {
         idsFound++;
-        const { record: rec, asked, answered: answered3 } = await verify(id, selection.confirm, ctx);
+        const { record: rec, asked, answered: answered3 } = await verifyOnce(id);
         if (answered3 > 0) anyAnswer = true;
         if (!rec) {
           found.push({

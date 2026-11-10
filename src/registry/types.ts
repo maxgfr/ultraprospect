@@ -346,6 +346,16 @@ export interface RegistryConnector {
   /** Confirm an identifier read off a company's own site, and return what the register filed under it. */
   verifyId?(id: LegalId, ctx: ConnectorContext): Promise<RegistryRecord | undefined>;
 
+  /**
+   * Whether `verifyId` can say anything at all about this identifier.
+   *
+   * Absent means "ask". A connector that would only ever answer `undefined` for
+   * a kind — VIES for a register number, GLEIF for a VAT number, which it does
+   * not index — declares it here, so the caller neither spends the request nor
+   * records the authority as having been asked a question it cannot hear.
+   */
+  canVerify?(id: LegalId): boolean;
+
   /** Does the upstream still speak the shape we parse? Run weekly, never in the unit suite. */
   canary(ctx: ConnectorContext): Promise<CanaryCheck[]>;
 

@@ -182,6 +182,10 @@ export const euVies: RegistryConnector = {
     return { available: true };
   },
 
+  canVerify(id: LegalId): boolean {
+    return id.kind === "vat";
+  },
+
   async verifyId(id: LegalId, ctx: ConnectorContext): Promise<RegistryRecord | undefined> {
     if (id.kind !== "vat") return undefined;
     const answer = await checkVat(id.countryCode, id.value);

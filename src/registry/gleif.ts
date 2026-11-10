@@ -133,7 +133,15 @@ export const gleif: RegistryConnector = {
     return queryRecords(loose, query.limit ?? 5);
   },
 
+  // An LEI record files the entity's REGISTER number (`registeredAs`), never its
+  // VAT number, so a full-text search for one cannot match. Asking anyway cost a
+  // request per VAT number VIES declined to name — every German and Spanish one.
+  canVerify(id: LegalId): boolean {
+    return id.kind !== "vat";
+  },
+
   async verifyId(id: LegalId): Promise<RegistryRecord | undefined> {
+    if (id.kind === "vat") return undefined;
     if (id.kind === "lei") {
       const data = await get(`/lei-records/${encodeURIComponent(id.value.toUpperCase())}`);
       return toRecord(data?.data);

@@ -180,6 +180,7 @@ async function verify(
   for (const connector of connectors) {
     if (!connector.verifyId) continue;
     if (!connector.countries.includes("*") && !connector.countries.includes(id.countryCode)) continue;
+    if (connector.canVerify && !connector.canVerify(id)) continue;
     asked.push(connector.id);
     try {
       const record = await connector.verifyId(id, ctx);
@@ -256,6 +257,22 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
   let idsFound = 0;
   let done = 0;
 
+  // One question per identifier per run. A VAT number sits in the footer of
+  // every page of a site, and a landlord's on every tenant's: asked per
+  // OCCURRENCE, a live Hamburg run put the same number to VIES three times over,
+  // at a second each, to be told the same thing. The court travels in the key
+  // because a German register number means a different company at each one.
+  const verified = new Map<string, ReturnType<typeof verify>>();
+  const verifyOnce = (id: LegalId): ReturnType<typeof verify> => {
+    const key = [id.kind, id.countryCode, id.value.replace(/[\s.]/g, "").toUpperCase(), id.context ?? ""].join("|");
+    let pending = verified.get(key);
+    if (!pending) {
+      pending = verify(id, selection.confirm, ctx);
+      verified.set(key, pending);
+    }
+    return pending;
+  };
+
   for (const place of targets) {
     done++;
     opts.onProgress?.(done, targets.length, place.name);
@@ -277,7 +294,7 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
       if (!text) continue;
       for (const id of extractLegalIds(text, opts.countryCode, pageId)) {
         idsFound++;
-        const { record: rec, asked, answered } = await verify(id, selection.confirm, ctx);
+        const { record: rec, asked, answered } = await verifyOnce(id);
         if (answered > 0) anyAnswer = true;
         if (!rec) {
           // The number was read off a page this run holds, and no authority

@@ -315,4 +315,33 @@ describe("runConfirm — which authority is asked, and how often", () => {
     await runConfirm(dir, [p], { countryCode: "gr" });
     expect(asked).toEqual(["gr:EL030440244"]);
   });
+
+  it("asks about one identifier once, however many pages print it", async () => {
+    // A VAT number sits in every page's footer. A live Hamburg run put the same
+    // one to VIES three times, a second apiece, for the same answer.
+    const verifyId = vi.fn(async () => undefined);
+    selection.confirm = [fake({ verifyId })];
+    const p = place({ pages: ["P1", "P2", "P3"] });
+    const dir = runWithPage(p.id, "P1", "Start\nUSt-IdNr. DE811907980");
+    for (const pageId of ["P2", "P3"]) writeFileSync(join(dir, "pages", "osm_n1", `${pageId}.md`), "Kontakt\nUSt-IdNr. DE811907980");
+    await runConfirm(dir, [p], { countryCode: "de" });
+    expect(verifyId).toHaveBeenCalledTimes(1);
+    // Still one finding on the record, as before.
+    expect(p.legalIds).toHaveLength(1);
+  });
+
+  it("does not ask an authority about a kind of identifier it cannot check, nor record it as asked", async () => {
+    const vies = vi.fn(async () => undefined);
+    const gleif = vi.fn(async () => undefined);
+    selection.confirm = [
+      fake({ id: "eu-vies", verifyId: vies, canVerify: (id) => id.kind === "vat" }),
+      fake({ id: "gleif", verifyId: gleif, canVerify: (id) => id.kind !== "vat" }),
+    ];
+    const p = place({ pages: ["P1"] });
+    const dir = runWithPage(p.id, "P1", "Impressum\nUSt-IdNr. DE811907980");
+    await runConfirm(dir, [p], { countryCode: "de" });
+    expect(vies).toHaveBeenCalledTimes(1);
+    expect(gleif).not.toHaveBeenCalled();
+    expect(p.legalIds?.[0]?.authority).toBe("eu-vies");
+  });
 });
