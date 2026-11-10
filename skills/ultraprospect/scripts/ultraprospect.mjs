@@ -14407,8 +14407,9 @@ async function scanLocality(connectorId, key, keep2, limit) {
   const path = join5(dir(connectorId), "loc", `${bucketOf(key)}.jsonl`);
   if (!existsSync4(path)) return [];
   const out2 = [];
+  const ownLine = `{"l":${JSON.stringify(key)},`;
   for await (const line of linesOf(createReadStream2(path, { encoding: "utf8" }))) {
-    if (!line) continue;
+    if (!line || !line.startsWith(ownLine)) continue;
     let parsed;
     try {
       parsed = JSON.parse(line);

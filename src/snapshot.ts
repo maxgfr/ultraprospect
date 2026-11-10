@@ -623,8 +623,14 @@ async function scanLocality(connectorId: string, key: string, keep: (r: Registry
   const path = join(dir(connectorId), "loc", `${bucketOf(key)}.jsonl`);
   if (!existsSync(path)) return [];
   const out: RegistryRecord[] = [];
+  // A shard is a hash bucket holding every town that collided into it, and the
+  // lines of the one being asked for are a small share of it. Each line is
+  // written by `ingestSnapshot` as `{"l":<key>,…` with the key first, so the
+  // lines of other towns can be told apart WITHOUT parsing them — and parsing
+  // was nearly all of what a lookup spent.
+  const ownLine = `{"l":${JSON.stringify(key)},`;
   for await (const line of linesOf(createReadStream(path, { encoding: "utf8" }))) {
-    if (!line) continue;
+    if (!line || !line.startsWith(ownLine)) continue;
     let parsed: { l?: string; k?: string[]; r?: RegistryRecord };
     try {
       parsed = JSON.parse(line);
