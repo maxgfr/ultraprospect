@@ -18495,6 +18495,11 @@ function overpassError(body) {
   const m = /<strong[^>]*>Error<\/strong>:\s*([^<]+)/i.exec(body);
   return (m?.[1] ?? body.slice(0, 160)).replace(/\s+/g, " ").trim();
 }
+function overpassRemark(json2) {
+  const remark = json2?.remark;
+  if (typeof remark !== "string" || !/runtime error/i.test(remark)) return void 0;
+  return remark.replace(/\s+/g, " ").trim();
+}
 function isInstanceBusy(message) {
   return /dispatcher|open64|too busy|rate.?limit|HTTP 50[234]|HTTP 429|HTTP 0\b|not JSON|fetch failed|aborted|socket|ETIMEDOUT|ECONNRESET/i.test(message);
 }
@@ -18537,11 +18542,20 @@ async function runOnce(query, opts) {
       if (isQueryTooBig(err)) return { error: err, mirror, tooBig: true };
       continue;
     }
+    let json2;
     try {
-      return { json: JSON.parse(body), mirror };
+      json2 = JSON.parse(body);
     } catch {
       failures.push(`${mirror}: response was not JSON`);
+      continue;
     }
+    const remark = overpassRemark(json2);
+    if (remark) {
+      failures.push(`${mirror}: ${remark}`);
+      if (isQueryTooBig(remark)) return { error: remark, mirror, tooBig: true };
+      continue;
+    }
+    return { json: json2, mirror };
   }
   const joined = failures.join(" | ");
   return { error: joined, tooBig: failures.every((f) => isQueryTooBig(f) || isInstanceBusy(f)) };

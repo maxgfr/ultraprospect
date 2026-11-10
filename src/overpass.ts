@@ -179,6 +179,20 @@ export function overpassError(body: string): string | undefined {
   return (m?.[1] ?? body.slice(0, 160)).replace(/\s+/g, " ").trim();
 }
 
+/**
+ * The runtime error a JSON answer carries, if it carries one.
+ *
+ * Overpass reports a timeout or an exhausted memory budget INSIDE a successful
+ * response: HTTP 200, a parseable body, the elements gathered before it gave
+ * up, and `"remark": "runtime error: Query timed out in \"query\" at line 3
+ * after 91 seconds."`. Exported for the drift tests.
+ */
+export function overpassRemark(json: unknown): string | undefined {
+  const remark = (json as { remark?: unknown } | null)?.remark;
+  if (typeof remark !== "string" || !/runtime error/i.test(remark)) return undefined;
+  return remark.replace(/\s+/g, " ").trim();
+}
+
 // Overpass failures come in two kinds that look alike and want OPPOSITE
 // responses, and conflating them is why a first cut of this file declared a
 // perfectly ordinary town "incomplete".
@@ -243,11 +257,23 @@ async function runOnce(query: string, opts: OverpassOptions): Promise<{ json?: a
       // Busy: fall through to the next mirror.
       continue;
     }
+    let json: any;
     try {
-      return { json: JSON.parse(body), mirror };
+      json = JSON.parse(body);
     } catch {
       failures.push(`${mirror}: response was not JSON`);
+      continue;
     }
+    // A query that dies PARTWAY still answers 200 with valid JSON: the elements
+    // it had collected so far, plus a `remark` saying why it stopped. Reading
+    // only `elements` would count half a city as a whole partition.
+    const remark = overpassRemark(json);
+    if (remark) {
+      failures.push(`${mirror}: ${remark}`);
+      if (isQueryTooBig(remark)) return { error: remark, mirror, tooBig: true };
+      continue;
+    }
+    return { json, mirror };
   }
   const joined = failures.join(" | ");
   // Every mirror refused. If they all refused for capacity reasons the area is
