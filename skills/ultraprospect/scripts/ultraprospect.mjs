@@ -22475,6 +22475,8 @@ function tally(items, key) {
 function describeFilters(filters) {
   const out2 = [];
   const list3 = (v) => Array.isArray(v) && v.length ? v.map(String) : void 0;
+  const categories = list3(filters.categories);
+  if (categories) out2.push(`category \`${categories.join("`, `")}\` only`);
   const groups = list3(filters.osmGroups);
   if (groups) out2.push(`OSM \`${groups.join("`, `")}\` tags only`);
   const codes = list3(filters.activityCodes);
@@ -22483,8 +22485,13 @@ function describeFilters(filters) {
   if (sections) out2.push(`register sections ${sections.join(", ")}`);
   const bands = list3(filters.sizeBands);
   if (bands) out2.push(`headcount bands ${bands.join(", ")}`);
+  if (typeof filters.minEmployees === "number" && filters.minEmployees > 0) out2.push(`at least ${filters.minEmployees} employees`);
+  const forms = list3(filters.legalForms);
+  if (forms) out2.push(`legal forms ${forms.join(", ")} only`);
+  const excluded = list3(filters.excludeLegalForms);
+  if (excluded) out2.push(`legal forms ${excluded.join(", ")} excluded`);
   const ids = list3(filters.registryIds);
-  if (ids) out2.push(`${ids.length} explicit register identifier(s)`);
+  if (ids) out2.push(`register connector${ids.length === 1 ? "" : "s"} ${ids.join(", ")} only`);
   if (typeof filters.maxResults === "number" && filters.maxResults > 0) out2.push(`capped at ${filters.maxResults} results`);
   if (filters.includeCeased === true) out2.push("ceased companies included");
   return out2;

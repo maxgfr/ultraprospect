@@ -171,6 +171,16 @@ describe("summarise", () => {
 });
 
 describe("describeFilters", () => {
+  it("describes a --category run, whose legacy fields hold a note instead of a list", () => {
+    const said = describeFilters({ categories: ["amenity=cafe", "naf=56.30Z"], osmGroups: "replaced by --category", sections: null });
+    expect(said).toEqual(["category `amenity=cafe`, `naf=56.30Z` only"]);
+  });
+
+  it("names the size and legal-form filters, and calls a connector a connector", () => {
+    const said = describeFilters({ minEmployees: 10, legalForms: ["5710"], excludeLegalForms: ["9110", "9220"], registryIds: ["fr-sirene"] });
+    expect(said).toEqual(["at least 10 employees", "legal forms 5710 only", "legal forms 9110, 9220 excluded", "register connector fr-sirene only"]);
+  });
+
   it("reports what narrowed the run and stays silent about the defaults", () => {
     expect(describeFilters({ osmGroups: ["office", "shop"], includeCeased: false })).toEqual(["OSM `office`, `shop` tags only"]);
     // "all" is not a narrowing, and neither is excluding ceased companies.

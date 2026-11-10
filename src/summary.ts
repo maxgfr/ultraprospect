@@ -240,6 +240,11 @@ export function describeFilters(filters: Record<string, unknown>): string[] {
   const out: string[] = [];
   const list = (v: unknown): string[] | undefined => (Array.isArray(v) && v.length ? v.map(String) : undefined);
 
+  // `--category` aims both lanes and records itself here; when it ran, the
+  // legacy fields beside it hold a note ("replaced by --category") rather than
+  // a list, and reading only those reported a narrowed run as unfiltered.
+  const categories = list(filters.categories);
+  if (categories) out.push(`category \`${categories.join("`, `")}\` only`);
   const groups = list(filters.osmGroups);
   if (groups) out.push(`OSM \`${groups.join("`, `")}\` tags only`);
   const codes = list(filters.activityCodes);
@@ -248,8 +253,14 @@ export function describeFilters(filters: Record<string, unknown>): string[] {
   if (sections) out.push(`register sections ${sections.join(", ")}`);
   const bands = list(filters.sizeBands);
   if (bands) out.push(`headcount bands ${bands.join(", ")}`);
+  if (typeof filters.minEmployees === "number" && filters.minEmployees > 0) out.push(`at least ${filters.minEmployees} employees`);
+  const forms = list(filters.legalForms);
+  if (forms) out.push(`legal forms ${forms.join(", ")} only`);
+  const excluded = list(filters.excludeLegalForms);
+  if (excluded) out.push(`legal forms ${excluded.join(", ")} excluded`);
+  // These are CONNECTOR ids (`--registry fr-sirene`), not company identifiers.
   const ids = list(filters.registryIds);
-  if (ids) out.push(`${ids.length} explicit register identifier(s)`);
+  if (ids) out.push(`register connector${ids.length === 1 ? "" : "s"} ${ids.join(", ")} only`);
   if (typeof filters.maxResults === "number" && filters.maxResults > 0) out.push(`capped at ${filters.maxResults} results`);
   // Stated only when ceased companies WERE kept: excluding them is the default,
   // and a default reported as a finding is noise.
