@@ -358,6 +358,7 @@ export interface PeopleOptions {
  */
 export function extractPeople(text: string, opts: PeopleOptions = {}): FoundPerson[] {
   const roles = rolesFor(opts.countryCode);
+  const compounds = new Set(LANGUAGE_OF[(opts.countryCode ?? "").toLowerCase()] === "de" ? ROLES.de : []);
   const found: FoundPerson[] = [];
   const seen = new Set<string>();
 
@@ -371,11 +372,21 @@ export function extractPeople(text: string, opts: PeopleOptions = {}): FoundPers
 
   for (const role of roles) {
     const escaped = role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // A label is a WORD, not a run of letters inside another one. Without the
+    // boundary, and with matching case-insensitive, "Director of Sales" was read
+    // as a CTO, "Coordinator" as a COO and "Leiterplatten" as a Leiter.
+    //
+    // German is the one exception on the left side, and only for its own
+    // labels: it compounds, so "Vertriebsleiter" and "Firmeninhaber" are real
+    // titles ending in a label, and refusing them would lose most of a German
+    // team page.
+    const before = compounds.has(role) ? "" : "(?<!\\p{L})";
+    const after = "(?!\\p{L})";
 
     // LABEL: Name, Name — the separator is a colon or a dash, NEVER nothing.
     // Requiring a separator is what refuses "Geschäftsführer an Bord, wodurch",
     // where the label runs straight into prose.
-    for (const m of text.matchAll(new RegExp(`${escaped}\\s*[:：]\\s*([^\\n]{3,120})`, "gi"))) {
+    for (const m of text.matchAll(new RegExp(`${before}${escaped}\\s*[:：]\\s*([^\\n]{3,120})`, "giu"))) {
       for (const candidate of m[1]!.split(/\s*(?:,|;|\bund\b|\band\b|&|\bet\b|\by\b)\s*/i)) {
         if (isName(candidate, opts)) add(candidate, role);
       }
@@ -383,7 +394,7 @@ export function extractPeople(text: string, opts: PeopleOptions = {}): FoundPers
 
     // Name \n LABEL — a team card. The name is the line above, and it has to be
     // a whole line: a name buried in a sentence is a mention, not a card.
-    for (const m of text.matchAll(new RegExp(`(^|\\n)\\s*([^\\n]{4,70})\\s*\\n\\s*[^\\n]{0,20}${escaped}`, "gi"))) {
+    for (const m of text.matchAll(new RegExp(`(^|\\n)\\s*([^\\n]{4,70})\\s*\\n\\s*[^\\n]{0,20}${before}${escaped}${after}`, "giu"))) {
       if (isName(m[2]!, opts)) add(m[2]!, role);
     }
   }

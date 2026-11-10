@@ -87,6 +87,25 @@ describe("extractPeople", () => {
     expect(de("Head of: Digital Solutions")).toEqual([]);
   });
 
+  it("reads a label as a word, never as letters inside a longer one", () => {
+    // "Dire-cto-r", "Co-o-rdinator": matching is case-insensitive, so without a
+    // boundary every Director was a CTO and every Coordinator a COO.
+    expect(de("Anna Müller\nDirector of Sales")).toEqual([]);
+    expect(de("Jonas Petersen\nProject Coordinator")).toEqual([]);
+    expect(extractPeople("Claire Dubosc\nCoordinatrice de projet", { countryCode: "fr" })).toEqual([]);
+    // A circuit board is not somebody's manager.
+    expect(de("Thomas Becker\nLeiterplatten und Bestückung")).toEqual([]);
+    // …and the real thing still reads, in both shapes.
+    expect(de("Anna Müller\nCTO")).toEqual([{ value: "Anna Müller", role: "CTO" }]);
+    expect(de("CTO: Anna Müller")).toEqual([{ value: "Anna Müller", role: "CTO" }]);
+    expect(de("Anna Müller\nCo-Founder & CEO").map((p) => p.value)).toEqual(["Anna Müller"]);
+  });
+
+  it("keeps German compound titles, because that is how German names a role", () => {
+    expect(de("Vertriebsleiter: Thomas Becker")).toEqual([{ value: "Thomas Becker", role: "Leiter" }]);
+    expect(de("Thomas Becker\nVertriebsleiter")).toEqual([{ value: "Thomas Becker", role: "Leiter" }]);
+  });
+
   it("does not report the same person twice from one page", () => {
     const twice = de("Vertreten durch: René Schuch\nGeschäftsführer: René Schuch");
     expect(twice).toHaveLength(1);

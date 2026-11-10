@@ -20935,6 +20935,7 @@ function isName(raw, opts) {
 }
 function extractPeople(text3, opts = {}) {
   const roles = rolesFor(opts.countryCode);
+  const compounds = new Set(LANGUAGE_OF[(opts.countryCode ?? "").toLowerCase()] === "de" ? ROLES.de : []);
   const found = [];
   const seen = /* @__PURE__ */ new Set();
   const add2 = (value, role) => {
@@ -20946,12 +20947,14 @@ function extractPeople(text3, opts = {}) {
   };
   for (const role of roles) {
     const escaped = role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    for (const m of text3.matchAll(new RegExp(`${escaped}\\s*[:\uFF1A]\\s*([^\\n]{3,120})`, "gi"))) {
+    const before = compounds.has(role) ? "" : "(?<!\\p{L})";
+    const after = "(?!\\p{L})";
+    for (const m of text3.matchAll(new RegExp(`${before}${escaped}\\s*[:\uFF1A]\\s*([^\\n]{3,120})`, "giu"))) {
       for (const candidate of m[1].split(/\s*(?:,|;|\bund\b|\band\b|&|\bet\b|\by\b)\s*/i)) {
         if (isName(candidate, opts)) add2(candidate, role);
       }
     }
-    for (const m of text3.matchAll(new RegExp(`(^|\\n)\\s*([^\\n]{4,70})\\s*\\n\\s*[^\\n]{0,20}${escaped}`, "gi"))) {
+    for (const m of text3.matchAll(new RegExp(`(^|\\n)\\s*([^\\n]{4,70})\\s*\\n\\s*[^\\n]{0,20}${before}${escaped}${after}`, "giu"))) {
       if (isName(m[2], opts)) add2(m[2], role);
     }
   }
