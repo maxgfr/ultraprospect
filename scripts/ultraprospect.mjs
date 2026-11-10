@@ -15516,7 +15516,10 @@ function toRecord6(payload) {
     address: addressOf6(siedziba),
     countryCode: "pl",
     activityCode,
-    section: activityCode ? activityCode.slice(0, 2).replace(/\D/g, "") : void 0,
+    // The SECTION LETTER, like every other NACE connector. This used to hand
+    // back the division's two digits ("62"), which no `--section J` filter and
+    // no section label could ever match.
+    section: activityCode ? naceSection(activityCode) : void 0,
     activityScheme: "nace",
     legalForm: dzial1?.danePodmiotu?.formaPrawna ?? void 0,
     status: odpis?.naglowekA?.stanPozycji != null ? "active" : "unknown",

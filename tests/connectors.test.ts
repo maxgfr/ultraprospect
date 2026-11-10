@@ -282,6 +282,23 @@ describe("us-edgar", () => {
 });
 
 describe("pl-krs", () => {
+  it("files the activity under its NACE section letter, not under the division's digits", () => {
+    const rec = krsRecord({
+      odpis: {
+        naglowekA: { numerKRS: "0000012345", stanPozycji: 1 },
+        dane: {
+          dzial1: {
+            danePodmiotu: { nazwa: "PRZYKLAD SOFTWARE SP. Z O.O." },
+            siedzibaIAdres: { adres: { miejscowosc: "KRAKÓW" } },
+            przedmiotDzialalnosci: { przedmiotPrzewazajacejDzialalnosci: [{ dzial: "62", grupa: "01", podklasa: "Z" }] },
+          },
+        },
+      },
+    })!;
+    expect(rec.activityCode).toBe("62.01.Z");
+    expect(rec.section).toBe("J");
+  });
+
   it("reads the name and address out of the nested odpis", () => {
     const rec = krsRecord({
       odpis: {

@@ -15,6 +15,7 @@
 // It publishes more than most: the company's email and website come back in
 // `siedzibaIAdres`, which is unusual for a court register.
 import { awaitHostSlot, httpJson } from "../engine.js";
+import { naceSection } from "../classification/nace.js";
 import { politeUa } from "../net.js";
 import type { PostalAddress } from "../types.js";
 import type { Availability, CanaryCheck, LegalId, RegistryConnector, RegistryRecord } from "./types.js";
@@ -63,7 +64,10 @@ export function toRecord(payload: any): RegistryRecord | undefined {
     address: addressOf(siedziba),
     countryCode: "pl",
     activityCode,
-    section: activityCode ? activityCode.slice(0, 2).replace(/\D/g, "") : undefined,
+    // The SECTION LETTER, like every other NACE connector. This used to hand
+    // back the division's two digits ("62"), which no `--section J` filter and
+    // no section label could ever match.
+    section: activityCode ? naceSection(activityCode) : undefined,
     activityScheme: "nace",
     legalForm: dzial1?.danePodmiotu?.formaPrawna ?? undefined,
     status: odpis?.naglowekA?.stanPozycji != null ? "active" : "unknown",
