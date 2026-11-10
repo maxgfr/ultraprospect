@@ -2,6 +2,49 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [3.17.1](https://github.com/maxgfr/ultraprospect/compare/v3.17.0...v3.17.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **cli:** refuse a numeric flag that is not a number instead of guessing one ([b689106](https://github.com/maxgfr/ultraprospect/commit/b689106490d855d19dc09961690380d78f88d3f9))
+* **companies-house:** do not answer a name made of legal forms with the first companies in town ([92c2170](https://github.com/maxgfr/ultraprospect/commit/92c2170a9da026885f92f0c3d688485b708dafe9))
+* **confirm:** keep attributions and counts across passes, and do not attach a dissolved company by name ([5720842](https://github.com/maxgfr/ultraprospect/commit/57208421f78d123229b60a5b5fce6845a1289917))
+* **confirm:** send a Greek VAT number to the authority that serves Greece ([2f31505](https://github.com/maxgfr/ultraprospect/commit/2f31505753cf8a4569c7cefbce6b028b04521d5d))
+* **csv:** defuse cells a spreadsheet would execute as a formula ([52bc5df](https://github.com/maxgfr/ultraprospect/commit/52bc5dfbc4a6df2d4c20103e99ca1650ca86a1f2))
+* **enrich:** spend the legal fetch on the notice, and try each guessed path until one answers ([cfc84d2](https://github.com/maxgfr/ultraprospect/commit/cfc84d25e587b220a1f650eb846a6d22ef0a40e4))
+* **enrich:** survive a malformed mailto and a pathological token on a fetched page ([dd66e3a](https://github.com/maxgfr/ultraprospect/commit/dd66e3ae07a106bc2f0d99b8c21cdb5edbeca7a3))
+* **html:** print a link that is not a web, mail or phone link as text ([d58b2da](https://github.com/maxgfr/ultraprospect/commit/d58b2dac6a327b10cb742b9a898daf3d5d8ade62))
+* **ingest:** a failed or limited ingest can no longer pass as a complete index ([130f6fd](https://github.com/maxgfr/ultraprospect/commit/130f6fd93a79b756fdbf65ab9f1e9c0d76b85518))
+* **ingest:** decode a register export across chunk boundaries instead of per chunk ([6fef4f2](https://github.com/maxgfr/ultraprospect/commit/6fef4f215c403c43993a5c962c0a663b2c404946))
+* **krs:** file a Polish activity under its NACE section letter ([c7d6097](https://github.com/maxgfr/ultraprospect/commit/c7d609759d4c32835978c8050ff23d02d4b35131))
+* **legal-notice:** do not read an ordinary lowercase word as a VAT prefix ([f2710f6](https://github.com/maxgfr/ultraprospect/commit/f2710f6b9504a15dd83895d196269ca24d60e732))
+* **match:** fold an adjudication as one record onto one unmatched place, and say it was adjudicated ([8d9632d](https://github.com/maxgfr/ultraprospect/commit/8d9632d9ad9ffef130dcf9478627482a00deedd6))
+* **mcp:** give scan, enrich and watch the arguments and refusals the CLI has ([7ff2897](https://github.com/maxgfr/ultraprospect/commit/7ff28972c8e710a40edad764fa9091af35771252))
+* **overpass:** read the runtime-error remark of a 200 answer as a failed query ([672039c](https://github.com/maxgfr/ultraprospect/commit/672039cdd5849f0177d6d1f1a1149a1fedd5c3ce))
+* **people:** read a role label as a word, not as letters inside a longer one ([fdd87d3](https://github.com/maxgfr/ultraprospect/commit/fdd87d3d13debb218d8a2f56addc51a91706fc1f))
+* **privacy:** make --no-people hold for the raw register lane and every deliverable ([5b18e85](https://github.com/maxgfr/ultraprospect/commit/5b18e85c67e4b53c93e30abab343ebb3f18eeee9))
+* **report:** describe every filter that narrowed a run ([e2cdda3](https://github.com/maxgfr/ultraprospect/commit/e2cdda34b47d73a4e5642b829edfe1303c508501))
+* **resolve:** corroborate a company name word by word, not as a substring of the page ([e58b9bb](https://github.com/maxgfr/ultraprospect/commit/e58b9bb0ce23d9f97be5d53fc68f533ebc885803))
+* **resolve:** match a listed host as a host, not as letters inside another one ([04df77d](https://github.com/maxgfr/ultraprospect/commit/04df77d99d5c0aedc97dbe15a0985745ab03a5bb))
+* **resolve:** try the domain that carries the company's name before a directory that lists it ([7d04a49](https://github.com/maxgfr/ultraprospect/commit/7d04a49718b9983a1446e06f63091cfc2f202a45))
+* **scan:** do not replay an unsweepable territory as a register sweep that found nothing ([771c0fb](https://github.com/maxgfr/ultraprospect/commit/771c0fbc45f08eaa494d554673d386056b6f609f))
+* **score:** refuse a fit level nobody defined, in --min-fit and in a verdict file ([892b015](https://github.com/maxgfr/ultraprospect/commit/892b01547c00af01f5c85f72b56fcc474cc560fd))
+* **signals:** do not read a short term out of the longer words that begin with it ([89e3748](https://github.com/maxgfr/ultraprospect/commit/89e37482fd5a66f42813f34a4e018a0c8d53cdc1))
+* **sirene:** keep the caller's activity codes when a capped section is split by division ([d806016](https://github.com/maxgfr/ultraprospect/commit/d80601682d61e573bcdecdf700c1748584e9f502))
+* **sirene:** report a results page that fails after the first as truncation ([a80061f](https://github.com/maxgfr/ultraprospect/commit/a80061f435efd76b1216461772dc0706bc219279))
+* **tenders:** four ways a run lost or misstated a notice without saying so ([9e53902](https://github.com/maxgfr/ultraprospect/commit/9e539029b2a23d0810a9cb72931b1f8ab129abbc))
+* **tenders:** read a deadline in its own timezone instead of comparing its day with UTC's ([6d8e29d](https://github.com/maxgfr/ultraprospect/commit/6d8e29d7098a94e5801b7bef513014ce7ac2ebce))
+* **watch:** join two runs on any key a place shares, not on its register key alone ([ff8c182](https://github.com/maxgfr/ultraprospect/commit/ff8c182689765f0216f61295e3fa39fc3c1ce8e3))
+* **zip:** stop trusting the sizes an archive states about itself ([0236960](https://github.com/maxgfr/ultraprospect/commit/02369604e4a1865df2072ddbbe627660b3715b05))
+
+
+### Performance Improvements
+
+* **check:** fold each page once, however many values cite it ([92b56d4](https://github.com/maxgfr/ultraprospect/commit/92b56d41bb24f3e36cb7afe4585d435574a6cc18))
+* **confirm:** ask about each identifier once, and only authorities that can answer ([45d7a9a](https://github.com/maxgfr/ultraprospect/commit/45d7a9a7e326525c3254d5c8c2a062e68220493b))
+* **snapshot:** tell another town's line apart without parsing it ([090d579](https://github.com/maxgfr/ultraprospect/commit/090d5796bccb66a32b8b6d75b8273036e345ebdb))
+
 # [3.17.0](https://github.com/maxgfr/ultraprospect/compare/v3.16.5...v3.17.0) (2026-11-02)
 
 
