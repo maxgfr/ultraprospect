@@ -62,6 +62,59 @@ const LEGAL_GUESSES = [
   "/legal-notices",
 ];
 
+/** The guesses a country's own law makes likely, tried before the rest. */
+const LEGAL_GUESSES_BY_COUNTRY: Record<string, string[]> = {
+  fr: ["/mentions-legales", "/mentions-legales/"],
+  de: ["/impressum", "/impressum/", "/imprint"],
+  at: ["/impressum", "/impressum/", "/imprint"],
+  ch: ["/impressum", "/impressum/", "/imprint"],
+  es: ["/aviso-legal", "/aviso-legal/", "/informacion-legal"],
+  it: ["/note-legali"],
+};
+
+/**
+ * How many guessed paths one site is worth. Each miss is a 404 served by a
+ * company that never asked to be probed, so the list is tried in the order the
+ * country makes likely and abandoned quickly.
+ */
+const MAX_LEGAL_GUESSES = 3;
+
+/** The guesses for a run's country: its own first, the general list after. */
+export function legalGuessesFor(countryCode: string | undefined): string[] {
+  const own = LEGAL_GUESSES_BY_COUNTRY[(countryCode ?? "").toLowerCase()] ?? [];
+  return [...new Set([...own, ...LEGAL_GUESSES])];
+}
+
+/**
+ * A legal NOTICE, as opposed to the other pages filed under the `legal` role.
+ *
+ * The role covers privacy policies and terms of sale too, because those are
+ * legal pages. Only the notice carries what tier 1 goes there for: the
+ * registration number, the VAT number and who represents the company.
+ */
+const LEGAL_NOTICE_RE =
+  /(?:^|\/)(?:mentions-legales|mentions-légales|legal-notice|legal-notices|impressum|imprint|anbieterkennzeichnung|aviso-legal|informacion-legal|note-legali)(?:\/|$|\.)/i;
+
+export function isLegalNotice(url: string): boolean {
+  try {
+    return LEGAL_NOTICE_RE.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
+/** Whether this notice is spelled the way the run's country spells it. */
+function isOwnCountryNotice(url: string, countryCode: string | undefined): boolean {
+  const own = LEGAL_GUESSES_BY_COUNTRY[(countryCode ?? "").toLowerCase()];
+  if (!own) return false;
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    return own.some((guess) => path.includes(guess.replace(/\/$/, "")));
+  } catch {
+    return false;
+  }
+}
+
 export interface EnrichOptions {
   tier: 1 | 2;
   /** Enrich at most this many places. */
@@ -138,8 +191,18 @@ async function readSitemap(homeUrl: string): Promise<SiteMap> {
   }
 }
 
-/** Pick one URL per role from an inventory, nearest-to-root first. */
-export function pickByRole(urls: readonly string[], roles: readonly PageRole[]): Map<PageRole, string> {
+/**
+ * Pick one URL per role from an inventory, nearest-to-root first.
+ *
+ * The `legal` role is ranked before depth is consulted, because it holds three
+ * kinds of page and only one of them is worth the single fetch tier 1 has: a
+ * notice beats a privacy policy, and a notice in the run's own language beats a
+ * translation. Measured on a live Hamburg run, where depth alone decided: 9 of
+ * 26 legal slots went to `/datenschutz` while the site's `/impressum` — the page
+ * carrying the HRB number — was in the same inventory, and one German company
+ * was read through its `/es/aviso-legal/`.
+ */
+export function pickByRole(urls: readonly string[], roles: readonly PageRole[], countryCode?: string): Map<PageRole, string> {
   const wanted = new Set(roles);
   const best = new Map<PageRole, string>();
   const depth = (u: string) => {
@@ -149,12 +212,18 @@ export function pickByRole(urls: readonly string[], roles: readonly PageRole[]):
       return 99;
     }
   };
+  /** Lower is better. Only the legal role has anything but depth to say. */
+  const rank = (role: PageRole, u: string): number => {
+    if (role !== "legal") return depth(u);
+    const kind = !isLegalNotice(u) ? 2 : isOwnCountryNotice(u, countryCode) ? 0 : 1;
+    return kind * 100 + depth(u);
+  };
   for (const url of urls) {
     const role = roleOf(url);
     if (!wanted.has(role)) continue;
     const current = best.get(role);
     // A section's landing page says more than one article inside it.
-    if (!current || depth(url) < depth(current)) best.set(role, url);
+    if (!current || rank(role, url) < rank(role, current)) best.set(role, url);
   }
   return best;
 }
@@ -194,23 +263,43 @@ async function enrichOne(
   const inventory = [...new Set([...sitemap.urls, ...homeLinks])];
 
   const roles = opts.tier === 1 ? TIER1_ROLES.filter((r) => r !== "home") : TIER2_ROLES;
-  const picked = pickByRole(inventory, roles);
+  const picked = pickByRole(inventory, roles, opts.countryCode);
 
   // The legal notice is the highest-value page in tier 1: it carries the
   // registration number that corroborates the register match — and outside
   // France it is where the register identity comes from at all, since `confirm`
   // reads it there. It is also the one page a site reliably has at a
   // predictable path when the sitemap omits it.
-  if (opts.tier === 1 && !picked.has("legal")) {
-    for (const guess of LEGAL_GUESSES) {
+  //
+  // Guessed when the inventory names no NOTICE — which includes the case where
+  // all it names is a privacy policy. Each guess is actually fetched, in the
+  // order the run's country makes likely, until one answers: the loop used to
+  // settle on the first path in the list without asking, so every German site
+  // was asked for `/mentions-legales` and `/impressum` was never reached.
+  const pickedLegal = picked.get("legal");
+  if (opts.tier === 1 && (!pickedLegal || !isLegalNotice(pickedLegal))) {
+    let tried = 0;
+    for (const guess of legalGuessesFor(opts.countryCode)) {
+      if (tried >= MAX_LEGAL_GUESSES) break;
+      let url: string;
       try {
-        const url = new URL(guess, home).href;
-        if (inventory.includes(url) || !allowed(url)) continue;
-        picked.set("legal", url);
-        break;
+        url = new URL(guess, home).href;
       } catch {
         // A base URL that will not parse has bigger problems.
+        break;
       }
+      if (inventory.includes(url) || !allowed(url)) continue;
+      tried++;
+      const outcome = await fetchPage(runDir, place.id, url, "legal", store, { keepHtml: true });
+      if (!outcome.ok) continue;
+      // A site that answers every unknown path with its homepage has not
+      // published a notice at this one, and will say the same of the next.
+      if (roleOf(outcome.page.record.url) === "home") break;
+      fetched.push(outcome.page);
+      boards.push(...detectBoards(outcome.page.html ?? "", outcome.page.record.url));
+      // The notice was the point of the legal slot; the privacy page is not read on top of it.
+      picked.delete("legal");
+      break;
     }
   }
 

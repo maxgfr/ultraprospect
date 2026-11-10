@@ -20982,6 +20982,37 @@ var LEGAL_GUESSES = [
   "/note-legali",
   "/legal-notices"
 ];
+var LEGAL_GUESSES_BY_COUNTRY = {
+  fr: ["/mentions-legales", "/mentions-legales/"],
+  de: ["/impressum", "/impressum/", "/imprint"],
+  at: ["/impressum", "/impressum/", "/imprint"],
+  ch: ["/impressum", "/impressum/", "/imprint"],
+  es: ["/aviso-legal", "/aviso-legal/", "/informacion-legal"],
+  it: ["/note-legali"]
+};
+var MAX_LEGAL_GUESSES = 3;
+function legalGuessesFor(countryCode) {
+  const own = LEGAL_GUESSES_BY_COUNTRY[(countryCode ?? "").toLowerCase()] ?? [];
+  return [.../* @__PURE__ */ new Set([...own, ...LEGAL_GUESSES])];
+}
+var LEGAL_NOTICE_RE = /(?:^|\/)(?:mentions-legales|mentions-légales|legal-notice|legal-notices|impressum|imprint|anbieterkennzeichnung|aviso-legal|informacion-legal|note-legali)(?:\/|$|\.)/i;
+function isLegalNotice(url) {
+  try {
+    return LEGAL_NOTICE_RE.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+function isOwnCountryNotice(url, countryCode) {
+  const own = LEGAL_GUESSES_BY_COUNTRY[(countryCode ?? "").toLowerCase()];
+  if (!own) return false;
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    return own.some((guess) => path.includes(guess.replace(/\/$/, "")));
+  } catch {
+    return false;
+  }
+}
 function enrichable(places) {
   return places.filter((p) => p.website?.confidence === "corroborated");
 }
@@ -21003,7 +21034,7 @@ async function readSitemap(homeUrl) {
     return { urls: [], count: 0 };
   }
 }
-function pickByRole(urls, roles) {
+function pickByRole(urls, roles, countryCode) {
   const wanted = new Set(roles);
   const best = /* @__PURE__ */ new Map();
   const depth = (u) => {
@@ -21013,11 +21044,16 @@ function pickByRole(urls, roles) {
       return 99;
     }
   };
+  const rank = (role, u) => {
+    if (role !== "legal") return depth(u);
+    const kind = !isLegalNotice(u) ? 2 : isOwnCountryNotice(u, countryCode) ? 0 : 1;
+    return kind * 100 + depth(u);
+  };
   for (const url of urls) {
     const role = roleOf(url);
     if (!wanted.has(role)) continue;
     const current2 = best.get(role);
-    if (!current2 || depth(url) < depth(current2)) best.set(role, url);
+    if (!current2 || rank(role, url) < rank(role, current2)) best.set(role, url);
   }
   return best;
 }
@@ -21037,16 +21073,27 @@ async function enrichOne(runDir, place, store, opts) {
   const homeLinks = sameOriginLinks(homePage.html ?? "", homePage.record.url);
   const inventory = [.../* @__PURE__ */ new Set([...sitemap.urls, ...homeLinks])];
   const roles = opts.tier === 1 ? TIER1_ROLES.filter((r) => r !== "home") : TIER2_ROLES;
-  const picked = pickByRole(inventory, roles);
-  if (opts.tier === 1 && !picked.has("legal")) {
-    for (const guess of LEGAL_GUESSES) {
+  const picked = pickByRole(inventory, roles, opts.countryCode);
+  const pickedLegal = picked.get("legal");
+  if (opts.tier === 1 && (!pickedLegal || !isLegalNotice(pickedLegal))) {
+    let tried = 0;
+    for (const guess of legalGuessesFor(opts.countryCode)) {
+      if (tried >= MAX_LEGAL_GUESSES) break;
+      let url;
       try {
-        const url = new URL(guess, home).href;
-        if (inventory.includes(url) || !allowed(url)) continue;
-        picked.set("legal", url);
-        break;
+        url = new URL(guess, home).href;
       } catch {
+        break;
       }
+      if (inventory.includes(url) || !allowed(url)) continue;
+      tried++;
+      const outcome = await fetchPage2(runDir, place.id, url, "legal", store, { keepHtml: true });
+      if (!outcome.ok) continue;
+      if (roleOf(outcome.page.record.url) === "home") break;
+      fetched.push(outcome.page);
+      boards.push(...detectBoards(outcome.page.html ?? "", outcome.page.record.url));
+      picked.delete("legal");
+      break;
     }
   }
   const budget = opts.tier === 1 ? 2 : opts.maxPages ?? TIER2_ROLES.length;
