@@ -13707,7 +13707,7 @@ var frSirene = {
 
 // src/snapshot.ts
 import { createReadStream as createReadStream2, createWriteStream } from "fs";
-import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync6, readdirSync as readdirSync4, rmSync as rmSync3, statSync as statSync6, writeFileSync as writeFileSync6 } from "fs";
+import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync6, readdirSync as readdirSync4, renameSync as renameSync2, rmSync as rmSync3, statSync as statSync6, writeFileSync as writeFileSync6 } from "fs";
 import { createInterface as createInterface2 } from "readline";
 import { Readable } from "stream";
 import { StringDecoder } from "string_decoder";
@@ -14078,6 +14078,10 @@ async function openZipMember(path, entry) {
 // src/snapshot.ts
 var BUCKETS = 256;
 var LAYOUT_VERSION = 2;
+function partialIngestNote(meta) {
+  if (meta?.limited === void 0) return void 0;
+  return `PARTIAL INGEST: this snapshot was indexed with --limit ${meta.limited}, so it holds the first ${meta.rows} records of the export and not the register. Re-run \`ingest\` without --limit before reading anything as complete.`;
+}
 var root = () => join5(cacheDir(), "snapshots");
 var dir = (connectorId) => join5(root(), connectorId);
 function snapshotKey(raw) {
@@ -14256,28 +14260,52 @@ async function ingestSnapshot(connectorId, source2, opts = {}) {
     source_file = download;
     note(`ingest: ${used.url} (${(statSync6(download).size / 1e6).toFixed(0)} MB${used.lastModified ? `, last modified ${used.lastModified}` : ""})`);
   }
+  const metaPath = join5(target, "meta.json");
+  rmSync3(metaPath, { force: true });
   for (const sub of ["loc", "id"]) rmSync3(join5(target, sub), { recursive: true, force: true });
   for (const sub of ["loc", "id"]) mkdirSync2(join5(target, sub), { recursive: true });
   const handles = /* @__PURE__ */ new Map();
+  let writeError;
   const streamFor = (index, bucket2) => {
     const key = `${index}/${bucket2}`;
     let s = handles.get(key);
     if (!s) {
       s = createWriteStream(join5(target, index, `${bucket2}.jsonl`), { flags: "a" });
+      s.on("error", (e) => {
+        writeError ??= e;
+      });
       handles.set(key, s);
     }
     return s;
   };
   const writeLine = async (index, bucket2, line) => {
+    if (writeError) throw writeError;
     const s = streamFor(index, bucket2);
-    if (!s.write(line)) await new Promise((resolve4) => s.once("drain", () => resolve4()));
+    if (!s.write(line)) {
+      await new Promise((resolve4, reject) => {
+        const onDrain = () => {
+          s.off("error", onError);
+          resolve4();
+        };
+        const onError = (e) => {
+          s.off("drain", onDrain);
+          reject(e);
+        };
+        s.once("drain", onDrain);
+        s.once("error", onError);
+      });
+    }
   };
   const fallbackAsOf = source2.datesRecords === false ? void 0 : source2.vintage ?? (used.lastModified ? new Date(used.lastModified).toISOString().slice(0, 10) : void 0);
   let rows = 0;
   let skipped = 0;
+  let limited = false;
   try {
     for await (const raw of rowsOf(source2, source_file)) {
-      if (opts.limit && rows >= opts.limit) break;
+      if (opts.limit && rows >= opts.limit) {
+        limited = true;
+        break;
+      }
       const mapped = raw === void 0 ? void 0 : source2.parse(raw);
       if (!mapped) {
         skipped++;
@@ -14304,11 +14332,14 @@ async function ingestSnapshot(connectorId, source2, opts = {}) {
     await Promise.all(
       [...handles.values()].map(
         (s) => new Promise((resolve4) => {
+          if (s.destroyed) return resolve4();
+          s.once("error", () => resolve4());
           s.end(() => resolve4());
         })
       )
     );
   }
+  if (writeError) throw new Error(`ingest: writing the ${connectorId} index failed \u2014 ${writeError.message}. The partial index was not marked as usable.`);
   if (rows === 0) {
     throw new Error(`ingest: ${connectorId} mapped 0 of ${skipped} rows. The export's shape has moved \u2014 do not trust the cache, fix the parser.`);
   }
@@ -14325,10 +14356,13 @@ async function ingestSnapshot(connectorId, source2, opts = {}) {
     ingestedAt: (/* @__PURE__ */ new Date()).toISOString(),
     rows,
     skipped,
-    bytesOnDisk: directorySize(target)
+    bytesOnDisk: directorySize(target),
+    ...limited && opts.limit ? { limited: opts.limit } : {}
   };
-  writeFileSync6(join5(target, "meta.json"), `${JSON.stringify(meta, null, 2)}
+  writeFileSync6(`${metaPath}.tmp`, `${JSON.stringify(meta, null, 2)}
 `);
+  renameSync2(`${metaPath}.tmp`, metaPath);
+  if (limited) note(`ingest: ${connectorId} \u2014 stopped at --limit ${opts.limit}. This index is a sample, and every lane reading it will say so.`);
   note(`ingest: ${connectorId} \u2014 ${rows} records indexed, ${(meta.bytesOnDisk / 1e6).toFixed(0)} MB on disk at ${target}`);
   return meta;
 }
@@ -14743,7 +14777,7 @@ var eeAriregister = {
     const truncated = all.length > max;
     const records = truncated ? all.slice(0, max) : all;
     ctx.onProgress?.(records.length, town);
-    return {
+    const result = {
       records,
       notes: [],
       coverage: {
@@ -14756,6 +14790,13 @@ var eeAriregister = {
         reason: truncated ? `enumerated from the \xC4riregister open-data export by ADMINISTRATIVE UNIT "${town}", and stopped at --max-results ${max}. An administrative unit is not a bounding box, so this lane's shape does not coincide with the OSM lane's.` : `enumerated from the \xC4riregister open-data export by ADMINISTRATIVE UNIT "${town}" \u2014 every company the register files there, from a file rebuilt daily. An administrative unit is not a bounding box, so this lane's shape does not coincide with the OSM lane's.`
       }
     };
+    const partial = partialIngestNote(meta);
+    if (partial) {
+      result.coverage.truncated = true;
+      result.coverage.reason = `${partial} ${result.coverage.reason ?? ""}`.trim();
+      result.notes.push(partial);
+    }
+    return result;
   },
   async lookup(query) {
     const name = query.names.find((n) => n?.trim());
@@ -15044,7 +15085,7 @@ var gbCompaniesHouse = {
     const truncated = all.length > max;
     const records = truncated ? all.slice(0, max) : all;
     ctx.onProgress?.(records.length, town);
-    return {
+    const result = {
       records,
       notes,
       coverage: {
@@ -15058,6 +15099,13 @@ var gbCompaniesHouse = {
         reason: truncated ? `enumerated from the ${meta.lastModified ? `${meta.lastModified.slice(0, 16)} ` : ""}Companies House snapshot by POST TOWN "${town}", and stopped at --max-results ${max}. A post town is not a bounding box, so this lane's shape does not coincide with the OSM lane's.` : `enumerated from the Companies House monthly snapshot by POST TOWN "${town}" \u2014 every company the register files there. A post town is not a bounding box, so this lane's shape does not coincide with the OSM lane's, and a company registered at an accountant's address in another town is absent from it.`
       }
     };
+    const partial = partialIngestNote(meta);
+    if (partial) {
+      result.coverage.truncated = true;
+      result.coverage.reason = `${partial} ${result.coverage.reason ?? ""}`.trim();
+      result.notes.push(partial);
+    }
+    return result;
   },
   async lookup(query, ctx) {
     const name = query.names.find((n) => n?.trim());

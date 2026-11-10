@@ -32,7 +32,7 @@
 import { awaitHostSlot, backOffHost, httpJson } from "../engine.js";
 import { naceSection } from "../classification/nace.js";
 import { politeUa } from "../net.js";
-import { hasSnapshot, snapshotByLocality, snapshotById, snapshotMeta, type SnapshotSource } from "../snapshot.js";
+import { hasSnapshot, partialIngestNote, snapshotByLocality, snapshotById, snapshotMeta, type SnapshotSource } from "../snapshot.js";
 import { nameSimilarity, normalizeName, shortLabel } from "../util.js";
 import type { GeoTarget, PostalAddress } from "../types.js";
 import type {
@@ -364,7 +364,7 @@ export const gbCompaniesHouse: RegistryConnector = {
     const records = truncated ? all.slice(0, max) : all;
     ctx.onProgress?.(records.length, town);
 
-    return {
+    const result: SweepResult = {
       records,
       notes,
       coverage: {
@@ -380,6 +380,15 @@ export const gbCompaniesHouse: RegistryConnector = {
           : `enumerated from the Companies House monthly snapshot by POST TOWN "${town}" — every company the register files there. A post town is not a bounding box, so this lane's shape does not coincide with the OSM lane's, and a company registered at an accountant's address in another town is absent from it.`,
       },
     };
+    // A snapshot indexed with --limit is a sample of the register, and a sweep
+    // of a sample is not an enumeration whatever its row count says.
+    const partial = partialIngestNote(meta);
+    if (partial) {
+      result.coverage.truncated = true;
+      result.coverage.reason = `${partial} ${result.coverage.reason ?? ""}`.trim();
+      result.notes.push(partial);
+    }
+    return result;
   },
 
   async lookup(query: LookupQuery, ctx: ConnectorContext): Promise<RegistryRecord[]> {

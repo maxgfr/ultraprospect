@@ -45,7 +45,7 @@
 // and a record that repeats its own register number four times costs a gigabyte
 // to say the same thing.
 import { createReadStream, createWriteStream } from "node:fs";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
@@ -169,6 +169,19 @@ export interface SnapshotMeta {
   /** Rows the connector's own mapper rejected. A high number means the shape moved. */
   skipped: number;
   bytesOnDisk: number;
+  /**
+   * Set when the ingest was stopped by `--limit` before the end of the file.
+   *
+   * Such an index is a SAMPLE of the register. Without this a lane sweeping it
+   * said "every company the register files there" over the first thousand rows.
+   */
+  limited?: number;
+}
+
+/** What a lane must say about a snapshot that does not hold the whole register. */
+export function partialIngestNote(meta: SnapshotMeta | undefined): string | undefined {
+  if (meta?.limited === undefined) return undefined;
+  return `PARTIAL INGEST: this snapshot was indexed with --limit ${meta.limited}, so it holds the first ${meta.rows} records of the export and not the register. Re-run \`ingest\` without --limit before reading anything as complete.`;
 }
 
 const root = () => join(cacheDir(), "snapshots");
@@ -456,23 +469,53 @@ export async function ingestSnapshot(connectorId: string, source: SnapshotSource
   // One open handle per shard per index. 512 handles is well inside every default
   // ulimit, and it is what makes this a single pass over a multi-gigabyte
   // decompressed stream instead of one pass per shard.
+  //
+  // `meta.json` GOES FIRST. It is what `hasSnapshot` reads, so it is the claim
+  // that an index exists and is whole — and from the next line on that is no
+  // longer true. Left in place, any failure below (a truncated download, a full
+  // disk, Ctrl-C) kept last month's meta beside this month's half-written
+  // shards, and every lane went on sweeping them as "every company the register
+  // files there". It is written back last, and only by an ingest that finished.
+  const metaPath = join(target, "meta.json");
+  rmSync(metaPath, { force: true });
   for (const sub of ["loc", "id"]) rmSync(join(target, sub), { recursive: true, force: true });
   for (const sub of ["loc", "id"]) mkdirSync(join(target, sub), { recursive: true });
 
   const handles = new Map<string, ReturnType<typeof createWriteStream>>();
+  // A write stream reports a full disk as an 'error' event. With no listener
+  // that is an uncaught exception; with one that only logs, the `drain` below
+  // never comes and the ingest hangs. So the first error is kept and rethrown.
+  let writeError: Error | undefined;
   const streamFor = (index: "loc" | "id", bucket: string) => {
     const key = `${index}/${bucket}`;
     let s = handles.get(key);
     if (!s) {
       s = createWriteStream(join(target, index, `${bucket}.jsonl`), { flags: "a" });
+      s.on("error", (e) => {
+        writeError ??= e;
+      });
       handles.set(key, s);
     }
     return s;
   };
   /** Backpressure: a write that returns false means the buffer is full. */
   const writeLine = async (index: "loc" | "id", bucket: string, line: string) => {
+    if (writeError) throw writeError;
     const s = streamFor(index, bucket);
-    if (!s.write(line)) await new Promise<void>((resolve) => s.once("drain", () => resolve()));
+    if (!s.write(line)) {
+      await new Promise<void>((resolve, reject) => {
+        const onDrain = () => {
+          s.off("error", onError);
+          resolve();
+        };
+        const onError = (e: Error) => {
+          s.off("drain", onDrain);
+          reject(e);
+        };
+        s.once("drain", onDrain);
+        s.once("error", onError);
+      });
+    }
   };
 
   // Every record from a snapshot is dated, and the date is filled in HERE rather
@@ -485,9 +528,13 @@ export async function ingestSnapshot(connectorId: string, source: SnapshotSource
 
   let rows = 0;
   let skipped = 0;
+  let limited = false;
   try {
     for await (const raw of rowsOf(source, source_file)) {
-      if (opts.limit && rows >= opts.limit) break;
+      if (opts.limit && rows >= opts.limit) {
+        limited = true;
+        break;
+      }
       const mapped = raw === undefined ? undefined : source.parse(raw);
       if (!mapped) {
         skipped++;
@@ -527,11 +574,15 @@ export async function ingestSnapshot(connectorId: string, source: SnapshotSource
       [...handles.values()].map(
         (s) =>
           new Promise<void>((resolve) => {
+            // A stream that already failed will never call back from `end`.
+            if (s.destroyed) return resolve();
+            s.once("error", () => resolve());
             s.end(() => resolve());
           }),
       ),
     );
   }
+  if (writeError) throw new Error(`ingest: writing the ${connectorId} index failed — ${writeError.message}. The partial index was not marked as usable.`);
 
   if (rows === 0) {
     throw new Error(`ingest: ${connectorId} mapped 0 of ${skipped} rows. The export's shape has moved — do not trust the cache, fix the parser.`);
@@ -556,8 +607,13 @@ export async function ingestSnapshot(connectorId: string, source: SnapshotSource
     rows,
     skipped,
     bytesOnDisk: directorySize(target),
+    ...(limited && opts.limit ? { limited: opts.limit } : {}),
   };
-  writeFileSync(join(target, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`);
+  // Written beside its final name and renamed into it, so a reader never finds
+  // half a meta file and a crash here leaves no meta at all.
+  writeFileSync(`${metaPath}.tmp`, `${JSON.stringify(meta, null, 2)}\n`);
+  renameSync(`${metaPath}.tmp`, metaPath);
+  if (limited) note(`ingest: ${connectorId} — stopped at --limit ${opts.limit}. This index is a sample, and every lane reading it will say so.`);
   note(`ingest: ${connectorId} — ${rows} records indexed, ${(meta.bytesOnDisk / 1e6).toFixed(0)} MB on disk at ${target}`);
   return meta;
 }

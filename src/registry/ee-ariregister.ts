@@ -31,7 +31,7 @@
 //
 // What this file does NOT carry is an activity code — EMTAK lives in a separate
 // export — so no `activityScheme` is declared rather than one being invented.
-import { hasSnapshot, snapshotByLocality, snapshotById, snapshotMeta, type SnapshotSource } from "../snapshot.js";
+import { hasSnapshot, partialIngestNote, snapshotByLocality, snapshotById, snapshotMeta, type SnapshotSource } from "../snapshot.js";
 import { nameSimilarity, normalizeName, shortLabel } from "../util.js";
 import type { GeoTarget, PostalAddress } from "../types.js";
 import type {
@@ -202,7 +202,7 @@ export const eeAriregister: RegistryConnector = {
     const records = truncated ? all.slice(0, max) : all;
     ctx.onProgress?.(records.length, town);
 
-    return {
+    const result: SweepResult = {
       records,
       notes: [],
       coverage: {
@@ -217,6 +217,15 @@ export const eeAriregister: RegistryConnector = {
           : `enumerated from the Äriregister open-data export by ADMINISTRATIVE UNIT "${town}" — every company the register files there, from a file rebuilt daily. An administrative unit is not a bounding box, so this lane's shape does not coincide with the OSM lane's.`,
       },
     };
+    // A snapshot indexed with --limit is a sample of the register, and a sweep
+    // of a sample is not an enumeration whatever its row count says.
+    const partial = partialIngestNote(meta);
+    if (partial) {
+      result.coverage.truncated = true;
+      result.coverage.reason = `${partial} ${result.coverage.reason ?? ""}`.trim();
+      result.notes.push(partial);
+    }
+    return result;
   },
 
   async lookup(query: LookupQuery): Promise<RegistryRecord[]> {
