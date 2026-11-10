@@ -184,6 +184,26 @@ describe("csv", () => {
   it("renders undefined as an empty field, not the string undefined", () => {
     expect(csvRow(["a", undefined, null, 3])).toBe("a,,,3");
   });
+
+  it("defuses a cell a spreadsheet would run as a formula", () => {
+    // An OSM name is editable by anyone; opening the prospect file must not execute it.
+    expect(csvField("=1+1")).toBe("'=1+1");
+    expect(csvField('=HYPERLINK("http://evil.example","Click")')).toBe('"\'=HYPERLINK(""http://evil.example"",""Click"")"');
+    expect(csvField("@SUM(A1:A9)")).toBe("'@SUM(A1:A9)");
+    expect(csvField("+cmd|' /C calc'!A0")).toBe("'+cmd|' /C calc'!A0");
+    expect(csvField("-2+3+cmd|' /C calc'!A0")).toBe("'-2+3+cmd|' /C calc'!A0");
+    expect(csvField("\t=1+1")).toBe("'\t=1+1");
+  });
+
+  it("leaves numbers, coordinates and phone numbers exactly as they were", () => {
+    expect(csvField(-1.5)).toBe("-1.5");
+    expect(csvField("-1.5")).toBe("-1.5");
+    expect(csvField("+49 40 393933")).toBe("+49 40 393933");
+    expect(csvField("+33 (0)1 43 28-00.00")).toBe("+33 (0)1 43 28-00.00");
+    expect(csvField("+4940393933 | +4940393934")).toBe("+4940393933 | +4940393934");
+    expect(csvField("a=b")).toBe("a=b");
+    expect(csvField("")).toBe("");
+  });
 });
 
 describe("misc helpers", () => {

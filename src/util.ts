@@ -290,9 +290,36 @@ export function streetLine(a: PostalAddress): string {
   return [a.numero, prefixed ? undefined : type, name].filter(Boolean).join(" ");
 }
 
-/** RFC 4180 field: quote when the value contains a delimiter, quote or newline. */
+/**
+ * Whether a spreadsheet would EXECUTE this cell instead of displaying it.
+ *
+ * Excel, LibreOffice and Sheets treat a cell that opens with `=`, `@`, `+` or
+ * `-` as a formula, and a tab or carriage return in front does not stop them.
+ * Every text column here is written by someone else — an OSM name anyone can
+ * edit, a page title, a verdict — so `=HYPERLINK(...)` in a shop's name would
+ * otherwise run on whoever opens the prospect file.
+ *
+ * A sign followed only by digits and phone punctuation is left alone: that is
+ * a coordinate (`-1.5`) or an international number (`+49 40 393933`), it can
+ * call nothing, and quoting it would corrupt the two columns people sort by.
+ */
+function isSpreadsheetFormula(s: string): boolean {
+  const first = s[0];
+  if (first === "=" || first === "@" || first === "\t" || first === "\r") return true;
+  // `" | "` is how this file joins several values in one cell, so a list of
+  // phone numbers is still nothing but digits and punctuation.
+  if (first === "+" || first === "-") return !/^[+-][\d\s().,/-]*(?: \| \+?[\d\s().,/-]+)*$/.test(s);
+  return false;
+}
+
+/**
+ * RFC 4180 field: quote when the value contains a delimiter, quote or newline.
+ * A string a spreadsheet would run as a formula is defused with a leading
+ * apostrophe first, the form every spreadsheet reads back as plain text.
+ */
 export function csvField(value: unknown): string {
-  const s = value === undefined || value === null ? "" : String(value);
+  let s = value === undefined || value === null ? "" : String(value);
+  if (typeof value === "string" && isSpreadsheetFormula(s)) s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

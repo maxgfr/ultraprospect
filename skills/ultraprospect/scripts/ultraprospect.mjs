@@ -13124,8 +13124,15 @@ function streetLine(a) {
   const prefixed = type ? new RegExp(`^${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name) : false;
   return [a.numero, prefixed ? void 0 : type, name].filter(Boolean).join(" ");
 }
+function isSpreadsheetFormula(s) {
+  const first = s[0];
+  if (first === "=" || first === "@" || first === "	" || first === "\r") return true;
+  if (first === "+" || first === "-") return !/^[+-][\d\s().,/-]*(?: \| \+?[\d\s().,/-]+)*$/.test(s);
+  return false;
+}
 function csvField(value) {
-  const s = value === void 0 || value === null ? "" : String(value);
+  let s = value === void 0 || value === null ? "" : String(value);
+  if (typeof value === "string" && isSpreadsheetFormula(s)) s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 function csvRow(values) {
