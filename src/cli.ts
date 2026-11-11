@@ -16,7 +16,7 @@
 //
 // Exit codes: 0 ok · 1 a gate failed or nothing was produced · 2 usage, or a
 // refusal to guess. Anything non-zero means stop and fix, never present anyway.
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { feedbackSource, importFeedback } from "./feedback.js";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1427,7 +1427,27 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 }
 
-if (isInvokedDirectly(process.argv[1], "ultraprospect")) {
+/**
+ * Whether the file node was asked to run IS this module, whatever it is called.
+ *
+ * `isInvokedDirectly` recognises the entry by its file name, so a copy of the
+ * bundle saved as `prospect.mjs` imported fine and ran nothing: exit 0, no
+ * output, no error. Comparing real paths names the module itself, and still
+ * answers false to anything that merely imports it — the skill-bundle drift
+ * gate reads the flag tables that way, and so do the tests. Real paths on both
+ * sides, because `npm i -g` runs the bin through a symlink.
+ */
+export function isProcessEntry(argv1: string | undefined, moduleUrl: string): boolean {
+  if (!argv1) return false;
+  try {
+    return realpathSync(argv1) === realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    // `node -e`, a deleted script, a non-file URL: not this module being run.
+    return false;
+  }
+}
+
+if (isProcessEntry(process.argv[1], import.meta.url) || isInvokedDirectly(process.argv[1], "ultraprospect")) {
   main(process.argv.slice(2))
     .then((code) => {
       process.exitCode = code;

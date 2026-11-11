@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // src/cli.ts
-import { readFileSync as readFileSync24 } from "fs";
+import { readFileSync as readFileSync24, realpathSync as realpathSync3 } from "fs";
 
 // src/feedback.ts
 import { createHash as createHash2 } from "crypto";
@@ -28638,7 +28638,15 @@ async function main(argv) {
       throw new UsageError(`unknown command "${command2}"`);
   }
 }
-if (isInvokedDirectly(process.argv[1], "ultraprospect")) {
+function isProcessEntry(argv1, moduleUrl) {
+  if (!argv1) return false;
+  try {
+    return realpathSync3(argv1) === realpathSync3(fileURLToPath2(moduleUrl));
+  } catch {
+    return false;
+  }
+}
+if (isProcessEntry(process.argv[1], import.meta.url) || isInvokedDirectly(process.argv[1], "ultraprospect")) {
   main(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
   }).catch((e) => {
@@ -28655,6 +28663,7 @@ export {
   TENDER_CONNECTORS,
   VALUE_FLAGS,
   brandEngine,
+  isProcessEntry,
   main,
   politeUa
 };
