@@ -20941,6 +20941,9 @@ var ROLES = {
     "Vertreten durch",
     "Gesch\xE4ftsf\xFChrerin",
     "Gesch\xE4ftsf\xFChrer",
+    // The collective form a board is listed under: "Geschäftsführung: Dr.
+    // Christoph Müller (Vorsitzender), Katrin Hilmer, …" (amprion.net).
+    "Gesch\xE4ftsf\xFChrung",
     "Gesch\xE4ftsleitung",
     "Vorstandsvorsitzender",
     "Vorstand",
@@ -21129,14 +21132,18 @@ var BUSINESS_NOUN = /* @__PURE__ */ new Set([
 ]);
 var LINK_PREFIX = /^(?:\S*-?(?:Profil|Profile)\s+(?:von|of|de)\s+|(?:LinkedIn|Xing|Twitter|Facebook|Instagram|GitHub|Mastodon)\s*[:–-]?\s*)/i;
 function cleanName(raw) {
-  return raw.trim().replace(LINK_PREFIX, "").replace(/[.,;:•·|–—-]+$/, "").trim();
+  return raw.trim().replace(LINK_PREFIX, "").replace(/\s*\([^()]*\)?\s*$/, "").replace(/[.,;:•·|–—-]+$/, "").trim();
 }
+var TITLE = /^(?:Prof|Dr|Dipl|Mag|Ing)\.(?:-[A-Za-zÄÖÜäöü]+\.)*$/;
 function isName(raw, opts) {
   const s = cleanName(raw);
   if (!s || s.length < 4 || s.length > 70) return false;
   if (/[0-9@/\\]/.test(s)) return false;
   if (LEGAL_FORM.test(s)) return false;
-  const tokens = s.split(/\s+/);
+  const all = s.split(/\s+/);
+  let titles = 0;
+  while (titles < all.length && TITLE.test(all[titles])) titles++;
+  const tokens = all.slice(titles);
   if (tokens.length < 2 || tokens.length > 4) return false;
   if (tokens.every((t) => t === t.toUpperCase() && t.length > 1)) return false;
   for (const t of tokens) {

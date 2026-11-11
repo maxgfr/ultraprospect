@@ -111,6 +111,14 @@ describe("extractPeople", () => {
     expect(twice).toHaveLength(1);
   });
 
+  it("reads a board listed under Geschäftsführung, with its titles and the chair's function", () => {
+    // amprion.net's Impressum, verbatim.
+    const board = de("Geschäftsführung: Dr. Christoph Müller (Vorsitzender), Katrin Hilmer, Dr. Hendrik Neumann, Peter Rüth");
+    expect(board.map((p) => p.value)).toEqual(["Dr. Christoph Müller", "Katrin Hilmer", "Dr. Hendrik Neumann", "Peter Rüth"]);
+    expect(board.every((p) => p.role === "Geschäftsführung")).toBe(true);
+    expect(de("Vorstand: Prof. Dr. Hans Peter Müller")[0]?.value).toBe("Prof. Dr. Hans Peter Müller");
+  });
+
   it("caps what one page can contribute", () => {
     const many = Array.from({ length: 40 }, (_, i) => `Geschäftsführer: Anna Nummer${String.fromCharCode(65 + (i % 26))}`).join("\n");
     expect(de(many).length).toBeLessThanOrEqual(12);

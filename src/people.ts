@@ -46,6 +46,9 @@ const ROLES: Record<string, string[]> = {
     "Vertreten durch",
     "Geschäftsführerin",
     "Geschäftsführer",
+    // The collective form a board is listed under: "Geschäftsführung: Dr.
+    // Christoph Müller (Vorsitzender), Katrin Hilmer, …" (amprion.net).
+    "Geschäftsführung",
     "Geschäftsleitung",
     "Vorstandsvorsitzender",
     "Vorstand",
@@ -279,14 +282,29 @@ const BUSINESS_NOUN = new Set([
  */
 const LINK_PREFIX = /^(?:\S*-?(?:Profil|Profile)\s+(?:von|of|de)\s+|(?:LinkedIn|Xing|Twitter|Facebook|Instagram|GitHub|Mastodon)\s*[:–-]?\s*)/i;
 
-/** Trim the punctuation and the link furniture a page wraps a name in. */
+/**
+ * Trim the punctuation and the link furniture a page wraps a name in.
+ *
+ * A trailing parenthesis is the person's function within the list — "Dr.
+ * Christoph Müller (Vorsitzender)" — and is not part of the name; left on, its
+ * token failed the name test and the chair of the board was the one person a
+ * legal notice did not yield. What remains is still verbatim on the page.
+ */
 function cleanName(raw: string): string {
   return raw
     .trim()
     .replace(LINK_PREFIX, "")
+    .replace(/\s*\([^()]*\)?\s*$/, "")
     .replace(/[.,;:•·|–—-]+$/, "")
     .trim();
 }
+
+/**
+ * Academic titles written before a German name ("Dr.", "Prof.", "Dipl.-Ing.").
+ * Kept in the value — in Germany they are used in the address — but not
+ * counted as name tokens, so "Prof. Dr. Hans Peter Müller" is still a name.
+ */
+const TITLE = /^(?:Prof|Dr|Dipl|Mag|Ing)\.(?:-[A-Za-zÄÖÜäöü]+\.)*$/;
 
 /**
  * Is this string a person's name?
@@ -301,7 +319,10 @@ function isName(raw: string, opts: { companyName?: string; town?: string }): boo
   if (/[0-9@/\\]/.test(s)) return false;
   if (LEGAL_FORM.test(s)) return false;
 
-  const tokens = s.split(/\s+/);
+  const all = s.split(/\s+/);
+  let titles = 0;
+  while (titles < all.length && TITLE.test(all[titles]!)) titles++;
+  const tokens = all.slice(titles);
   if (tokens.length < 2 || tokens.length > 4) return false;
 
   // A run of capitals is a heading, not a name: "IMPRESSUM KONTAKT".
