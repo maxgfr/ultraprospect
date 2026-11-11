@@ -21005,7 +21005,7 @@ function sharedAddressesIn(places) {
   }
   return new Set([...seen].filter(([, n]) => n > 1).map(([key]) => key));
 }
-function corroborate(place, pageText, pageTitle, sharedAddresses = /* @__PURE__ */ new Set()) {
+function corroborate(place, pageText, pageTitle, sharedAddresses = /* @__PURE__ */ new Set(), countryCode) {
   const haystack = foldAccents(`${pageTitle ?? ""}
 ${pageText}`).toLowerCase();
   const digits = haystack.replace(/[^0-9]/g, "");
@@ -21041,7 +21041,8 @@ ${pageText}`).toLowerCase();
     }
   }
   if (evidence.length === 0) {
-    return { ok: false, evidence: [], reason: "the page carries neither the company's name, its address nor its SIREN" };
+    const id = (countryCode ?? "").toLowerCase() === "fr" ? "SIREN" : "registration number";
+    return { ok: false, evidence: [], reason: `the page carries neither the company's name, its address nor its ${id}` };
   }
   return { ok: true, evidence };
 }
@@ -21245,7 +21246,7 @@ async function runResolve(runDir, places, store, opts = {}) {
         continue;
       }
       const page2 = fetched.page;
-      const check = corroborate(place, page2.text, page2.title, shared);
+      const check = corroborate(place, page2.text, page2.title, shared, opts.countryCode);
       const list3 = outcome.pages.get(place.id) ?? [];
       list3.push(page2.record);
       outcome.pages.set(place.id, list3);

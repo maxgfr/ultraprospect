@@ -459,7 +459,13 @@ export interface Corroboration {
  *     tokens are dropped before matching and at least one distinctive token
  *     must survive and appear.
  */
-export function corroborate(place: Place, pageText: string, pageTitle?: string, sharedAddresses: ReadonlySet<string> = new Set()): Corroboration {
+export function corroborate(
+  place: Place,
+  pageText: string,
+  pageTitle?: string,
+  sharedAddresses: ReadonlySet<string> = new Set(),
+  countryCode?: string,
+): Corroboration {
   const haystack = foldAccents(`${pageTitle ?? ""}\n${pageText}`).toLowerCase();
   const digits = haystack.replace(/[^0-9]/g, "");
   const evidence: string[] = [];
@@ -514,7 +520,9 @@ export function corroborate(place: Place, pageText: string, pageTitle?: string, 
   }
 
   if (evidence.length === 0) {
-    return { ok: false, evidence: [], reason: "the page carries neither the company's name, its address nor its SIREN" };
+    // SIREN is France's word; a Hamburg run was told its pages lacked one.
+    const id = (countryCode ?? "").toLowerCase() === "fr" ? "SIREN" : "registration number";
+    return { ok: false, evidence: [], reason: `the page carries neither the company's name, its address nor its ${id}` };
   }
   return { ok: true, evidence };
 }
@@ -964,7 +972,7 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
       }
       const page = fetched.page;
 
-      const check = corroborate(place, page.text, page.title, shared);
+      const check = corroborate(place, page.text, page.title, shared, opts.countryCode);
       const list = outcome.pages.get(place.id) ?? [];
       list.push(page.record);
       outcome.pages.set(place.id, list);

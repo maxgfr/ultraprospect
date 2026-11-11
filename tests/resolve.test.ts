@@ -220,6 +220,12 @@ describe("corroborate", () => {
     expect(r.reason).toContain("neither the company's name");
   });
 
+  it("names the identifier the run's country uses when it refuses", () => {
+    const text = "Bienvenue sur le site de la Boulangerie Martin à Lyon.";
+    expect(corroborate(place(), text, undefined, new Set(), "de").reason).toMatch(/nor its registration number$/);
+    expect(corroborate(place(), text, undefined, new Set(), "fr").reason).toMatch(/nor its SIREN$/);
+  });
+
   it("does not accept a generic word as a name match", () => {
     // "Pharmacie" on a page called Pharmacie du Centre proves nothing. Only
     // tokens of four characters or more count, and all of them must appear.
