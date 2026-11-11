@@ -62,18 +62,18 @@
     "url": "https://github.com/maxgfr/ultraprospect"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16",
+    "@biomejs/biome": "^2.6.6",
     "@maxgfr/webindex": "https://codeload.github.com/maxgfr/webindex/tar.gz/814753f525c208abebd218ff1d3b30972310bd3c",
-    "@semantic-release/changelog": "^6.0.3",
-    "@semantic-release/exec": "^6.0.3",
-    "@semantic-release/git": "^10.0.1",
-    "@types/node": "^20.14.0",
-    "@vitest/coverage-v8": "^4.1.12",
-    "semantic-release": "^24.2.0",
+    "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/exec": "^7.1.0",
+    "@semantic-release/git": "^11.0.1",
+    "@types/node": "^22.20.5",
+    "@vitest/coverage-v8": "^5.1.0",
+    "semantic-release": "^25.0.9",
     "tsup": "^8.5.0",
     "typescript": "^5.9.3",
     "vite": "^8.3.7",
-    "vitest": "^4.1.12"
+    "vitest": "^5.1.0"
   },
   "pnpm": {
     "overrides": {
