@@ -94,9 +94,23 @@ export function dedupeTenders(input: readonly Tender[]): DedupeOutcome {
       if (a.connectorId === b.connectorId || a.country !== b.country) continue;
       const da = dayOf(a.deadline);
       if (!da || da !== dayOf(b.deadline)) continue;
+      const title = nameSimilarity(a.title, b.title);
+      // A web lead names no buyer (the lane reads only the page's title and a
+      // labelled deadline), so a buyer score of 0 kept it from ever being
+      // proposed beside the API copy of the same call. Without a buyer to
+      // compare, the title carries the proposal alone, at a higher bar.
+      if (!a.buyer.name.trim() || !b.buyer.name.trim()) {
+        if (title >= 0.8)
+          pairs.push({
+            keep: a.id,
+            drop: b.id,
+            score: Math.round(title * 100) / 100,
+            why: `same deadline ${da}; title ${Math.round(title * 100)}% alike; one side names no buyer; no shared procedure id`,
+          });
+        continue;
+      }
       const buyer = nameSimilarity(a.buyer.name, b.buyer.name);
       if (buyer < 0.6) continue;
-      const title = nameSimilarity(a.title, b.title);
       const score = Math.round((0.5 * buyer + 0.5 * title) * 100) / 100;
       if (score >= 0.55)
         pairs.push({

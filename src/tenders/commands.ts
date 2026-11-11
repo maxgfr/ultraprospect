@@ -5,7 +5,7 @@
 // directly — so a tool call and a command line can never disagree.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { isNoWrite, writeArtifact } from "../engine.js";
+import { isNoWrite, readJsonSafe, writeArtifact } from "../engine.js";
 import { newPageStore } from "../pages.js";
 import { connectorsFor } from "../registry/index.js";
 import type { LegalId, RegistryRecord } from "../registry/types.js";
@@ -21,7 +21,8 @@ import { emptyTenderManifest, newTenderRun, readTenders, recount, requireTenderM
 import { recordFixture, runTenderSearch } from "./search.js";
 import type { NoticeKind, Tender, TenderLane, TenderQuery } from "./types.js";
 import { EU27, sinceToDate, today } from "./util.js";
-import { applyTenderVerdicts, buildTendersTodo, rankTenders, type ApplyOutcome } from "./verdicts.js";
+import { dedupeTenders, type DuplicatePair } from "./dedupe.js";
+import { applyTenderVerdicts, buildTendersTodo, openPairs, rankTenders, type ApplyOutcome, type TendersTodo } from "./verdicts.js";
 import { diffTenderRuns, tenderDeltaMarkdown, type TenderDelta } from "./watch.js";
 import { buildWebTodo, engineSearchWeb, foldWebHits, type WebFoldOutcome, type WebHit, type WebTodo } from "./web.js";
 
@@ -160,6 +161,12 @@ export function writeWebTodo(runDir: string, opts: { countries?: string[]; perCo
   return todo;
 }
 
+/** The look-alike pairs the run's worklist still holds. */
+function pendingPairs(runDir: string): DuplicatePair[] {
+  const todo = readJsonSafe(join(runDir, "TENDERS.todo.json")) as Partial<TendersTodo> | undefined;
+  return Array.isArray(todo?.pairs) ? todo.pairs : [];
+}
+
 export async function foldWeb(
   runDir: string,
   input: { hits?: WebHit[]; engineSearch?: boolean; limit?: number; onProgress?: (line: string) => void },
@@ -173,7 +180,14 @@ export async function foldWeb(
   if (!hits.length && input.engineSearch) hits = await engineSearchWeb(todo, (n) => notes.push(n));
   const store = newPageStore(tenders.flatMap((t) => t.pages ?? []));
   const outcome = await foldWebHits(runDir, hits, todo, store, new Set(tenders.map((t) => t.id)), { limit: input.limit, onProgress: input.onProgress });
-  const all = [...tenders, ...outcome.tenders];
+  // The web leads go through the same de-duplication as the API notices, so
+  // one call found both ways is proposed as a pair instead of listed twice.
+  // The pairs found at search time stay in the worklist: rewriting it with
+  // nothing erased every look-alike nobody had judged yet.
+  const d = dedupeTenders([...tenders, ...outcome.tenders]);
+  const all = d.tenders;
+  const fresh = new Set(outcome.tenders.map((t) => t.id));
+  const pairs = openPairs([...pendingPairs(runDir), ...d.pairs.filter((p) => fresh.has(p.keep) || fresh.has(p.drop))], all);
   const lane: TenderLane = {
     lane: "tenders",
     connectorId: "web",
@@ -187,9 +201,11 @@ export async function foldWeb(
   manifest.lanes = [...(manifest.lanes as TenderLane[]).filter((l) => l.connectorId !== "web"), lane];
   manifest.licences = tenderLicences(manifest.lanes as TenderLane[]);
   manifest.notes.push(...notes, `web lane: ${lane.reason}.`);
+  manifest.tenderCounts.mergedDuplicates += d.merged.length;
+  manifest.tenderCounts.pairs = pairs.length;
   recount(manifest, all);
   writeTenders(runDir, all);
-  writeJson(runDir, "TENDERS.todo.json", buildTendersTodo(all, [], existsSync(join(runDir, "profile.json")) ? "profile.json" : undefined));
+  writeJson(runDir, "TENDERS.todo.json", buildTendersTodo(all, pairs, existsSync(join(runDir, "profile.json")) ? "profile.json" : undefined));
   writeRunManifest(runDir, manifest);
   return { ...outcome, notes };
 }
@@ -197,13 +213,17 @@ export async function foldWeb(
 export function applyVerdictsToRun(runDir: string, verdicts: unknown): ApplyOutcome {
   const manifest = requireTenderManifest(runDir);
   const { tenders, outcome } = applyTenderVerdicts(readTenders(runDir), verdicts);
+  // Only the pairs a verdict settled, or whose notices are gone, leave the
+  // worklist: a first partial answer must not erase the ones still unjudged.
+  const pairs = openPairs(pendingPairs(runDir), tenders, outcome.decidedPairs);
   recount(manifest, tenders);
   manifest.tenderCounts.mergedDuplicates += outcome.merged;
+  manifest.tenderCounts.pairs = pairs.length;
   manifest.notes.push(
     `tenders --apply: ${outcome.applied} verdict(s), ${outcome.merged} pair(s) merged${outcome.unknown.length ? `, ${outcome.unknown.length} unknown id(s)` : ""}${outcome.expired.length ? `, ${outcome.expired.length} go on an expired call refused` : ""}.`,
   );
   writeTenders(runDir, tenders);
-  writeJson(runDir, "TENDERS.todo.json", buildTendersTodo(tenders, [], existsSync(join(runDir, "profile.json")) ? "profile.json" : undefined));
+  writeJson(runDir, "TENDERS.todo.json", buildTendersTodo(tenders, pairs, existsSync(join(runDir, "profile.json")) ? "profile.json" : undefined));
   writeRunManifest(runDir, manifest);
   return outcome;
 }

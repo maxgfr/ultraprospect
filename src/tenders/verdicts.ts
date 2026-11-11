@@ -40,6 +40,24 @@ export interface ApplyOutcome {
   invalid: string[];
   /** go verdicts on notices whose deadline has passed — refused. */
   expired: string[];
+  /** Look-alike pairs a verdict settled, either way: no longer to be judged. */
+  decidedPairs: [string, string][];
+}
+
+/** The pairs still owed a judgement: not settled by a verdict, both notices still in the run. */
+export function openPairs(pairs: readonly DuplicatePair[], tenders: readonly Tender[], decided: readonly (readonly [string, string])[] = []): DuplicatePair[] {
+  const ids = new Set(tenders.map((t) => t.id));
+  const key = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  const settled = new Set(decided.map(([a, b]) => key(a, b)));
+  const seen = new Set<string>();
+  const out: DuplicatePair[] = [];
+  for (const p of pairs) {
+    const k = key(p.keep, p.drop);
+    if (seen.has(k) || settled.has(k) || !ids.has(p.keep) || !ids.has(p.drop)) continue;
+    seen.add(k);
+    out.push(p);
+  }
+  return out;
 }
 
 /**
@@ -50,7 +68,7 @@ export interface ApplyOutcome {
 export function applyTenderVerdicts(tenders: Tender[], input: unknown, now = new Date()): { tenders: Tender[]; outcome: ApplyOutcome } {
   const list: unknown[] = Array.isArray(input) ? input : Array.isArray((input as any)?.verdicts) ? (input as any).verdicts : [];
   const byId = new Map(tenders.map((t) => [t.id, t]));
-  const outcome: ApplyOutcome = { applied: 0, merged: 0, unknown: [], invalid: [], expired: [] };
+  const outcome: ApplyOutcome = { applied: 0, merged: 0, unknown: [], invalid: [], expired: [], decidedPairs: [] };
   const drop = new Set<string>();
   for (const raw of list) {
     const v = raw as Partial<TenderVerdict> & Partial<PairVerdict>;
@@ -76,6 +94,7 @@ export function applyTenderVerdicts(tenders: Tender[], input: unknown, now = new
         drop.add(b);
         outcome.merged += 1;
       }
+      if (typeof v.same === "boolean") outcome.decidedPairs.push([a, b]);
       continue;
     }
     if (!v.id || !byId.has(v.id)) {

@@ -25409,10 +25409,24 @@ function buildTendersTodo(tenders, pairs, profilePath) {
 }
 var DECISIONS = ["go", "maybe", "no-go"];
 var FITS = ["strong", "possible", "weak", "no"];
+function openPairs(pairs, tenders, decided = []) {
+  const ids = new Set(tenders.map((t) => t.id));
+  const key = (a, b) => a < b ? `${a}|${b}` : `${b}|${a}`;
+  const settled = new Set(decided.map(([a, b]) => key(a, b)));
+  const seen = /* @__PURE__ */ new Set();
+  const out2 = [];
+  for (const p of pairs) {
+    const k = key(p.keep, p.drop);
+    if (seen.has(k) || settled.has(k) || !ids.has(p.keep) || !ids.has(p.drop)) continue;
+    seen.add(k);
+    out2.push(p);
+  }
+  return out2;
+}
 function applyTenderVerdicts(tenders, input, now = /* @__PURE__ */ new Date()) {
   const list3 = Array.isArray(input) ? input : Array.isArray(input?.verdicts) ? input.verdicts : [];
   const byId = new Map(tenders.map((t) => [t.id, t]));
-  const outcome = { applied: 0, merged: 0, unknown: [], invalid: [], expired: [] };
+  const outcome = { applied: 0, merged: 0, unknown: [], invalid: [], expired: [], decidedPairs: [] };
   const drop = /* @__PURE__ */ new Set();
   for (const raw of list3) {
     const v = raw;
@@ -25434,6 +25448,7 @@ function applyTenderVerdicts(tenders, input, now = /* @__PURE__ */ new Date()) {
         drop.add(b);
         outcome.merged += 1;
       }
+      if (typeof v.same === "boolean") outcome.decidedPairs.push([a, b]);
       continue;
     }
     if (!v.id || !byId.has(v.id)) {
@@ -25734,9 +25749,19 @@ function dedupeTenders(input) {
       if (a.connectorId === b.connectorId || a.country !== b.country) continue;
       const da = dayOf(a.deadline);
       if (!da || da !== dayOf(b.deadline)) continue;
+      const title = nameSimilarity(a.title, b.title);
+      if (!a.buyer.name.trim() || !b.buyer.name.trim()) {
+        if (title >= 0.8)
+          pairs.push({
+            keep: a.id,
+            drop: b.id,
+            score: Math.round(title * 100) / 100,
+            why: `same deadline ${da}; title ${Math.round(title * 100)}% alike; one side names no buyer; no shared procedure id`
+          });
+        continue;
+      }
       const buyer = nameSimilarity(a.buyer.name, b.buyer.name);
       if (buyer < 0.6) continue;
-      const title = nameSimilarity(a.title, b.title);
       const score = Math.round((0.5 * buyer + 0.5 * title) * 100) / 100;
       if (score >= 0.55)
         pairs.push({
@@ -25947,6 +25972,10 @@ function writeWebTodo(runDir, opts = {}) {
   writeJson2(runDir, "WEB.todo.json", todo);
   return todo;
 }
+function pendingPairs(runDir) {
+  const todo = readJsonSafe(join30(runDir, "TENDERS.todo.json"));
+  return Array.isArray(todo?.pairs) ? todo.pairs : [];
+}
 async function foldWeb(runDir, input) {
   const manifest = requireTenderManifest(runDir);
   const tenders = readTenders(runDir);
@@ -25957,7 +25986,10 @@ async function foldWeb(runDir, input) {
   if (!hits.length && input.engineSearch) hits = await engineSearchWeb(todo, (n) => notes.push(n));
   const store = newPageStore(tenders.flatMap((t) => t.pages ?? []));
   const outcome = await foldWebHits(runDir, hits, todo, store, new Set(tenders.map((t) => t.id)), { limit: input.limit, onProgress: input.onProgress });
-  const all = [...tenders, ...outcome.tenders];
+  const d = dedupeTenders([...tenders, ...outcome.tenders]);
+  const all = d.tenders;
+  const fresh = new Set(outcome.tenders.map((t) => t.id));
+  const pairs = openPairs([...pendingPairs(runDir), ...d.pairs.filter((p) => fresh.has(p.keep) || fresh.has(p.drop))], all);
   const lane = {
     lane: "tenders",
     connectorId: "web",
@@ -25971,22 +26003,26 @@ async function foldWeb(runDir, input) {
   manifest.lanes = [...manifest.lanes.filter((l) => l.connectorId !== "web"), lane];
   manifest.licences = tenderLicences(manifest.lanes);
   manifest.notes.push(...notes, `web lane: ${lane.reason}.`);
+  manifest.tenderCounts.mergedDuplicates += d.merged.length;
+  manifest.tenderCounts.pairs = pairs.length;
   recount(manifest, all);
   writeTenders(runDir, all);
-  writeJson2(runDir, "TENDERS.todo.json", buildTendersTodo(all, [], existsSync22(join30(runDir, "profile.json")) ? "profile.json" : void 0));
+  writeJson2(runDir, "TENDERS.todo.json", buildTendersTodo(all, pairs, existsSync22(join30(runDir, "profile.json")) ? "profile.json" : void 0));
   writeRunManifest(runDir, manifest);
   return { ...outcome, notes };
 }
 function applyVerdictsToRun(runDir, verdicts) {
   const manifest = requireTenderManifest(runDir);
   const { tenders, outcome } = applyTenderVerdicts(readTenders(runDir), verdicts);
+  const pairs = openPairs(pendingPairs(runDir), tenders, outcome.decidedPairs);
   recount(manifest, tenders);
   manifest.tenderCounts.mergedDuplicates += outcome.merged;
+  manifest.tenderCounts.pairs = pairs.length;
   manifest.notes.push(
     `tenders --apply: ${outcome.applied} verdict(s), ${outcome.merged} pair(s) merged${outcome.unknown.length ? `, ${outcome.unknown.length} unknown id(s)` : ""}${outcome.expired.length ? `, ${outcome.expired.length} go on an expired call refused` : ""}.`
   );
   writeTenders(runDir, tenders);
-  writeJson2(runDir, "TENDERS.todo.json", buildTendersTodo(tenders, [], existsSync22(join30(runDir, "profile.json")) ? "profile.json" : void 0));
+  writeJson2(runDir, "TENDERS.todo.json", buildTendersTodo(tenders, pairs, existsSync22(join30(runDir, "profile.json")) ? "profile.json" : void 0));
   writeRunManifest(runDir, manifest);
   return outcome;
 }
