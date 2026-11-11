@@ -14374,7 +14374,12 @@ function directorySize(path) {
 }
 async function* linesOf(stream) {
   const rl = createInterface2({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
-  for await (const line of rl) yield line;
+  try {
+    for await (const line of rl) yield line;
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
 }
 async function* csvRecords(stream, delimiter = ",") {
   let field = "";

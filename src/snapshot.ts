@@ -240,10 +240,23 @@ function directorySize(path: string): number {
   return total;
 }
 
-/** Lines of a stream, decoded as UTF-8 and split on newlines. */
+/**
+ * Lines of a stream, decoded as UTF-8 and split on newlines.
+ *
+ * The stream is destroyed when the caller stops early. Closing the readline
+ * interface — which is all a `break` out of `for await` does — only pauses its
+ * input, so a lookup that hit its limit left the shard's ReadStream paused and
+ * its file descriptor open: one leaked fd per capped lookup, for the life of
+ * the process.
+ */
 async function* linesOf(stream: Readable): AsyncGenerator<string> {
   const rl = createInterface({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
-  for await (const line of rl) yield line;
+  try {
+    for await (const line of rl) yield line;
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
 }
 
 /**
