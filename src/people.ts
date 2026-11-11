@@ -160,6 +160,9 @@ const LANGUAGE_OF: Record<string, string> = {
   no: "no",
 };
 
+/** Labels that name a body of people, read only where they introduce a list of names. */
+const COLLECTIVE_ROLES = new Set(["Geschäftsführung", "Geschäftsleitung", "Vertreten durch", "Verantwortlich für den Inhalt"]);
+
 function rolesFor(countryCode: string | undefined): string[] {
   const lang = LANGUAGE_OF[(countryCode ?? "").toLowerCase()];
   const local = lang ? (ROLES[lang] ?? []) : [];
@@ -436,6 +439,11 @@ export function extractPeople(text: string, opts: PeopleOptions = {}): FoundPers
 
     // Name \n LABEL — a team card. The name is the line above, and it has to be
     // a whole line: a name buried in a sentence is a mention, not a card.
+    // A COLLECTIVE label names a body, not one person under a card: "Die
+    // Geschäftsführung" is a menu entry or a section heading far more often than
+    // a caption, and read in this form it filed "Unsere Werte" and "Standorte
+    // Weltweit" as people. It is read in the `LABEL: names` form only.
+    if (COLLECTIVE_ROLES.has(role)) continue;
     for (const m of text.matchAll(new RegExp(`(^|\\n)\\s*([^\\n]{4,70})\\s*\\n\\s*[^\\n]{0,20}${before}${escaped}${after}`, "giu"))) {
       if (!isName(m[2]!, opts)) continue;
       if (AMBIGUOUS_CARD_ROLES.has(role)) held.push({ value: m[2]!, role });

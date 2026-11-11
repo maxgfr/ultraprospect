@@ -106,6 +106,15 @@ describe("extractPeople", () => {
     expect(de("Thomas Becker\nVertriebsleiter")).toEqual([{ value: "Thomas Becker", role: "Leiter" }]);
   });
 
+  it("does not read a menu entry above a collective label as a person", () => {
+    // Measured shapes: navigation and section headings, not captions.
+    expect(de("Unsere Werte\nGeschäftsführung")).toEqual([]);
+    expect(de("Standorte Weltweit\nGeschäftsführung")).toEqual([]);
+    expect(de("Nachhaltigkeit Verantwortung\nDie Geschäftsführung")).toEqual([]);
+    // The label still introduces names in the form a legal notice uses.
+    expect(de("Geschäftsführung: Katrin Hilmer, Peter Rüth").map((p) => p.value)).toEqual(["Katrin Hilmer", "Peter Rüth"]);
+  });
+
   it("does not report the same person twice from one page", () => {
     const twice = de("Vertreten durch: René Schuch\nGeschäftsführer: René Schuch");
     expect(twice).toHaveLength(1);

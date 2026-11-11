@@ -21111,6 +21111,7 @@ var LANGUAGE_OF = {
   fi: "fi",
   no: "no"
 };
+var COLLECTIVE_ROLES = /* @__PURE__ */ new Set(["Gesch\xE4ftsf\xFChrung", "Gesch\xE4ftsleitung", "Vertreten durch", "Verantwortlich f\xFCr den Inhalt"]);
 function rolesFor(countryCode) {
   const lang = LANGUAGE_OF[(countryCode ?? "").toLowerCase()];
   const local2 = lang ? ROLES[lang] ?? [] : [];
@@ -21271,6 +21272,7 @@ function extractPeople(text3, opts = {}) {
         if (isName(candidate, opts)) add2(candidate, role);
       }
     }
+    if (COLLECTIVE_ROLES.has(role)) continue;
     for (const m of text3.matchAll(new RegExp(`(^|\\n)\\s*([^\\n]{4,70})\\s*\\n\\s*[^\\n]{0,20}${before}${escaped}${after}`, "giu"))) {
       if (!isName(m[2], opts)) continue;
       if (AMBIGUOUS_CARD_ROLES.has(role)) held.push({ value: m[2], role });
