@@ -12,11 +12,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { vocabularyOf } from "./classification/index.js";
+import { pageDirFor } from "./pages.js";
 import { sizeBandLabel } from "./registry/index.js";
 import type { Place, RunManifest } from "./types.js";
 import { streetLine } from "./util.js";
 
-/** Where a place's write-up goes, relative to the run. */
+/** Where a place's write-up goes, relative to the run. `check` reads it from here too. */
 export function dossierPathFor(place: Place): string {
   return join("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
 }
@@ -251,7 +252,7 @@ export function buildDossierPacket(runDir: string, place: Place, manifest: RunMa
   parts.push(`## Pages (${place.pages.length})`);
   parts.push("");
   for (const id of place.pages) {
-    const rel = join("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${id}.md`);
+    const rel = join(pageDirFor(place.id), `${id}.md`);
     const abs = join(runDir, rel);
     if (!existsSync(abs)) {
       parts.push(`### ${id} — MISSING (${rel})`);

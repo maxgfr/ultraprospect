@@ -35,6 +35,7 @@ import { buildMatchTodo } from "./match.js";
 import { licencesFor, writeJson, writePlaces, writeRunManifest } from "./run.js";
 import { readPageText } from "./run.js";
 import { runBindsNoPeople, withoutOfficers } from "./no-people.js";
+import { pageDirFor } from "./pages.js";
 import type { LaneCoverage, MatchCandidate, MatchTodo, Place, RunManifest } from "./types.js";
 import { foldAccents, nameSimilarity, normalizeName, shortLabel, tokenSet } from "./util.js";
 
@@ -379,7 +380,7 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
       // too — reading the id as a path silently found no text at all, and the
       // run reported "no German site published a registration number" while
       // sitting on a fetched Impressum that did.
-      const text = readPageText(runDir, join("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${pageId}.md`));
+      const text = readPageText(runDir, join(pageDirFor(place.id), `${pageId}.md`));
       if (!text) continue;
       for (const id of extractLegalIds(text, opts.countryCode, pageId)) {
         idsFound++;

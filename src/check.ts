@@ -25,7 +25,9 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { readJsonSafe } from "./engine.js";
+import { dossierPathFor } from "./dossier.js";
 import { poiContacts } from "./overpass.js";
+import { pageDirFor } from "./pages.js";
 import { connectorById } from "./registry/index.js";
 import type { OsmPoi, Place, RunManifest } from "./types.js";
 import { foldAccents } from "./util.js";
@@ -212,7 +214,7 @@ export function runCheck(input: CheckInput): CheckReport {
   const pageText = new Map<string, string>();
   const pageOwners = new Map<string, Set<string>>();
   for (const place of places) {
-    const dir = join(runDir, "pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"));
+    const dir = join(runDir, pageDirFor(place.id));
     for (const id of place.pages) {
       const file = join(dir, `${id}.md`);
       const owners = pageOwners.get(id) ?? new Set<string>();
@@ -477,7 +479,7 @@ export function runCheck(input: CheckInput): CheckReport {
   // ---- Dossiers ---------------------------------------------------------------
   const dossierDir = join(runDir, "dossiers");
   const files = existsSync(dossierDir) ? readdirSync(dossierDir).filter((f) => f.endsWith(".md")) : [];
-  const byDossierName = new Map(places.map((p) => [`${p.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`, p]));
+  const byDossierName = new Map(places.map((p) => [basename(dossierPathFor(p)), p]));
   let citations = 0;
 
   for (const file of files) {

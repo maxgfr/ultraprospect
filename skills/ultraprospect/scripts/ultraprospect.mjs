@@ -20236,7 +20236,7 @@ function writeScan(runDir, outcome) {
 }
 
 // src/confirm.ts
-import { join as join15 } from "path";
+import { join as join20 } from "path";
 
 // src/no-people.ts
 function bindsNoPeople(manifest) {
@@ -20267,6 +20267,106 @@ function holdNoPeople(manifest, places) {
 }
 function noPeopleNote(removed) {
   return `--no-people (recorded at scan): removed ${removed} named individual(s) this stage read; the run still holds organisation data only`;
+}
+
+// src/pages.ts
+import { mkdirSync as mkdirSync9 } from "fs";
+import { join as join15 } from "path";
+function pageDirFor(placeId) {
+  return join15("pages", placeId.replace(/[^a-zA-Z0-9._-]/g, "_"));
+}
+var MIN_READABLE_CHARS = 120;
+function newPageStore(existing = []) {
+  const highest = existing.reduce((max, p) => Math.max(max, Number.parseInt(p.id.slice(1), 10) || 0), 0);
+  return { next: highest + 1 };
+}
+function describeFailure(failure) {
+  return failure.reason === "not-public" ? `refused, ${failure.why}` : failure.reason;
+}
+async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
+  const hops = opts.keepHtml ? hopGuard(url) : void 0;
+  if (!hops?.authorizeUrl) {
+    const why = await publicUrlRefusal(url);
+    if (why) return { ok: false, reason: "not-public", why };
+  }
+  let result;
+  try {
+    result = opts.keepHtml ? await fetchAndExtract(url, { keepHtml: true, ...hops?.authorizeUrl ? { authorizeUrl: hops.authorizeUrl } : {} }) : await cachedFetchAndExtract(url);
+  } catch {
+    return { ok: false, reason: "unreachable" };
+  }
+  const refusedHop = hops?.refusal();
+  if (refusedHop) return { ok: false, reason: "not-public", why: refusedHop };
+  const text3 = (result.text ?? "").trim();
+  const status = result.status ?? 0;
+  if (status === 0) return { ok: false, reason: "unreachable" };
+  if (status < 200 || status >= 300) return { ok: false, reason: "refused", status };
+  if (text3.length < MIN_READABLE_CHARS) {
+    return { ok: false, reason: "no-readable-text", status, chars: text3.length };
+  }
+  const id = `P${store.next++}`;
+  const dir2 = pageDirFor(placeId);
+  const extract = join15(dir2, `${id}.md`);
+  const fetchedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const header2 = [
+    `# ${id} \u2014 ${result.title ?? url}`,
+    "",
+    `- url: ${result.finalUrl ?? url}`,
+    `- role: ${role}`,
+    `- fetched: ${fetchedAt}`,
+    `- extractor: ${result.extractor ?? "native"}`,
+    `- status: ${result.status ?? 200}`,
+    "",
+    "---",
+    ""
+  ].join("\n");
+  if (!isNoWrite()) mkdirSync9(join15(runDir, dir2), { recursive: true });
+  writeArtifact(join15(runDir, extract), header2 + text3 + markupEvidence(result.html) + "\n");
+  return {
+    ok: true,
+    page: {
+      record: {
+        id,
+        url: result.finalUrl ?? url,
+        role,
+        title: result.title,
+        fetchedAt,
+        extractor: result.extractor,
+        status: result.status,
+        chars: text3.length,
+        extract
+      },
+      text: text3,
+      title: result.title,
+      html: result.html
+    }
+  };
+}
+function markupEvidence(html) {
+  if (!html) return "";
+  const lines = [];
+  const add2 = (label, value) => {
+    const entry = `- ${label}: ${value}`;
+    if (!lines.includes(entry)) lines.push(entry);
+  };
+  for (const m of html.matchAll(/mailto:([^"'?>\s]+@[^"'?>\s]+)/gi)) add2("mailto", decodeLoose(m[1]));
+  for (const m of html.matchAll(/tel:([+0-9().\s-]{6,})/gi)) add2("tel", m[1].trim());
+  for (const m of html.matchAll(/https?:\/\/(?:[a-z]{2,3}\.)?(?:www\.)?(?:facebook|instagram|linkedin|twitter|x|youtube|tiktok)\.com\/[^\s"'<>)]+/gi)) {
+    add2("social", m[0].replace(/[)"'<>]+$/, ""));
+  }
+  if (lines.length === 0) return "";
+  return [
+    "",
+    "---",
+    "",
+    "## Contacts in the markup",
+    "",
+    "Read from this page's HTML rather than from its visible text \u2014 `mailto:` and",
+    "`tel:` hrefs and social links. Recorded here so that anything attributed to",
+    "this page can be re-read in this file, which is what the citation gate does.",
+    "",
+    ...lines
+  ].join("\n");
 }
 
 // src/confirm.ts
@@ -20437,7 +20537,7 @@ async function runConfirm(runDir, places, opts = {}) {
     let anyAnswer = false;
     for (const pageId of place.pages) {
       if (attached) break;
-      const text3 = readPageText(runDir, join15("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${pageId}.md`));
+      const text3 = readPageText(runDir, join20(pageDirFor(place.id), `${pageId}.md`));
       if (!text3) continue;
       for (const id of extractLegalIds(text3, opts.countryCode, pageId)) {
         idsFound++;
@@ -20575,7 +20675,7 @@ function persistConfirm(runDir, places, manifest, outcome) {
   const held = mergeRegistryRecords(runDir, outcome.records);
   writeJson2(runDir, "registry.json", held);
   if (outcome.undecided.length) {
-    const existing = readJsonSafe(join15(runDir, "MATCH.todo.json"))?.pairs ?? [];
+    const existing = readJsonSafe(join20(runDir, "MATCH.todo.json"))?.pairs ?? [];
     writeJson2(runDir, "MATCH.todo.json", buildMatchTodo([...existing, ...outcome.undecided]));
   }
   manifest.lanes = [...manifest.lanes.filter((l) => l.lane !== "registry" || l.mode === "sweep"), outcome.coverage];
@@ -20588,7 +20688,7 @@ function persistConfirm(runDir, places, manifest, outcome) {
   writeRunManifest(runDir, manifest);
 }
 function mergeRegistryRecords(runDir, fresh) {
-  const existing = readJsonSafe(join15(runDir, "registry.json")) ?? [];
+  const existing = readJsonSafe(join20(runDir, "registry.json")) ?? [];
   const byKey = /* @__PURE__ */ new Map();
   for (const rec of [...existing, ...fresh]) byKey.set(recordKey(rec), rec);
   return [...byKey.values()];
@@ -20648,106 +20748,6 @@ function describeSkips(outcome, limited = false) {
   const sum = SKIP_REASONS.reduce((n, r) => n + (outcome.counts[r] ?? 0), 0);
   const overlap = sum > total ? ` (${sum - total} counted under more than one reason)` : "";
   return `skipped ${total} place(s) before searching \u2014 ${parts.join(", ")}${overlap}`;
-}
-
-// src/pages.ts
-import { mkdirSync as mkdirSync9 } from "fs";
-import { join as join20 } from "path";
-function pageDirFor(placeId) {
-  return join20("pages", placeId.replace(/[^a-zA-Z0-9._-]/g, "_"));
-}
-var MIN_READABLE_CHARS = 120;
-function newPageStore(existing = []) {
-  const highest = existing.reduce((max, p) => Math.max(max, Number.parseInt(p.id.slice(1), 10) || 0), 0);
-  return { next: highest + 1 };
-}
-function describeFailure(failure) {
-  return failure.reason === "not-public" ? `refused, ${failure.why}` : failure.reason;
-}
-async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
-  const hops = opts.keepHtml ? hopGuard(url) : void 0;
-  if (!hops?.authorizeUrl) {
-    const why = await publicUrlRefusal(url);
-    if (why) return { ok: false, reason: "not-public", why };
-  }
-  let result;
-  try {
-    result = opts.keepHtml ? await fetchAndExtract(url, { keepHtml: true, ...hops?.authorizeUrl ? { authorizeUrl: hops.authorizeUrl } : {} }) : await cachedFetchAndExtract(url);
-  } catch {
-    return { ok: false, reason: "unreachable" };
-  }
-  const refusedHop = hops?.refusal();
-  if (refusedHop) return { ok: false, reason: "not-public", why: refusedHop };
-  const text3 = (result.text ?? "").trim();
-  const status = result.status ?? 0;
-  if (status === 0) return { ok: false, reason: "unreachable" };
-  if (status < 200 || status >= 300) return { ok: false, reason: "refused", status };
-  if (text3.length < MIN_READABLE_CHARS) {
-    return { ok: false, reason: "no-readable-text", status, chars: text3.length };
-  }
-  const id = `P${store.next++}`;
-  const dir2 = pageDirFor(placeId);
-  const extract = join20(dir2, `${id}.md`);
-  const fetchedAt = (/* @__PURE__ */ new Date()).toISOString();
-  const header2 = [
-    `# ${id} \u2014 ${result.title ?? url}`,
-    "",
-    `- url: ${result.finalUrl ?? url}`,
-    `- role: ${role}`,
-    `- fetched: ${fetchedAt}`,
-    `- extractor: ${result.extractor ?? "native"}`,
-    `- status: ${result.status ?? 200}`,
-    "",
-    "---",
-    ""
-  ].join("\n");
-  if (!isNoWrite()) mkdirSync9(join20(runDir, dir2), { recursive: true });
-  writeArtifact(join20(runDir, extract), header2 + text3 + markupEvidence(result.html) + "\n");
-  return {
-    ok: true,
-    page: {
-      record: {
-        id,
-        url: result.finalUrl ?? url,
-        role,
-        title: result.title,
-        fetchedAt,
-        extractor: result.extractor,
-        status: result.status,
-        chars: text3.length,
-        extract
-      },
-      text: text3,
-      title: result.title,
-      html: result.html
-    }
-  };
-}
-function markupEvidence(html) {
-  if (!html) return "";
-  const lines = [];
-  const add2 = (label, value) => {
-    const entry = `- ${label}: ${value}`;
-    if (!lines.includes(entry)) lines.push(entry);
-  };
-  for (const m of html.matchAll(/mailto:([^"'?>\s]+@[^"'?>\s]+)/gi)) add2("mailto", decodeLoose(m[1]));
-  for (const m of html.matchAll(/tel:([+0-9().\s-]{6,})/gi)) add2("tel", m[1].trim());
-  for (const m of html.matchAll(/https?:\/\/(?:[a-z]{2,3}\.)?(?:www\.)?(?:facebook|instagram|linkedin|twitter|x|youtube|tiktok)\.com\/[^\s"'<>)]+/gi)) {
-    add2("social", m[0].replace(/[)"'<>]+$/, ""));
-  }
-  if (lines.length === 0) return "";
-  return [
-    "",
-    "---",
-    "",
-    "## Contacts in the markup",
-    "",
-    "Read from this page's HTML rather than from its visible text \u2014 `mailto:` and",
-    "`tel:` hrefs and social links. Recorded here so that anything attributed to",
-    "this page can be re-read in this file, which is what the citation gate does.",
-    "",
-    ...lines
-  ].join("\n");
 }
 
 // src/resolve.ts
@@ -22522,7 +22522,7 @@ function buildDossierPacket(runDir, place, manifest) {
   parts.push(`## Pages (${place.pages.length})`);
   parts.push("");
   for (const id of place.pages) {
-    const rel = join21("pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"), `${id}.md`);
+    const rel = join21(pageDirFor(place.id), `${id}.md`);
     const abs = join21(runDir, rel);
     if (!existsSync14(abs)) {
       parts.push(`### ${id} \u2014 MISSING (${rel})`);
@@ -22594,7 +22594,7 @@ function runCheck(input) {
   const pageText = /* @__PURE__ */ new Map();
   const pageOwners = /* @__PURE__ */ new Map();
   for (const place of places) {
-    const dir2 = join22(runDir, "pages", place.id.replace(/[^a-zA-Z0-9._-]/g, "_"));
+    const dir2 = join22(runDir, pageDirFor(place.id));
     for (const id of place.pages) {
       const file = join22(dir2, `${id}.md`);
       const owners = pageOwners.get(id) ?? /* @__PURE__ */ new Set();
@@ -22793,7 +22793,7 @@ function runCheck(input) {
   }
   const dossierDir = join22(runDir, "dossiers");
   const files = existsSync15(dossierDir) ? readdirSync9(dossierDir).filter((f) => f.endsWith(".md")) : [];
-  const byDossierName = new Map(places.map((p) => [`${p.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`, p]));
+  const byDossierName = new Map(places.map((p) => [basename3(dossierPathFor(p)), p]));
   let citations = 0;
   for (const file of files) {
     const rel = join22("dossiers", file);
