@@ -40,6 +40,12 @@ interface JsonResponse {
  * request failing, and says nothing about the company.
  */
 export function registerAnswer(connectorId: string, res: JsonResponse): any {
+  // A 200 whose body is not JSON — a maintenance page, a firewall's challenge —
+  // comes back from the engine as the raw text. Read as an answer, it held no
+  // record, and the company was filed as one the register does not know.
+  if (res.ok && typeof res.data === "string" && res.data.trim() !== "") {
+    throw new RegisterUnreachable(connectorId, `HTTP ${res.status} with a body that is not JSON (${res.data.trim().slice(0, 60)}…)`);
+  }
   if (res.ok) return res.data;
   if (res.status === 404 || res.status === 410) return undefined;
   throw new RegisterUnreachable(connectorId, res.status ? `HTTP ${res.status}` : (res.error ?? "no response"));

@@ -232,7 +232,7 @@ const TOOLS: ToolDecl[] = [
         csvRaw: {
           type: "boolean",
           description:
-            "Write PROSPECTS.csv cells unchanged, for a machine consumer. By default a cell a spreadsheet would run as a formula gets a leading apostrophe. Refused on a tenders run.",
+            "Write PROSPECTS.csv (or TENDERS.csv on a tenders run) cells unchanged, for a machine consumer. By default a cell a spreadsheet would run as a formula gets a leading apostrophe.",
         },
       },
       required: ["run"],

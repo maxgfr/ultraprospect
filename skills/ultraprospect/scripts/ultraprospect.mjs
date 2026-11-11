@@ -11991,6 +11991,9 @@ var RegisterUnreachable = class extends Error {
   connectorId;
 };
 function registerAnswer(connectorId, res) {
+  if (res.ok && typeof res.data === "string" && res.data.trim() !== "") {
+    throw new RegisterUnreachable(connectorId, `HTTP ${res.status} with a body that is not JSON (${res.data.trim().slice(0, 60)}\u2026)`);
+  }
   if (res.ok) return res.data;
   if (res.status === 404 || res.status === 410) return void 0;
   throw new RegisterUnreachable(connectorId, res.status ? `HTTP ${res.status}` : res.error ?? "no response");
@@ -26657,7 +26660,7 @@ var TOOLS = [
         noPeople: { type: "boolean", description: "Strip named individuals from the deliverables." },
         csvRaw: {
           type: "boolean",
-          description: "Write PROSPECTS.csv cells unchanged, for a machine consumer. By default a cell a spreadsheet would run as a formula gets a leading apostrophe. Refused on a tenders run."
+          description: "Write PROSPECTS.csv (or TENDERS.csv on a tenders run) cells unchanged, for a machine consumer. By default a cell a spreadsheet would run as a formula gets a leading apostrophe."
         }
       },
       required: ["run"]
