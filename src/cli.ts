@@ -197,6 +197,7 @@ export const BOOL_FLAGS = [
   "no-registry",
   "include-ceased",
   "no-people",
+  "csv-raw",
   "queries",
   "engine-search",
   "eco",
@@ -350,6 +351,8 @@ DELIVERABLES (render)
                          Both cut EVERY deliverable — the CSV, prospects.json, the report
                          and the page — and the report and the page say how many rows of
                          the run were removed. places.json is never changed.
+  --csv-raw              Write PROSPECTS.csv cells as they are, for a machine consumer. By default
+                         a cell a spreadsheet would run as a formula (=, @, +, -) gets a leading '.
 
 CHANGE (watch)
   --since <dir>          The earlier run to compare against.
@@ -1203,7 +1206,13 @@ async function cmdCheck(values: Record<string, string>, bools: ReadonlySet<strin
 async function cmdRender(values: Record<string, string>, bools: ReadonlySet<string>): Promise<number> {
   if (!values.run) throw new UsageError("render needs --run <dir>");
   const runDir = resolveRun(values.run);
-  if (isTenderRun(runDir)) return tenderRenderCmd(runDir, bools, IO);
+  if (isTenderRun(runDir)) {
+    // TENDERS.csv is written by the tenders module, which does not take the
+    // option yet. Refusing beats honouring the flag on one file and silently
+    // guarding the other.
+    if (bools.has("csv-raw")) throw new UsageError("--csv-raw is not supported on a tenders run yet: TENDERS.csv is always formula-guarded");
+    return tenderRenderCmd(runDir, bools, IO);
+  }
   const places = readPlaces(runDir);
   const manifest = requireManifest(runDir);
 
@@ -1212,6 +1221,7 @@ async function cmdRender(values: Record<string, string>, bools: ReadonlySet<stri
     noPeople: bools.has("no-people"),
     minScore: values["min-score"] ? flagInt("min-score", values["min-score"], 0, 10_000, 0) : undefined,
     minFit: parseMinFit(values["min-fit"]),
+    csvRaw: bools.has("csv-raw"),
   });
 
   for (const file of outcome.files) writeArtifact(join(runDir, file.path), file.content);

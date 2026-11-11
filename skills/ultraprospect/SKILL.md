@@ -128,6 +128,7 @@ ultraprospect dossier --run <dir> --id <id>                   # the grounding pa
 ultraprospect check --run <dir>                               # the gate. Exit 1 means do not present.
 ultraprospect render --run <dir>                              # CSV + JSON + REPORT.md + index.html
 ultraprospect render --run <dir> --min-fit possible           # only the ones you judged worth it
+ultraprospect render --run <dir> --csv-raw                    # CSV cells as they are, for a CRM import or a script
 ultraprospect watch --run <new> --since <old>                 # who opened, closed, started hiring
 ultraprospect orchestrate --run <dir>                         # fan the two judgement phases out
 ultraprospect mcp                                             # serve it over MCP, stdio
@@ -465,7 +466,7 @@ ultraprospect awards --country fr --cpv 72 --since 2y         # who wins, who bu
     |---|---|---|
     | `index.html` | **Looking.** Self-contained, makes NO network request, opens from a file:// path with nothing installed. Sort, filter and facet in place to find the twenty rows that matter out of eight hundred — then open any row: the verdict verbatim, the score broken into the terms that produced it, every contact with the page id it was read from, the open roles, the register identity and its `sourceUrl`, the site signals. With JavaScript off, every panel is open. | anyone who has to SEE the territory |
     | `REPORT.md` | **Reading and sharing.** Coverage with each lane's `mode`, which connector answered and what attached each record, what the run was narrowed to, the counts, the score distribution, who is hiring, every `fit` verdict verbatim, the ranked table, and run notes deduplicated with their counts. Pastes into an issue, a PR, a wiki, a mail. | anyone who has to judge whether the run is sound |
-    | `PROSPECTS.csv` | **Working.** Flat and CRM-shaped: `score` and `fit` in separate columns so the measured number survives your judgement, each contact's source page beside it, `registry_as_of` on anything from a snapshot, and `role_filter` / `term_lexicon` beside their counts so a number says what it counted. | a CRM, a spreadsheet, a mail-merge |
+    | `PROSPECTS.csv` | **Working.** Flat and CRM-shaped: `score` and `fit` in separate columns so the measured number survives your judgement, each contact's source page beside it, `registry_as_of` on anything from a snapshot, and `role_filter` / `term_lexicon` beside their counts so a number says what it counted. A text cell a spreadsheet would run as a formula (`=`, `@`, `+`, `-`) is written with a leading `'`; `--csv-raw` writes it unchanged for a machine consumer (not on a tenders run). | a CRM, a spreadsheet, a mail-merge |
     | `prospects.json` | **Piping.** The same rows, unflattened, for whatever comes next. | another program |
 
     Do not hand over one and describe the others. The CSV is where someone will

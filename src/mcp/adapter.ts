@@ -229,6 +229,11 @@ const TOOLS: ToolDecl[] = [
             "strong, possible or weak — only rows you judged at least that. Cuts every deliverable; `selection` in the answer says how many rows were removed.",
         },
         noPeople: { type: "boolean", description: "Strip named individuals from the deliverables." },
+        csvRaw: {
+          type: "boolean",
+          description:
+            "Write PROSPECTS.csv cells unchanged, for a machine consumer. By default a cell a spreadsheet would run as a formula gets a leading apostrophe. Refused on a tenders run.",
+        },
       },
       required: ["run"],
     } as never,
@@ -532,13 +537,18 @@ export function createAdapter(): McpAdapter {
 
         case "ultraprospect_render": {
           const runDir = resolveRun(str(args.run, "run"));
-          if (isTenderRun(runDir)) return { text: JSON.stringify({ run: runDir, files: renderTenderRun(runDir) }, null, 2), artifact: runDir };
+          if (isTenderRun(runDir)) {
+            // Same refusal as the CLI: TENDERS.csv cannot be written raw yet.
+            if (args.csvRaw === true) throw new ToolError("csvRaw is not supported on a tenders run yet: TENDERS.csv is always formula-guarded");
+            return { text: JSON.stringify({ run: runDir, files: renderTenderRun(runDir) }, null, 2), artifact: runDir };
+          }
           const manifest = requireManifest(runDir);
           const outcome = buildAll(readPlaces(runDir), manifest, {
             runDir,
             noPeople: args.noPeople === true,
             minScore: typeof args.minScore === "number" ? clampInt(args.minScore, 0, 10_000, 0) : undefined,
             minFit: parseMinFit(args.minFit),
+            csvRaw: args.csvRaw === true,
           });
           for (const file of outcome.files) writeArtifact(join(runDir, file.path), file.content);
           return {

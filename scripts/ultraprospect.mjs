@@ -13325,13 +13325,13 @@ function isSpreadsheetFormula(s) {
   if (first === "+" || first === "-") return !/^[+-][\d\s().,/-]*(?: \| \+?[\d\s().,/-]+)*$/.test(s);
   return false;
 }
-function csvField(value) {
+function csvField(value, opts = {}) {
   let s = value === void 0 || value === null ? "" : String(value);
-  if (typeof value === "string" && isSpreadsheetFormula(s)) s = `'${s}`;
+  if (!opts.raw && typeof value === "string" && isSpreadsheetFormula(s)) s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
-function csvRow(values) {
-  return values.map(csvField).join(",");
+function csvRow(values, opts = {}) {
+  return values.map((v) => csvField(v, opts)).join(",");
 }
 function firstText(...values) {
   for (const v of values) if (typeof v === "string" && v.trim()) return v.trim();
@@ -22194,85 +22194,89 @@ function selectRows(places, opts = {}) {
   return { rows, selection: { filter: asked.join(", "), total: places.length, kept: rows.length, removed: places.length - rows.length } };
 }
 function toCsv(places, opts = {}) {
-  const rows = [csvRow(HEADER)];
+  const raw = { raw: opts.csvRaw === true };
+  const rows = [csvRow(HEADER, raw)];
   for (const place of ranked(selectRows(places, opts).rows)) {
     const s = place.registry;
     const sg = place.signals;
     const people = opts.noPeople ? "" : (s?.officers ?? []).map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" \u2014 ")).join(" | ");
     rows.push(
-      csvRow([
-        place.id,
-        place.name,
-        place.score?.total ?? 0,
-        place.score?.fit ?? "",
-        place.score?.why ?? "",
-        place.score?.angle ?? "",
-        place.category ?? "",
-        s?.connectorId ?? "",
-        s?.activityCode ?? "",
-        // The scheme travels with the code, always. NACE "D" and US SIC "D" are
-        // different economies, and a spreadsheet that lost the scheme would
-        // merge them without anyone noticing.
-        s?.activityScheme ?? "",
-        s?.section ?? "",
-        // The legal unit's, in its own columns: every register filter matched
-        // on these, so a row that looks off-target can be explained instead of
-        // looking like a bug.
-        s?.parent?.activityCode ?? "",
-        s?.parent?.section ?? "",
-        s ? sizeBandLabel(s, s.sizeBand) ?? (s.employees != null ? String(s.employees) : "") : "",
-        s ? sizeBandLabel(s, s.parent?.sizeBand) ?? (s.parent?.employees != null ? String(s.parent.employees) : "") : "",
-        s?.finances?.revenue ?? "",
-        s?.finances?.currency ?? "",
-        s?.finances?.year ?? "",
-        s?.id ?? "",
-        s?.establishmentId ?? "",
-        s?.sourceUrl ?? "",
-        // How the register record got attached: swept with the territory, or
-        // confirmed against an identifier read off the company's own site. Not
-        // equally strong, so the CSV says which.
-        place.registryEvidence ? `${place.registryEvidence.mode}:${place.registryEvidence.how}` : "",
-        place.registry?.asOf ?? "",
-        s?.isHeadOffice ? "yes" : s ? "no" : "",
-        s?.dateCreated ?? "",
-        streetLine(place.address),
-        place.address.codePostal ?? "",
-        place.address.commune ?? "",
-        place.address.codeCommune ?? "",
-        place.lat ?? "",
-        place.lon ?? "",
-        place.website?.url ?? "",
-        place.website?.confidence ?? "",
-        // Empty means discovery has not run for this row — NOT that it has no
-        // presence. "none" is the measured absence; blank is silence.
-        place.webPresence ?? "",
-        place.contacts.emails.map((e) => e.value).join(" | "),
-        // The page each contact came from, in the same order as the column
-        // beside it. A CRM row without this cannot be audited later.
-        place.contacts.emails.map((e) => e.from).join(" | "),
-        place.contacts.phones.map((p) => p.value).join(" | "),
-        place.contacts.phones.map((p) => p.from).join(" | "),
-        place.contacts.socials.map((x) => x.value).join(" | "),
-        place.contacts.socials.map((x) => x.from).join(" | "),
-        people,
-        // Three states, not two: an empty cell means a board was found and
-        // could not be read, which is not the same as "no".
-        sg?.isHiring === true ? "yes" : sg?.isHiring === false ? "no" : "",
-        sg?.openRoles ?? "",
-        sg?.matchedRoles ?? "",
-        sg?.roleFilter?.join(" | ") ?? "",
-        sg?.oldestOpenRoleDays ?? "",
-        // The terms the company itself used, verbatim, with the page beside
-        // them — so a row can be checked without opening the run.
-        sg?.termMentions?.map((m) => m.value).join(" | ") ?? "",
-        [...new Set(sg?.termMentions?.map((m) => m.from) ?? [])].join(" | "),
-        sg?.atsProviders.join(" | ") ?? "",
-        sg?.cms ?? "",
-        sg?.lastContentAt ?? "",
-        place.pages.length,
-        place.sources.join("+"),
-        place.matchConfidence ?? ""
-      ])
+      csvRow(
+        [
+          place.id,
+          place.name,
+          place.score?.total ?? 0,
+          place.score?.fit ?? "",
+          place.score?.why ?? "",
+          place.score?.angle ?? "",
+          place.category ?? "",
+          s?.connectorId ?? "",
+          s?.activityCode ?? "",
+          // The scheme travels with the code, always. NACE "D" and US SIC "D" are
+          // different economies, and a spreadsheet that lost the scheme would
+          // merge them without anyone noticing.
+          s?.activityScheme ?? "",
+          s?.section ?? "",
+          // The legal unit's, in its own columns: every register filter matched
+          // on these, so a row that looks off-target can be explained instead of
+          // looking like a bug.
+          s?.parent?.activityCode ?? "",
+          s?.parent?.section ?? "",
+          s ? sizeBandLabel(s, s.sizeBand) ?? (s.employees != null ? String(s.employees) : "") : "",
+          s ? sizeBandLabel(s, s.parent?.sizeBand) ?? (s.parent?.employees != null ? String(s.parent.employees) : "") : "",
+          s?.finances?.revenue ?? "",
+          s?.finances?.currency ?? "",
+          s?.finances?.year ?? "",
+          s?.id ?? "",
+          s?.establishmentId ?? "",
+          s?.sourceUrl ?? "",
+          // How the register record got attached: swept with the territory, or
+          // confirmed against an identifier read off the company's own site. Not
+          // equally strong, so the CSV says which.
+          place.registryEvidence ? `${place.registryEvidence.mode}:${place.registryEvidence.how}` : "",
+          place.registry?.asOf ?? "",
+          s?.isHeadOffice ? "yes" : s ? "no" : "",
+          s?.dateCreated ?? "",
+          streetLine(place.address),
+          place.address.codePostal ?? "",
+          place.address.commune ?? "",
+          place.address.codeCommune ?? "",
+          place.lat ?? "",
+          place.lon ?? "",
+          place.website?.url ?? "",
+          place.website?.confidence ?? "",
+          // Empty means discovery has not run for this row — NOT that it has no
+          // presence. "none" is the measured absence; blank is silence.
+          place.webPresence ?? "",
+          place.contacts.emails.map((e) => e.value).join(" | "),
+          // The page each contact came from, in the same order as the column
+          // beside it. A CRM row without this cannot be audited later.
+          place.contacts.emails.map((e) => e.from).join(" | "),
+          place.contacts.phones.map((p) => p.value).join(" | "),
+          place.contacts.phones.map((p) => p.from).join(" | "),
+          place.contacts.socials.map((x) => x.value).join(" | "),
+          place.contacts.socials.map((x) => x.from).join(" | "),
+          people,
+          // Three states, not two: an empty cell means a board was found and
+          // could not be read, which is not the same as "no".
+          sg?.isHiring === true ? "yes" : sg?.isHiring === false ? "no" : "",
+          sg?.openRoles ?? "",
+          sg?.matchedRoles ?? "",
+          sg?.roleFilter?.join(" | ") ?? "",
+          sg?.oldestOpenRoleDays ?? "",
+          // The terms the company itself used, verbatim, with the page beside
+          // them — so a row can be checked without opening the run.
+          sg?.termMentions?.map((m) => m.value).join(" | ") ?? "",
+          [...new Set(sg?.termMentions?.map((m) => m.from) ?? [])].join(" | "),
+          sg?.atsProviders.join(" | ") ?? "",
+          sg?.cms ?? "",
+          sg?.lastContentAt ?? "",
+          place.pages.length,
+          place.sources.join("+"),
+          place.matchConfidence ?? ""
+        ],
+        raw
+      )
     );
   }
   return rows.join("\n") + "\n";
@@ -26385,7 +26389,11 @@ var TOOLS = [
           type: "string",
           description: "strong, possible or weak \u2014 only rows you judged at least that. Cuts every deliverable; `selection` in the answer says how many rows were removed."
         },
-        noPeople: { type: "boolean", description: "Strip named individuals from the deliverables." }
+        noPeople: { type: "boolean", description: "Strip named individuals from the deliverables." },
+        csvRaw: {
+          type: "boolean",
+          description: "Write PROSPECTS.csv cells unchanged, for a machine consumer. By default a cell a spreadsheet would run as a formula gets a leading apostrophe. Refused on a tenders run."
+        }
       },
       required: ["run"]
     }
@@ -26658,13 +26666,17 @@ ${JSON.stringify({ ok: report2.ok, errors: report2.errors, warnings: report2.war
         }
         case "ultraprospect_render": {
           const runDir = resolveRun(str3(args.run, "run"));
-          if (isTenderRun(runDir)) return { text: JSON.stringify({ run: runDir, files: renderTenderRun(runDir) }, null, 2), artifact: runDir };
+          if (isTenderRun(runDir)) {
+            if (args.csvRaw === true) throw new ToolError("csvRaw is not supported on a tenders run yet: TENDERS.csv is always formula-guarded");
+            return { text: JSON.stringify({ run: runDir, files: renderTenderRun(runDir) }, null, 2), artifact: runDir };
+          }
           const manifest = requireManifest(runDir);
           const outcome = buildAll(readPlaces(runDir), manifest, {
             runDir,
             noPeople: args.noPeople === true,
             minScore: typeof args.minScore === "number" ? clampInt(args.minScore, 0, 1e4, 0) : void 0,
-            minFit: parseMinFit(args.minFit)
+            minFit: parseMinFit(args.minFit),
+            csvRaw: args.csvRaw === true
           });
           for (const file of outcome.files) writeArtifact(join31(runDir, file.path), file.content);
           return {
@@ -27610,6 +27622,7 @@ var BOOL_FLAGS = [
   "no-registry",
   "include-ceased",
   "no-people",
+  "csv-raw",
   "queries",
   "engine-search",
   "eco",
@@ -27762,6 +27775,8 @@ DELIVERABLES (render)
                          Both cut EVERY deliverable \u2014 the CSV, prospects.json, the report
                          and the page \u2014 and the report and the page say how many rows of
                          the run were removed. places.json is never changed.
+  --csv-raw              Write PROSPECTS.csv cells as they are, for a machine consumer. By default
+                         a cell a spreadsheet would run as a formula (=, @, +, -) gets a leading '.
 
 CHANGE (watch)
   --since <dir>          The earlier run to compare against.
@@ -28428,14 +28443,18 @@ async function cmdCheck(values, bools) {
 async function cmdRender(values, bools) {
   if (!values.run) throw new UsageError("render needs --run <dir>");
   const runDir = resolveRun(values.run);
-  if (isTenderRun2(runDir)) return tenderRenderCmd(runDir, bools, IO);
+  if (isTenderRun2(runDir)) {
+    if (bools.has("csv-raw")) throw new UsageError("--csv-raw is not supported on a tenders run yet: TENDERS.csv is always formula-guarded");
+    return tenderRenderCmd(runDir, bools, IO);
+  }
   const places = readPlaces(runDir);
   const manifest = requireManifest(runDir);
   const outcome = buildAll(places, manifest, {
     runDir,
     noPeople: bools.has("no-people"),
     minScore: values["min-score"] ? flagInt("min-score", values["min-score"], 0, 1e4, 0) : void 0,
-    minFit: parseMinFit(values["min-fit"])
+    minFit: parseMinFit(values["min-fit"]),
+    csvRaw: bools.has("csv-raw")
   });
   for (const file of outcome.files) writeArtifact(join33(runDir, file.path), file.content);
   if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join33(runDir, f.path)), selection: outcome.selection }));

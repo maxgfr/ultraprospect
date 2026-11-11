@@ -349,19 +349,30 @@ function isSpreadsheetFormula(s: string): boolean {
   return false;
 }
 
+export interface CsvFieldOptions {
+  /**
+   * Write formula-looking text unchanged. For a machine consumer — a CRM
+   * import, a script — the apostrophe is not a defence but a corrupted value:
+   * `-Acme-` arrives as `'-Acme-`. Off by default, because the file is far more
+   * often opened in a spreadsheet than parsed.
+   */
+  raw?: boolean;
+}
+
 /**
  * RFC 4180 field: quote when the value contains a delimiter, quote or newline.
  * A string a spreadsheet would run as a formula is defused with a leading
- * apostrophe first, the form every spreadsheet reads back as plain text.
+ * apostrophe first, the form every spreadsheet reads back as plain text —
+ * unless `raw` asks for the value as it is.
  */
-export function csvField(value: unknown): string {
+export function csvField(value: unknown, opts: CsvFieldOptions = {}): string {
   let s = value === undefined || value === null ? "" : String(value);
-  if (typeof value === "string" && isSpreadsheetFormula(s)) s = `'${s}`;
+  if (!opts.raw && typeof value === "string" && isSpreadsheetFormula(s)) s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-export function csvRow(values: readonly unknown[]): string {
-  return values.map(csvField).join(",");
+export function csvRow(values: readonly unknown[], opts: CsvFieldOptions = {}): string {
+  return values.map((v) => csvField(v, opts)).join(",");
 }
 
 /** First non-empty, non-whitespace string in the list. */

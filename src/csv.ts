@@ -23,6 +23,8 @@ export interface CsvOptions {
   minScore?: number;
   /** Only rows the agent judged at least this well. */
   minFit?: "strong" | "possible" | "weak";
+  /** Write formula-looking cells unchanged instead of apostrophe-guarded (`--csv-raw`). */
+  csvRaw?: boolean;
 }
 
 const HEADER = [
@@ -142,7 +144,8 @@ export function selectRows<T extends Place>(places: readonly T[], opts: CsvOptio
 }
 
 export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
-  const rows: string[] = [csvRow(HEADER)];
+  const raw = { raw: opts.csvRaw === true };
+  const rows: string[] = [csvRow(HEADER, raw)];
 
   for (const place of ranked(selectRows(places, opts).rows)) {
     const s = place.registry;
@@ -152,79 +155,82 @@ export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
       : (s?.officers ?? []).map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" — ")).join(" | ");
 
     rows.push(
-      csvRow([
-        place.id,
-        place.name,
-        place.score?.total ?? 0,
-        place.score?.fit ?? "",
-        place.score?.why ?? "",
-        place.score?.angle ?? "",
-        place.category ?? "",
-        s?.connectorId ?? "",
-        s?.activityCode ?? "",
-        // The scheme travels with the code, always. NACE "D" and US SIC "D" are
-        // different economies, and a spreadsheet that lost the scheme would
-        // merge them without anyone noticing.
-        s?.activityScheme ?? "",
-        s?.section ?? "",
-        // The legal unit's, in its own columns: every register filter matched
-        // on these, so a row that looks off-target can be explained instead of
-        // looking like a bug.
-        s?.parent?.activityCode ?? "",
-        s?.parent?.section ?? "",
-        s ? (sizeBandLabel(s, s.sizeBand) ?? (s.employees != null ? String(s.employees) : "")) : "",
-        s ? (sizeBandLabel(s, s.parent?.sizeBand) ?? (s.parent?.employees != null ? String(s.parent.employees) : "")) : "",
-        s?.finances?.revenue ?? "",
-        s?.finances?.currency ?? "",
-        s?.finances?.year ?? "",
-        s?.id ?? "",
-        s?.establishmentId ?? "",
-        s?.sourceUrl ?? "",
-        // How the register record got attached: swept with the territory, or
-        // confirmed against an identifier read off the company's own site. Not
-        // equally strong, so the CSV says which.
-        place.registryEvidence ? `${place.registryEvidence.mode}:${place.registryEvidence.how}` : "",
-        place.registry?.asOf ?? "",
-        s?.isHeadOffice ? "yes" : s ? "no" : "",
-        s?.dateCreated ?? "",
-        streetLine(place.address),
-        place.address.codePostal ?? "",
-        place.address.commune ?? "",
-        place.address.codeCommune ?? "",
-        place.lat ?? "",
-        place.lon ?? "",
-        place.website?.url ?? "",
-        place.website?.confidence ?? "",
-        // Empty means discovery has not run for this row — NOT that it has no
-        // presence. "none" is the measured absence; blank is silence.
-        place.webPresence ?? "",
-        place.contacts.emails.map((e) => e.value).join(" | "),
-        // The page each contact came from, in the same order as the column
-        // beside it. A CRM row without this cannot be audited later.
-        place.contacts.emails.map((e) => e.from).join(" | "),
-        place.contacts.phones.map((p) => p.value).join(" | "),
-        place.contacts.phones.map((p) => p.from).join(" | "),
-        place.contacts.socials.map((x) => x.value).join(" | "),
-        place.contacts.socials.map((x) => x.from).join(" | "),
-        people,
-        // Three states, not two: an empty cell means a board was found and
-        // could not be read, which is not the same as "no".
-        sg?.isHiring === true ? "yes" : sg?.isHiring === false ? "no" : "",
-        sg?.openRoles ?? "",
-        sg?.matchedRoles ?? "",
-        sg?.roleFilter?.join(" | ") ?? "",
-        sg?.oldestOpenRoleDays ?? "",
-        // The terms the company itself used, verbatim, with the page beside
-        // them — so a row can be checked without opening the run.
-        sg?.termMentions?.map((m) => m.value).join(" | ") ?? "",
-        [...new Set(sg?.termMentions?.map((m) => m.from) ?? [])].join(" | "),
-        sg?.atsProviders.join(" | ") ?? "",
-        sg?.cms ?? "",
-        sg?.lastContentAt ?? "",
-        place.pages.length,
-        place.sources.join("+"),
-        place.matchConfidence ?? "",
-      ]),
+      csvRow(
+        [
+          place.id,
+          place.name,
+          place.score?.total ?? 0,
+          place.score?.fit ?? "",
+          place.score?.why ?? "",
+          place.score?.angle ?? "",
+          place.category ?? "",
+          s?.connectorId ?? "",
+          s?.activityCode ?? "",
+          // The scheme travels with the code, always. NACE "D" and US SIC "D" are
+          // different economies, and a spreadsheet that lost the scheme would
+          // merge them without anyone noticing.
+          s?.activityScheme ?? "",
+          s?.section ?? "",
+          // The legal unit's, in its own columns: every register filter matched
+          // on these, so a row that looks off-target can be explained instead of
+          // looking like a bug.
+          s?.parent?.activityCode ?? "",
+          s?.parent?.section ?? "",
+          s ? (sizeBandLabel(s, s.sizeBand) ?? (s.employees != null ? String(s.employees) : "")) : "",
+          s ? (sizeBandLabel(s, s.parent?.sizeBand) ?? (s.parent?.employees != null ? String(s.parent.employees) : "")) : "",
+          s?.finances?.revenue ?? "",
+          s?.finances?.currency ?? "",
+          s?.finances?.year ?? "",
+          s?.id ?? "",
+          s?.establishmentId ?? "",
+          s?.sourceUrl ?? "",
+          // How the register record got attached: swept with the territory, or
+          // confirmed against an identifier read off the company's own site. Not
+          // equally strong, so the CSV says which.
+          place.registryEvidence ? `${place.registryEvidence.mode}:${place.registryEvidence.how}` : "",
+          place.registry?.asOf ?? "",
+          s?.isHeadOffice ? "yes" : s ? "no" : "",
+          s?.dateCreated ?? "",
+          streetLine(place.address),
+          place.address.codePostal ?? "",
+          place.address.commune ?? "",
+          place.address.codeCommune ?? "",
+          place.lat ?? "",
+          place.lon ?? "",
+          place.website?.url ?? "",
+          place.website?.confidence ?? "",
+          // Empty means discovery has not run for this row — NOT that it has no
+          // presence. "none" is the measured absence; blank is silence.
+          place.webPresence ?? "",
+          place.contacts.emails.map((e) => e.value).join(" | "),
+          // The page each contact came from, in the same order as the column
+          // beside it. A CRM row without this cannot be audited later.
+          place.contacts.emails.map((e) => e.from).join(" | "),
+          place.contacts.phones.map((p) => p.value).join(" | "),
+          place.contacts.phones.map((p) => p.from).join(" | "),
+          place.contacts.socials.map((x) => x.value).join(" | "),
+          place.contacts.socials.map((x) => x.from).join(" | "),
+          people,
+          // Three states, not two: an empty cell means a board was found and
+          // could not be read, which is not the same as "no".
+          sg?.isHiring === true ? "yes" : sg?.isHiring === false ? "no" : "",
+          sg?.openRoles ?? "",
+          sg?.matchedRoles ?? "",
+          sg?.roleFilter?.join(" | ") ?? "",
+          sg?.oldestOpenRoleDays ?? "",
+          // The terms the company itself used, verbatim, with the page beside
+          // them — so a row can be checked without opening the run.
+          sg?.termMentions?.map((m) => m.value).join(" | ") ?? "",
+          [...new Set(sg?.termMentions?.map((m) => m.from) ?? [])].join(" | "),
+          sg?.atsProviders.join(" | ") ?? "",
+          sg?.cms ?? "",
+          sg?.lastContentAt ?? "",
+          place.pages.length,
+          place.sources.join("+"),
+          place.matchConfidence ?? "",
+        ],
+        raw,
+      ),
     );
   }
 
