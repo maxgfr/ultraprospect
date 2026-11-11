@@ -319,7 +319,10 @@ export interface SupplierIdentity {
 export async function confirmSuppliers(analysis: AwardAnalysis, max = 15): Promise<SupplierIdentity[]> {
   const out: SupplierIdentity[] = [];
   for (const s of analysis.suppliers.filter((x) => x.legalId).slice(0, max)) {
-    const country = s.countries[0] ?? "";
+    // The supplier's own country decides the register: a German winner of a
+    // French contract is in the German register, not the French one. The
+    // buyer's market is only the fallback when no notice says where it is.
+    const country = s.country ?? s.countries[0] ?? "";
     const id = legalIdOf(s.legalId!, country);
     if (!id) {
       out.push({ supplier: s.name, legalId: s.legalId!, refused: "identifier shape not recognised for this country" });

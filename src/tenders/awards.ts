@@ -91,12 +91,20 @@ export function awardRows(tenders: readonly Tender[]): AwardRow[] {
   return rows;
 }
 
+/** Where the supplier is registered: its own published country, else the market it won in. */
+function supplierCountryOf(r: AwardRow): string {
+  return r.supplierCountry ?? r.country;
+}
+
 /** The key two award rows share when they name the same supplier. Identifier first, never a fuzzy name. */
 function supplierKey(r: AwardRow): string {
   if (r.supplierId) {
     const digits = r.supplierId.replace(/\s/g, "");
     // A French SIRET's first nine digits are the SIREN: one company, many sites.
-    const siren = /^\d{14}$/.test(digits) && r.country === "fr" ? digits.slice(0, 9) : digits;
+    // French by the SUPPLIER's own country when the notice publishes one: a
+    // foreign winner of a French contract has a fourteen-digit number that is
+    // not a SIRET, and the buyer's country says nothing about it.
+    const siren = /^\d{14}$/.test(digits) && supplierCountryOf(r) === "fr" ? digits.slice(0, 9) : digits;
     return `id:${siren.toUpperCase()}`;
   }
   return `name:${r.country}:${normalizeName(r.supplier)}`;
@@ -110,7 +118,10 @@ export interface SupplierStat {
   total: number;
   currency?: string;
   buyers: string[];
+  /** The markets it won in: the BUYERS' countries. */
   countries: string[];
+  /** The supplier's own country, as a notice publishes it. Its register is that country's. */
+  country?: string;
   lastWin?: string;
   /** Rows identified only by name: a lead to confirm, not an identity. */
   byNameOnly: boolean;
@@ -182,6 +193,7 @@ export function analyseAwards(tenders: readonly Tender[], opts: { horizonMonths?
     }
     if (r.buyer && !s.buyers.includes(r.buyer)) s.buyers.push(r.buyer);
     if (!s.countries.includes(r.country)) s.countries.push(r.country);
+    if (!s.country && r.supplierCountry) s.country = r.supplierCountry;
     if (r.awardedAt && (!s.lastWin || r.awardedAt > s.lastWin)) s.lastWin = r.awardedAt;
     suppliers.set(key, s);
   }

@@ -24237,10 +24237,13 @@ function awardRows(tenders) {
   }
   return rows;
 }
+function supplierCountryOf(r) {
+  return r.supplierCountry ?? r.country;
+}
 function supplierKey(r) {
   if (r.supplierId) {
     const digits = r.supplierId.replace(/\s/g, "");
-    const siren = /^\d{14}$/.test(digits) && r.country === "fr" ? digits.slice(0, 9) : digits;
+    const siren = /^\d{14}$/.test(digits) && supplierCountryOf(r) === "fr" ? digits.slice(0, 9) : digits;
     return `id:${siren.toUpperCase()}`;
   }
   return `name:${r.country}:${normalizeName(r.supplier)}`;
@@ -24279,6 +24282,7 @@ function analyseAwards(tenders, opts = {}) {
     }
     if (r.buyer && !s.buyers.includes(r.buyer)) s.buyers.push(r.buyer);
     if (!s.countries.includes(r.country)) s.countries.push(r.country);
+    if (!s.country && r.supplierCountry) s.country = r.supplierCountry;
     if (r.awardedAt && (!s.lastWin || r.awardedAt > s.lastWin)) s.lastWin = r.awardedAt;
     suppliers.set(key, s);
   }
@@ -26087,7 +26091,7 @@ function legalIdOf(raw, country) {
 async function confirmSuppliers(analysis, max = 15) {
   const out2 = [];
   for (const s of analysis.suppliers.filter((x) => x.legalId).slice(0, max)) {
-    const country = s.countries[0] ?? "";
+    const country = s.country ?? s.countries[0] ?? "";
     const id = legalIdOf(s.legalId, country);
     if (!id) {
       out2.push({ supplier: s.name, legalId: s.legalId, refused: "identifier shape not recognised for this country" });
