@@ -17,7 +17,7 @@
 //                        submission deadline at all. A German notice from here
 //                        is "status unknown" until its TED copy (merged by
 //                        procedure id) or its own page says otherwise.
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { awaitHostSlot, cacheDir, httpGet, httpJson } from "../engine.js";
 import { politeUa } from "../net.js";
@@ -245,7 +245,10 @@ async function readDeZip(path: string): Promise<{ ok: boolean; releases: any[]; 
 async function deDay(day: string, opts: { reuse?: boolean } = {}): Promise<{ ok: boolean; releases: any[]; error?: string }> {
   const dir = join(cacheDir(), "tenders", "de");
   const path = join(dir, `${day}.zip`);
-  if (opts.reuse && existsSync(path)) {
+  // Reused only if it was written after its day had fully passed AND the next
+  // day too: an export fetched while its day was still "yesterday" could yet
+  // be replaced, and re-reading that copy forever would freeze a partial day.
+  if (opts.reuse && existsSync(path) && statSync(path).mtimeMs > Date.parse(`${day}T00:00:00Z`) + 2 * 86_400_000) {
     const cached = await readDeZip(path);
     if (cached.ok) return cached;
   }

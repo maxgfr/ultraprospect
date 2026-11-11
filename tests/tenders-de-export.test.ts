@@ -1,6 +1,6 @@
 // Germany's daily export: a past day's zip is read back from the cache, not
 // downloaded again, and a window with no exportable day says so.
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -71,6 +71,18 @@ describe("the German daily export", () => {
     downloaded.length = 0;
     await deOeffentlichevergabe.search(query(dayAgo(4)));
     expect(downloaded).toEqual([dayAgo(1)]);
+  });
+
+  it("downloads again a day whose cached copy was fetched while it could still change", async () => {
+    await deOeffentlichevergabe.search(query(dayAgo(3)));
+    // Pretend the copy of three days ago was written the day after it, when it
+    // was still "yesterday" and its export could yet be replaced.
+    const stamp = new Date(Date.parse(`${dayAgo(3)}T00:00:00Z`) + 30 * 3_600_000);
+    utimesSync(join(cache, "tenders", "de", `${dayAgo(3)}.zip`), stamp, stamp);
+    downloaded.length = 0;
+    await deOeffentlichevergabe.search(query(dayAgo(3)));
+    expect(downloaded).toContain(dayAgo(3));
+    expect(downloaded).not.toContain(dayAgo(2));
   });
 
   it("says why a window that starts after the newest export downloaded nothing", async () => {

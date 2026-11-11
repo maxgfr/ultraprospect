@@ -17597,7 +17597,7 @@ var frBoamp = {
 };
 
 // src/tenders/ocds-sources.ts
-import { existsSync as existsSync13, mkdirSync as mkdirSync7, renameSync as renameSync4, writeFileSync as writeFileSync7 } from "fs";
+import { existsSync as existsSync13, mkdirSync as mkdirSync7, renameSync as renameSync4, statSync as statSync8, writeFileSync as writeFileSync7 } from "fs";
 import { join as join12 } from "path";
 
 // src/tenders/ocds.ts
@@ -17946,7 +17946,7 @@ async function readDeZip(path) {
 async function deDay(day, opts = {}) {
   const dir2 = join12(cacheDir(), "tenders", "de");
   const path = join12(dir2, `${day}.zip`);
-  if (opts.reuse && existsSync13(path)) {
+  if (opts.reuse && existsSync13(path) && statSync8(path).mtimeMs > Date.parse(`${day}T00:00:00Z`) + 2 * 864e5) {
     const cached = await readDeZip(path);
     if (cached.ok) return cached;
   }
