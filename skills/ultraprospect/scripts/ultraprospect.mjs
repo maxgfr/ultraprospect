@@ -19072,6 +19072,7 @@ function isQueryTooBig(message) {
 async function runOnce(query, opts) {
   const mirrors = opts.mirrors ?? OVERPASS_MIRRORS;
   const failures = [];
+  let answered3 = 0;
   for (const mirror of mirrors) {
     await awaitHostSlot(mirror, 1e3);
     let body;
@@ -19091,8 +19092,9 @@ async function runOnce(query, opts) {
         retries: 0
       });
       body = res.body ?? "";
+      if (res.status !== 0) answered3++;
       if (!res.ok && !body) {
-        failures.push(`${mirror}: HTTP ${res.status}`);
+        failures.push(`${mirror}: HTTP ${res.status}${res.status === 0 && res.error ? ` (${res.error})` : ""}`);
         continue;
       }
     } catch (e) {
@@ -19121,6 +19123,7 @@ async function runOnce(query, opts) {
     return { json: json2, mirror };
   }
   const joined = failures.join(" | ");
+  if (failures.length > 0 && answered3 === 0) return { error: joined, unreachable: true };
   return { error: joined, tooBig: failures.every((f) => isQueryTooBig(f) || isInstanceBusy(f)) };
 }
 function toPoi(el) {
@@ -19146,12 +19149,20 @@ async function fetchOsmPois(target, opts = {}) {
   const byId = /* @__PURE__ */ new Map();
   let partitions = 0;
   let incomplete = false;
+  const reasons = /* @__PURE__ */ new Set();
   const area = target.radiusM ? void 0 : areaIdFor(target);
   const rootBbox = target.radiusM ? bboxAround(target.lat, target.lon, target.radiusM) : target.bbox;
   async function walk(bbox, useArea, depth) {
     const query = buildQuery(useArea, bbox, opts);
-    const { json: json2, error, mirror, tooBig } = await runOnce(query, opts);
+    const { json: json2, error, mirror, tooBig, unreachable } = await runOnce(query, opts);
     if (mirror) mirrorsUsed.add(mirror);
+    if (error && unreachable) {
+      incomplete = true;
+      reasons.add("no Overpass mirror could be reached \u2014 a network failure on this machine, not an area too large");
+      notes.push(`overpass: no mirror answered at all (network unreachable, not a capacity limit), so the area was not split \u2014 ${error}`);
+      opts.onNote?.("overpass: no mirror could be reached (network down?); the OSM lane is INCOMPLETE");
+      return;
+    }
     if (error) {
       if (useArea !== void 0) {
         notes.push(`overpass: the administrative-area query failed (${error}); fell back to the bounding box, which extends past the commune boundary`);
@@ -19165,6 +19176,7 @@ async function fetchOsmPois(target, opts = {}) {
         return;
       }
       incomplete = true;
+      reasons.add("at least one Overpass tile could not be fetched after the split budget ran out");
       notes.push(`overpass: gave up on a tile after depth ${depth} \u2014 ${error}`);
       opts.onNote?.("overpass: a tile could not be fetched; the OSM lane is INCOMPLETE");
       return;
@@ -19189,6 +19201,7 @@ async function fetchOsmPois(target, opts = {}) {
     partitions: Math.max(1, partitions),
     notes,
     incomplete,
+    ...reasons.size ? { reason: [...reasons].join("; ") } : {},
     outsideRadius: dropped
   };
 }
@@ -20022,7 +20035,7 @@ async function runScan(target, opts = {}) {
       requested: 0,
       returned: pois.length,
       truncated: osm.incomplete,
-      reason: osm.incomplete ? "at least one Overpass tile could not be fetched after the split budget ran out" : void 0,
+      reason: osm.incomplete ? osm.reason ?? "at least one Overpass tile could not be fetched after the split budget ran out" : void 0,
       partitions: osm.partitions
     });
     if (osm.mirrorsUsed.length) notes.push(`overpass: answered by ${osm.mirrorsUsed.join(", ")}`);

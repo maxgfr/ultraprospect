@@ -110,8 +110,10 @@ export interface OverpassResult {
   /** How many sub-queries the area was split into. 1 means no split was needed. */
   partitions: number;
   notes: string[];
-  /** True when a leaf query still failed after the split budget ran out. */
+  /** True when a leaf query still failed after the split budget ran out, or no mirror could be reached. */
   incomplete: boolean;
+  /** Why the lane is incomplete, in words a coverage entry can print. Set whenever `incomplete` is. */
+  reason?: string;
   /**
    * Features returned inside the bounding square but outside the `--radius`
    * disc, and therefore dropped. 0 for an area search, which has no radius.
@@ -219,9 +221,27 @@ export function isQueryTooBig(message: string): boolean {
   return /query timed out|out of memory|too many results|memory limit/i.test(message);
 }
 
-async function runOnce(query: string, opts: OverpassOptions): Promise<{ json?: any; error?: string; mirror?: string; tooBig?: boolean }> {
+/**
+ * Outcome of one query across the mirror rotation.
+ *
+ * `unreachable` means no mirror answered at all — every attempt ended in a
+ * connection-level failure with no HTTP status. That is neither a busy instance
+ * nor a large area: it is this machine's network, and it wants a third
+ * response, which is to stop.
+ */
+interface RunOutcome {
+  json?: any;
+  error?: string;
+  mirror?: string;
+  tooBig?: boolean;
+  unreachable?: boolean;
+}
+
+async function runOnce(query: string, opts: OverpassOptions): Promise<RunOutcome> {
   const mirrors = opts.mirrors ?? OVERPASS_MIRRORS;
   const failures: string[] = [];
+  // Mirrors that answered SOMETHING — a status, a body — however unhelpful.
+  let answered = 0;
   for (const mirror of mirrors) {
     await awaitHostSlot(mirror, 1000);
     let body: string;
@@ -241,8 +261,12 @@ async function runOnce(query: string, opts: OverpassOptions): Promise<{ json?: a
         retries: 0,
       });
       body = res.body ?? "";
+      // Status 0 is the engine's way of saying no response came back at all:
+      // DNS, a refused or reset connection, or the client timeout. Its own
+      // error string says which, and used to be dropped for a bare "HTTP 0".
+      if (res.status !== 0) answered++;
       if (!res.ok && !body) {
-        failures.push(`${mirror}: HTTP ${res.status}`);
+        failures.push(`${mirror}: HTTP ${res.status}${res.status === 0 && res.error ? ` (${res.error})` : ""}`);
         continue;
       }
     } catch (e) {
@@ -276,6 +300,11 @@ async function runOnce(query: string, opts: OverpassOptions): Promise<{ json?: a
     return { json, mirror };
   }
   const joined = failures.join(" | ");
+  // Nothing answered at all. Splitting cannot help a network that is down, and
+  // used to be what happened: an outage reads as "every mirror busy", busy read
+  // as too big, and the run quartered itself to depth 3 — 85 tiles, each one
+  // trying every mirror against a client timeout of 105 s. Say so and stop.
+  if (failures.length > 0 && answered === 0) return { error: joined, unreachable: true };
   // Every mirror refused. If they all refused for capacity reasons the area is
   // probably too big after all, so let the caller split rather than give up —
   // splitting is cheap and a wrongly-declared truncation is not.
@@ -314,14 +343,25 @@ export async function fetchOsmPois(target: GeoTarget, opts: OverpassOptions = {}
   const byId = new Map<string, OsmPoi>();
   let partitions = 0;
   let incomplete = false;
+  const reasons = new Set<string>();
 
   const area = target.radiusM ? undefined : areaIdFor(target);
   const rootBbox = target.radiusM ? bboxAround(target.lat, target.lon, target.radiusM) : target.bbox;
 
   async function walk(bbox: [number, number, number, number], useArea: number | undefined, depth: number): Promise<void> {
     const query = buildQuery(useArea, bbox, opts);
-    const { json, error, mirror, tooBig } = await runOnce(query, opts);
+    const { json, error, mirror, tooBig, unreachable } = await runOnce(query, opts);
     if (mirror) mirrorsUsed.add(mirror);
+
+    // Before the area fallback and the split, both of which only multiply the
+    // queries a dead network will refuse.
+    if (error && unreachable) {
+      incomplete = true;
+      reasons.add("no Overpass mirror could be reached — a network failure on this machine, not an area too large");
+      notes.push(`overpass: no mirror answered at all (network unreachable, not a capacity limit), so the area was not split — ${error}`);
+      opts.onNote?.("overpass: no mirror could be reached (network down?); the OSM lane is INCOMPLETE");
+      return;
+    }
 
     if (error) {
       // An `area` query cannot be quartered — the boundary is a single object.
@@ -340,6 +380,7 @@ export async function fetchOsmPois(target: GeoTarget, opts: OverpassOptions = {}
         return;
       }
       incomplete = true;
+      reasons.add("at least one Overpass tile could not be fetched after the split budget ran out");
       notes.push(`overpass: gave up on a tile after depth ${depth} — ${error}`);
       opts.onNote?.("overpass: a tile could not be fetched; the OSM lane is INCOMPLETE");
       return;
@@ -373,6 +414,7 @@ export async function fetchOsmPois(target: GeoTarget, opts: OverpassOptions = {}
     partitions: Math.max(1, partitions),
     notes,
     incomplete,
+    ...(reasons.size ? { reason: [...reasons].join("; ") } : {}),
     outsideRadius: dropped,
   };
 }

@@ -169,7 +169,7 @@ live, which is what makes the pipeline testable without five live services.
 | `where` exits 2 with candidates | Working as designed. Pass `--pick <n>` or a more specific query. |
 | `0/4 Overpass mirrors answering` | All instances busy. `doctor` again in a few minutes. |
 | An Overpass mirror reports "regional extract" | It serves a country subset, not the planet. It is excluded automatically. |
-| OSM lane `truncated` | A tile failed after the split budget. Re-run; a different mirror will usually answer. |
+| OSM lane `truncated` | A tile failed after the split budget. Re-run; a different mirror will usually answer. If the reason names the network, no mirror answered at all: the area was not split, so check the connection (`doctor`) before re-running. |
 | Register lane `truncated` at 10 000 | The territory exceeds the API's ceiling even split by NACE division. Add `--activity` or `--min-employees`. |
 | Register lane returned far more than expected | Ceased companies are excluded by default; check whether `--include-ceased` was passed. |
 | A run wrote nothing | `--stdout` or `ULTRAPROSPECT_NO_WRITE=1` is set. |

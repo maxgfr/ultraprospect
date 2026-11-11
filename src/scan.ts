@@ -323,7 +323,7 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
       requested: 0,
       returned: pois.length,
       truncated: osm.incomplete,
-      reason: osm.incomplete ? "at least one Overpass tile could not be fetched after the split budget ran out" : undefined,
+      reason: osm.incomplete ? (osm.reason ?? "at least one Overpass tile could not be fetched after the split budget ran out") : undefined,
       partitions: osm.partitions,
     });
     if (osm.mirrorsUsed.length) notes.push(`overpass: answered by ${osm.mirrorsUsed.join(", ")}`);
