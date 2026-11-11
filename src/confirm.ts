@@ -181,21 +181,41 @@ function sameLocality(place: Place, rec: RegistryRecord, town?: string): boolean
   const compact = (raw: string | undefined) => (raw ?? "").replace(/\s+/g, "").toUpperCase();
   let comparable = false;
 
+  // A shared postcode is agreement. A DIFFERENT postcode is not disagreement:
+  // a city has dozens, and 22767 and 22763 are both Hamburg.
   const myPostcode = compact(place.address.codePostal);
   const theirPostcode = compact(rec.address.codePostal);
-  if (myPostcode && theirPostcode) {
-    if (myPostcode === theirPostcode) return true;
+  if (myPostcode && theirPostcode && myPostcode === theirPostcode) return true;
+
+  const theirs = localityWords(rec.address.commune);
+  if (!theirs.size) return undefined;
+  const agrees = (mine: Set<string>) => {
+    const [small, large] = mine.size <= theirs.size ? [mine, theirs] : [theirs, mine];
+    return [...small].every((word) => large.has(word));
+  };
+
+  // The place's OWN town, when a mapper recorded one, can disagree.
+  const own = localityWords(place.address.commune);
+  if (own.size) {
     comparable = true;
+    if (agrees(own)) return true;
+    return false;
   }
 
-  const mine = localityWords(place.address.commune ?? (town ? shortLabel(town) : undefined));
-  const theirs = localityWords(rec.address.commune);
-  if (mine.size && theirs.size) {
-    const [small, large] = mine.size <= theirs.size ? [mine, theirs] : [theirs, mine];
-    if ([...small].every((word) => large.has(word))) return true;
-    comparable = true;
-  }
-  return comparable ? false : undefined;
+  // Otherwise only the run's territory is known, and its label is a chain —
+  // "Altona, Hamburg, Deutschland". Any part of it may be the register's town:
+  // reading the first segment alone refused every Hamburg record on a run aimed
+  // at a district. When no part matches, the place is elsewhere than the
+  // record (the run found it inside that territory). A label with no place name
+  // in it at all — "53.55,9.93 within 800 m", "bbox …" — says nothing either
+  // way, and gives "unknown".
+  const named = (town ?? "")
+    .split(",")
+    .filter((part) => !/\d|^\s*bbox\b/i.test(part))
+    .map(localityWords)
+    .filter((words) => words.size > 0);
+  if (named.length === 0) return comparable ? false : undefined;
+  return named.some(agrees);
 }
 
 /** A name-lookup near-miss, in the same shape the sweep matcher produces. */
@@ -373,7 +393,14 @@ export async function runConfirm(runDir: string, places: Place[], opts: ConfirmO
     // Did ANY authority actually reply about this place, on either route? A
     // place nobody could be asked about is not a place with no register record.
     let anyAnswer = false;
-    for (const pageId of place.pages) {
+    // Only pages of a site PROVEN to be this company's. `resolve` keeps the pages
+    // of a candidate it rejected, and now reads that candidate's legal notice
+    // too: a namesake's Impressum then sat in `place.pages`, and its VAT number
+    // attached the namesake's register record as `verified-id` to a place
+    // whose website the run itself had refused. Enrich only reads corroborated
+    // sites, so its pages are unaffected.
+    const ownPages = place.website?.confidence === "corroborated" ? place.pages : [];
+    for (const pageId of ownPages) {
       if (attached) break;
       // `place.pages` holds page IDS ("P17"), not paths. The extract lives at
       // pages/<sanitised place id>/<page id>.md, which is how `check` finds it

@@ -20477,18 +20477,22 @@ function sameLocality(place, rec, town) {
   let comparable = false;
   const myPostcode = compact(place.address.codePostal);
   const theirPostcode = compact(rec.address.codePostal);
-  if (myPostcode && theirPostcode) {
-    if (myPostcode === theirPostcode) return true;
-    comparable = true;
-  }
-  const mine = localityWords(place.address.commune ?? (town ? shortLabel(town) : void 0));
+  if (myPostcode && theirPostcode && myPostcode === theirPostcode) return true;
   const theirs = localityWords(rec.address.commune);
-  if (mine.size && theirs.size) {
+  if (!theirs.size) return void 0;
+  const agrees = (mine) => {
     const [small, large] = mine.size <= theirs.size ? [mine, theirs] : [theirs, mine];
-    if ([...small].every((word) => large.has(word))) return true;
+    return [...small].every((word) => large.has(word));
+  };
+  const own = localityWords(place.address.commune);
+  if (own.size) {
     comparable = true;
+    if (agrees(own)) return true;
+    return false;
   }
-  return comparable ? false : void 0;
+  const named = (town ?? "").split(",").filter((part) => !/\d|^\s*bbox\b/i.test(part)).map(localityWords).filter((words) => words.size > 0);
+  if (named.length === 0) return comparable ? false : void 0;
+  return named.some(agrees);
 }
 function toCandidate3(place, rec, score, matchedName) {
   return {
@@ -20606,7 +20610,8 @@ async function runConfirm(runDir, places, opts = {}) {
     const found = [];
     const contradicted = /* @__PURE__ */ new Set();
     let anyAnswer = false;
-    for (const pageId of place.pages) {
+    const ownPages = place.website?.confidence === "corroborated" ? place.pages : [];
+    for (const pageId of ownPages) {
       if (attached) break;
       const text3 = readPageText(runDir, join20(pageDirFor(place.id), `${pageId}.md`));
       if (!text3) continue;

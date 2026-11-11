@@ -47,6 +47,8 @@ function place(over: Partial<Place> = {}): Place {
     name: "Bäckerei Siebert",
     sources: ["osm"],
     address: { commune: "Berlin", codePostal: "10243" },
+    // A site the run proved is this company's: only its pages are read for a number.
+    website: { url: "https://siebert.example/", confidence: "corroborated", evidence: ["P1"] },
     contacts: { emails: [], phones: [], socials: [], people: [] },
     jobs: [],
     pages: [],
@@ -570,5 +572,55 @@ describe("runConfirm — the name route", () => {
     const q = place();
     await runConfirm(dir, [q], { countryCode: "de" });
     expect(q.registry?.legalName).toBe("Bäckerei Siebert GmbH");
+  });
+});
+
+describe("runConfirm — what route 1 may read, and where a record is filed", () => {
+  it("does not read a number off the pages of a website the run did not prove is this company's", async () => {
+    // A namesake's Impressum, fetched while resolve was rejecting its site.
+    const verifyId = vi.fn(async () => rec({ connectorId: "fake", legalName: "Mueller-Bau Gesellschaft mbH", names: ["Mueller-Bau Gesellschaft mbH"] }));
+    selection.confirm = [fake({ verifyId })];
+    const p = place({
+      name: "Müller Bau",
+      pages: ["P2"],
+      website: { url: "https://mueller-bau-berlin.example/", confidence: "unverified", evidence: ["P1", "no corroboration"] },
+    });
+    const dir = runWithPage(p.id, "P2", "Impressum\nMueller-Bau Gesellschaft mbH, Kantstraße 5, 10623 Berlin\nUSt-IdNr. DE811907980");
+    const outcome = await runConfirm(dir, [p], { countryCode: "de" });
+    expect(verifyId).not.toHaveBeenCalled();
+    expect(p.registry).toBeUndefined();
+    expect(outcome.verified).toBe(0);
+  });
+
+  it("attaches a same-town record by name on a run aimed at a district, whatever its postcode", async () => {
+    const hit = rec({
+      connectorId: "fake",
+      legalName: "Bäckerei Siebert GmbH",
+      names: ["Bäckerei Siebert GmbH"],
+      address: { codePostal: "22767", commune: "Hamburg" },
+    });
+    selection.confirm = [fake({ lookup: async () => [hit] })];
+    const p = place({ address: { codePostal: "22763" }, website: undefined });
+    const dir = mkdtempSync(join(tmpdir(), "ultraprospect-confirm-"));
+    await runConfirm(dir, [p], { countryCode: "de", town: "Altona, Hamburg, Deutschland" });
+    expect(p.registry?.legalName).toBe("Bäckerei Siebert GmbH");
+  });
+
+  it("does not read a run aimed at coordinates as evidence of elsewhere", async () => {
+    const hit = rec({ connectorId: "fake", legalName: "Bäckerei Siebert GmbH", names: ["Bäckerei Siebert GmbH"], address: { commune: "Hamburg" } });
+    selection.confirm = [fake({ lookup: async () => [hit] })];
+    const p = place({ address: {}, website: undefined });
+    await runConfirm(mkdtempSync(join(tmpdir(), "ultraprospect-confirm-")), [p], { countryCode: "de", town: "53.55,9.93 within 800 m" });
+    expect(p.registry?.legalName).toBe("Bäckerei Siebert GmbH");
+  });
+
+  it("still refuses by name a record filed in another town than the one the place records", async () => {
+    const hit = rec({ connectorId: "fake", legalName: "Bäckerei Siebert GmbH", names: ["Bäckerei Siebert GmbH"], address: { commune: "München" } });
+    selection.confirm = [fake({ lookup: async () => [hit] })];
+    const p = place({ address: { commune: "Hamburg" }, website: undefined });
+    const dir = mkdtempSync(join(tmpdir(), "ultraprospect-confirm-"));
+    const outcome = await runConfirm(dir, [p], { countryCode: "de", town: "Hamburg, Deutschland" });
+    expect(p.registry).toBeUndefined();
+    expect(outcome.undecided).toHaveLength(1);
   });
 });
