@@ -17293,7 +17293,9 @@ var euTed = {
     let token;
     let total;
     const notes = [];
-    while (out2.length < q.limit) {
+    let read2 = 0;
+    const budget = q.limit * 10;
+    while (out2.length < q.limit && read2 < budget) {
       const res = await post({
         query,
         fields: TED_FIELDS,
@@ -17308,6 +17310,7 @@ var euTed = {
       total = typeof res.data?.totalNoticeCount === "number" ? res.data.totalNoticeCount : total;
       if (res.data?.timedOut) notes.push("TED reported timedOut on a page: its answer for that page may be partial.");
       const page2 = Array.isArray(res.data?.notices) ? res.data.notices : [];
+      read2 += page2.length;
       for (const n of page2) {
         const t = toTender(n);
         if (t && keepByQuery(t, q)) out2.push(t);
@@ -17315,12 +17318,13 @@ var euTed = {
       token = res.data?.iterationNextToken ?? void 0;
       if (!token || page2.length === 0) break;
     }
-    const truncated = total !== void 0 && total > out2.length && Boolean(token);
+    const budgetSpent = Boolean(token) && out2.length < q.limit && read2 >= budget;
+    const truncated = budgetSpent || total !== void 0 && total > out2.length && Boolean(token);
     return {
       tenders: out2,
       total,
       truncated,
-      reason: truncated ? `TED reports ${total} notices for this query; the lane stopped at --limit ${q.limit}` : void 0,
+      reason: budgetSpent ? `TED: stopped after reading ${read2} notice(s) (--limit ${q.limit} \xD7 10), ${out2.length} of them matched the filters; more pages exist` : truncated ? `TED reports ${total} notices for this query; the lane stopped at --limit ${q.limit}` : void 0,
       notes
     };
   },

@@ -268,7 +268,13 @@ export const euTed: TenderConnector = {
     let token: string | undefined;
     let total: number | undefined;
     const notes: string[] = [];
-    while (out.length < q.limit) {
+    // A read budget, as BOAMP and the OCDS sources have. The post-filter can
+    // drop nearly every row TED returns (a CPV or keyword TED's query cannot
+    // express), and without a bound the lane paged through the whole result,
+    // which for an EU-wide query is hundreds of thousands of notices.
+    let read = 0;
+    const budget = q.limit * 10;
+    while (out.length < q.limit && read < budget) {
       const res = await post({
         query,
         fields: TED_FIELDS,
@@ -283,6 +289,7 @@ export const euTed: TenderConnector = {
       total = typeof res.data?.totalNoticeCount === "number" ? res.data.totalNoticeCount : total;
       if (res.data?.timedOut) notes.push("TED reported timedOut on a page: its answer for that page may be partial.");
       const page: any[] = Array.isArray(res.data?.notices) ? res.data.notices : [];
+      read += page.length;
       for (const n of page) {
         const t = toTender(n);
         if (t && keepByQuery(t, q)) out.push(t);
@@ -290,12 +297,17 @@ export const euTed: TenderConnector = {
       token = res.data?.iterationNextToken ?? undefined;
       if (!token || page.length === 0) break;
     }
-    const truncated = total !== undefined && total > out.length && Boolean(token);
+    const budgetSpent = Boolean(token) && out.length < q.limit && read >= budget;
+    const truncated = budgetSpent || (total !== undefined && total > out.length && Boolean(token));
     return {
       tenders: out,
       total,
       truncated,
-      reason: truncated ? `TED reports ${total} notices for this query; the lane stopped at --limit ${q.limit}` : undefined,
+      reason: budgetSpent
+        ? `TED: stopped after reading ${read} notice(s) (--limit ${q.limit} × 10), ${out.length} of them matched the filters; more pages exist`
+        : truncated
+          ? `TED reports ${total} notices for this query; the lane stopped at --limit ${q.limit}`
+          : undefined,
       notes,
     };
   },
