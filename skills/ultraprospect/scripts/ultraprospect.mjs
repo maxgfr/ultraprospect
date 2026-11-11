@@ -45,10 +45,12 @@ import { mkdir, open, readFile, rename, rm, stat, writeFile } from "fs/promises"
 import { existsSync as existsSync7, statSync as statSync5 } from "fs";
 import { isAbsolute as isAbsolute2, join as join10 } from "path";
 import { join as join11 } from "path";
+import { chmodSync as chmodSync2, lstatSync as lstatSync2, mkdirSync as mkdirSync4 } from "fs";
+import { dirname } from "path";
 import { promisify } from "util";
 import { gunzip } from "zlib";
-import { chmodSync as chmodSync2, existsSync as existsSync9, lstatSync as lstatSync2, mkdirSync as mkdirSync5, readFileSync as readFileSync9, readdirSync as readdirSync7, rmSync as rmSync7, statSync as statSync7 } from "fs";
-import { dirname, join as join14 } from "path";
+import { existsSync as existsSync9, mkdirSync as mkdirSync6, readFileSync as readFileSync9, readdirSync as readdirSync7, rmSync as rmSync7, statSync as statSync7 } from "fs";
+import { join as join14 } from "path";
 import { join as join16 } from "path";
 import { readFileSync as readFileSync11 } from "fs";
 import { existsSync as existsSync11 } from "fs";
@@ -118,6 +120,9 @@ function envInt(suffix, def, min = 0, max = Number.MAX_SAFE_INTEGER) {
   const n = Number(raw);
   if (!Number.isFinite(n)) return def;
   return Math.min(max, Math.max(min, Math.trunc(n)));
+}
+function countOption(value, def) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(1, Math.floor(value)) : def;
 }
 var DEFAULT_BRAND;
 var current;
@@ -1653,11 +1658,11 @@ function openDocumentText(xml, budget) {
       const p = paragraphs[paragraphs.length - 1];
       const table = tables[tables.length - 1];
       if (name === "text:p" || name === "text:h") {
-        const level = name === "text:h" ? Math.min(6, Number(attr(attrs, "text:outline-level")) || 1) : 0;
+        const level = name === "text:h" ? Math.min(6, Math.max(1, Number(attr(attrs, "text:outline-level")) || 1)) : 0;
         paragraphs.push({ text: "", prefix: level ? `${"#".repeat(level)} ` : listItem && !table ? "- " : "" });
         listItem = false;
       } else if (name === "text:list-item") listItem = true;
-      else if (name === "text:s") add2(p, " ".repeat(Math.min(100, Number(attr(attrs, "text:c")) || 1)));
+      else if (name === "text:s") add2(p, " ".repeat(Math.min(100, Math.max(1, Number(attr(attrs, "text:c")) || 1))));
       else if (name === "text:tab") add2(p, "	");
       else if (name === "text:line-break") add2(p, "\n");
       else if (name === "office:spreadsheet") spreadsheet = true;
@@ -1752,7 +1757,9 @@ function packageText(bytes, budget) {
 function readOffice(bytes) {
   try {
     const text3 = packageText(bytes, new Budget()).replace(/\n{3,}/g, "\n\n").trim();
-    return { text: text3.length > MAX_OUTPUT_CHARS ? text3.slice(0, text3.lastIndexOf("\n", MAX_OUTPUT_CHARS)) : text3 };
+    if (text3.length <= MAX_OUTPUT_CHARS) return { text: text3 };
+    const lineEnd = text3.lastIndexOf("\n", MAX_OUTPUT_CHARS);
+    return { text: text3.slice(0, lineEnd < 0 ? MAX_OUTPUT_CHARS : lineEnd) };
   } catch (e) {
     return { failure: e instanceof Refused ? e.message : "the built-in reader could not parse it" };
   }
@@ -2882,7 +2889,9 @@ var CJK_RUNS;
 var ACCENT_CLASSES;
 var BASE_OF;
 var NON_ASCII;
+var MAX_IDENT;
 var MAX_PATTERNS;
+var MAX_KEYWORD_CHARS;
 var VARIANT_PRIORITY;
 var LIGATURE_SPELLING;
 var LIGATURE_OF;
@@ -3109,7 +3118,9 @@ var init_text = __esm({
       for (const ch of cls) BASE_OF.set(ch, base22);
     }
     NON_ASCII = /[\u0080-\uffff]/;
+    MAX_IDENT = 64;
     MAX_PATTERNS = 24;
+    MAX_KEYWORD_CHARS = 256;
     VARIANT_PRIORITY = { original: 0, folded: 1, subtoken: 2 };
     LIGATURE_SPELLING = { \u0153: "oe", \u00E6: "ae", \u00DF: "ss" };
     LIGATURE_OF = { oe: "\u0153", ae: "\xE6", ss: "\xDF" };
@@ -3156,7 +3167,7 @@ var NON_ASCII2;
 var CJK_CHAR2;
 var CJK_RUNS2;
 var IDENT_BOUNDARY;
-var MAX_IDENT;
+var MAX_IDENT2;
 var FOLD_CACHE_MAX;
 var foldCache;
 var NO_SUBTERMS;
@@ -3183,7 +3194,7 @@ var init_rank = __esm({
     CJK_CHAR2 = /[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}]/u;
     CJK_RUNS2 = /([\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}]+)/u;
     IDENT_BOUNDARY = new RegExp("_|[\\p{Ll}\\p{N}]\\p{Lu}|\\p{Lu}\\p{Lu}\\p{Ll}|\\p{L}\\p{N}|\\p{N}\\p{L}", "u");
-    MAX_IDENT = 64;
+    MAX_IDENT2 = 64;
     FOLD_CACHE_MAX = 5e4;
     foldCache = /* @__PURE__ */ new Map();
     NO_SUBTERMS = [];
@@ -4294,7 +4305,9 @@ function detectBrowserBinary(opts = {}) {
   const explicit = opts.env ? opts.env("BROWSER_BIN") : env("BROWSER_BIN");
   if (explicit) {
     const bare = !/[\\/]/.test(explicit);
-    const options = bare ? (sys.PATH ?? "").split(":").filter(Boolean).map((d) => posix.join(d, explicit)) : [explicit];
+    const win = platform === "win32";
+    const names = win && !/\.[a-z0-9]+$/i.test(explicit) ? [explicit, `${explicit}.exe`] : [explicit];
+    const options = bare ? (sys.PATH ?? (win ? sys.Path : void 0) ?? "").split(win ? ";" : ":").filter(Boolean).flatMap((d) => names.map((n) => (win ? win32 : posix).join(d, n))) : [explicit];
     const found = options.find(exists);
     if (!found) throw new Error(`BROWSER_BIN points at "${explicit}", which is not an executable file`);
     return { kind: kindOf(found), path: found };
@@ -7060,7 +7073,10 @@ function probeFirecrawl(base22, explicit = false) {
     const t = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS2);
     try {
       const res = await fetch(`${base22}/`, { signal: ctrl.signal });
-      const body = await res.text().catch(() => "");
+      const body = await readCappedBytes(res, PROBE_BODY_BYTES).then(
+        (b) => b.toString("utf8"),
+        () => ""
+      );
       return explicit || looksLikeFirecrawl(res.headers.get("content-type"), body);
     } catch {
       return false;
@@ -7205,6 +7221,7 @@ async function searchViaFirecrawl(query, limit, opts = {}) {
 }
 var FIRECRAWL_DEFAULT_BASE;
 var PROBE_TIMEOUT_MS2;
+var PROBE_BODY_BYTES;
 var SCRAPE_TIMEOUT_MS;
 var SEARCH_TIMEOUT_MS;
 var SERVER_MARGIN_MS;
@@ -7222,6 +7239,7 @@ var init_firecrawl = __esm({
     init_trim();
     FIRECRAWL_DEFAULT_BASE = "http://localhost:3002";
     PROBE_TIMEOUT_MS2 = 2e3;
+    PROBE_BODY_BYTES = 4096;
     SCRAPE_TIMEOUT_MS = 45e3;
     SEARCH_TIMEOUT_MS = 3e4;
     SERVER_MARGIN_MS = { scrape: 5e3, search: 2e3 };
@@ -7909,7 +7927,15 @@ async function fetchAndExtract(url, opts = {}) {
   if (opts.signal?.aborted) return cancelled();
   const video = opts.video === false ? void 0 : knownVideo(url);
   if (video) {
-    if (opts.authorizeUrl && !await opts.authorizeUrl(url)) return { text: "", finalUrl: url, status: 0, note: `Refused ${url}: not a public address.` };
+    if (opts.authorizeUrl) {
+      let refusal2;
+      try {
+        if (!await opts.authorizeUrl(url)) refusal2 = "the URL is not authorized";
+      } catch (e) {
+        refusal2 = `its authorization failed (${e.message})`;
+      }
+      if (refusal2) return { text: "", finalUrl: url, status: 0, note: `Refused ${url}: ${refusal2}.` };
+    }
     const t = await transcribeVideo(url, {
       lang: opts.acceptLanguage?.split(/[,;]/)[0]?.trim() || void 0,
       signal: opts.signal,
@@ -8015,7 +8041,7 @@ async function readWithoutBrowser(url, opts, wantsPdf, wantsDoc, seen) {
       asBrowser ? { ...fetchOpts, userAgent: contactUa() } : { ...fetchOpts, userAgent: browserUa(), acceptLanguage: opts.acceptLanguage ?? "en-US,en;q=0.9" }
     );
     if (opts.signal?.aborted) return cancelled();
-    if (!challengeUrl(again.url)) res = again;
+    if (again.status !== 0 && !challengeUrl(again.url)) res = again;
   }
   if (challengeUrl(res.url)) {
     seen.page = true;
@@ -8025,7 +8051,7 @@ async function readWithoutBrowser(url, opts, wantsPdf, wantsDoc, seen) {
     return { text: "", finalUrl: res.url, status: 304, etag: res.etag ?? opts.headers?.["if-none-match"], lastModified: res.lastModified };
   }
   if (!res.ok) {
-    seen.page = true;
+    seen.page = !(res.truncated && res.status >= 200 && res.status < 300);
     const wait = res.retryAfterMs !== void 0 ? `, retry after ${Math.ceil(res.retryAfterMs / 1e3)} s` : "";
     const why = res.status === 429 ? `rate-limited (HTTP 429${wait})` : `status ${res.status}${res.error ? ", " + res.error : ""}${wait}`;
     return {
@@ -9425,6 +9451,39 @@ init_exec2();
 init_brand();
 init_exec2();
 init_forge_host();
+init_no_write();
+function openPrivateTmpDir(dir2, create) {
+  const uid = typeof process.getuid === "function" ? process.getuid() : void 0;
+  if (create) mkdirSync4(dirname(dirname(dir2)), { recursive: true });
+  for (const p of [dirname(dir2), dir2]) {
+    if (create) mkdirPrivate(p);
+    let st;
+    try {
+      st = lstatSync2(p);
+    } catch (e) {
+      if (e.code === "ENOENT") return {};
+      return { refused: `${p} cannot be inspected (${e.message})` };
+    }
+    if (st.isSymbolicLink()) return { refused: `${p} is a symbolic link` };
+    if (!st.isDirectory()) return { refused: `${p} is not a directory` };
+    if (st.uid !== uid) return { refused: `${p} belongs to another user` };
+    if (st.mode & 18) return { refused: `${p} is writable by other users` };
+    if (st.mode & 63 && !isNoWrite()) {
+      try {
+        chmodSync2(p, 448);
+      } catch {
+      }
+    }
+  }
+  return { dir: dir2 };
+}
+function mkdirPrivate(p) {
+  try {
+    mkdirSync4(p, { mode: 448 });
+  } catch (e) {
+    if (e.code !== "EEXIST") throw e;
+  }
+}
 init_text();
 var STALE_STAGING_MS = 24 * 60 * 60 * 1e3;
 init_brand();
@@ -9741,13 +9800,17 @@ function parseSitemap(xml) {
     return out2;
   }
   const isIndex = /<sitemapindex(?=[\s/>])/i.test(body);
+  const httpLoc = (inner) => {
+    const loc = tagText(inner, "loc");
+    return loc && /^https?:\/\//i.test(loc) ? loc : void 0;
+  };
   for (const el of elements(body, "sitemap")) {
-    const loc = tagText(el.inner, "loc");
+    const loc = httpLoc(el.inner);
     if (loc) out2.sitemaps.push(loc);
   }
   if (isIndex) return out2;
   for (const el of elements(body, "url")) {
-    const loc = tagText(el.inner, "loc");
+    const loc = httpLoc(el.inner);
     if (!loc) continue;
     const lastmod = tagText(el.inner, "lastmod");
     out2.urls.push({ loc, ...lastmod ? { lastmod } : {} });
@@ -10034,8 +10097,8 @@ async function searchViaKeyless(engine, query, opts = {}) {
   const spec = SPECS[engine];
   const q = query.trim();
   if (!q) return { hits: [], note: "Empty query." };
-  const pages = Math.max(1, opts.pages ?? 1);
-  const limit = Math.max(1, opts.limit ?? 10);
+  const pages = countOption(opts.pages, 1);
+  const limit = countOption(opts.limit, 10);
   const localised = !!(opts.lang || opts.region);
   const kl = localised ? ddgRegion(opts.lang, opts.region) : "wt-wt";
   const acceptLanguage = acceptLanguageHeader(opts.lang, opts.region);
@@ -10100,6 +10163,7 @@ init_trim();
 init_url();
 var SEARXNG_DEFAULT_BASE = "http://localhost:8888";
 var PROBE_TIMEOUT_MS4 = 2e3;
+var PROBE_BODY_BYTES2 = 4096;
 var QUERY_TIMEOUT_MS = 8e3;
 function searxngBase(opts = {}) {
   const raw = (opts.searxng ?? env("SEARXNG") ?? SEARXNG_DEFAULT_BASE).trim();
@@ -10116,7 +10180,10 @@ function probeSearxng(base22, explicit = false) {
     const t = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS4);
     try {
       const res = await fetch(`${base22}/healthz`, { signal: ctrl.signal });
-      const body = await res.text().catch(() => "");
+      const body = await readCappedBytes(res, PROBE_BODY_BYTES2).then(
+        (b) => b.toString("utf8"),
+        () => ""
+      );
       return explicit || res.ok && /^\s*ok\s*$/i.test(body);
     } catch {
       return false;
@@ -10139,8 +10206,8 @@ async function searchViaSearxng(query, opts = {}) {
       ]
     );
   }
-  const pages = Math.max(1, opts.pages ?? 1);
-  const limit = Math.max(1, opts.limit ?? 10);
+  const pages = countOption(opts.pages, 1);
+  const limit = countOption(opts.limit, 10);
   const acceptLanguage = acceptLanguageHeader(opts.lang, opts.region);
   const language = searxngLanguage(opts.lang, opts.region);
   const root2 = `${base22}/search?q=${encodeURIComponent(query)}&format=json&safesearch=1` + (language ? `&language=${encodeURIComponent(language)}` : "");
@@ -10305,7 +10372,7 @@ async function search(query, opts = {}) {
   if (!hits.length) notes.push(closingNote(rungs, opts.signal?.aborted === true));
   return { hits, notes, rungs, searched: rungs.some((r) => answered2(r.outcome)) };
 }
-var limitOf = (opts) => Math.max(1, opts.limit ?? 10);
+var limitOf = (opts) => countOption(opts.limit, 10);
 function firecrawlHits(found, limit) {
   const seen = /* @__PURE__ */ new Set();
   const hits = [];
@@ -10490,45 +10557,16 @@ function writeCache(url, res, now, acceptLanguage = "", extractor = "native", va
 var ensured = /* @__PURE__ */ new Set();
 function ensureDir2(dir2) {
   if (ensured.has(dir2)) return;
-  mkdirSync5(dir2, { recursive: true });
+  mkdirSync6(dir2, { recursive: true });
   ensured.add(dir2);
 }
 function openCacheDir(create) {
   const dir2 = cacheDir();
-  const uid = typeof process.getuid === "function" ? process.getuid() : void 0;
-  if (namedCacheDir() !== void 0 || uid === void 0) {
+  if (namedCacheDir() !== void 0 || typeof process.getuid !== "function") {
     if (create) ensureDir2(dir2);
     return { dir: dir2 };
   }
-  if (create) mkdirSync5(dirname(dirname(dir2)), { recursive: true });
-  for (const p of [dirname(dir2), dir2]) {
-    if (create) mkdirPrivate(p);
-    let st;
-    try {
-      st = lstatSync2(p);
-    } catch (e) {
-      if (e.code === "ENOENT") return {};
-      return { refused: `${p} cannot be inspected (${e.message})` };
-    }
-    if (st.isSymbolicLink()) return { refused: `${p} is a symbolic link` };
-    if (!st.isDirectory()) return { refused: `${p} is not a directory` };
-    if (st.uid !== uid) return { refused: `${p} belongs to another user` };
-    if (st.mode & 18) return { refused: `${p} is writable by other users` };
-    if (st.mode & 63 && !isNoWrite()) {
-      try {
-        chmodSync2(p, 448);
-      } catch {
-      }
-    }
-  }
-  return { dir: dir2 };
-}
-function mkdirPrivate(p) {
-  try {
-    mkdirSync5(p, { mode: 448 });
-  } catch (e) {
-    if (e.code !== "EEXIST") throw e;
-  }
+  return openPrivateTmpDir(dir2, create);
 }
 var announced = /* @__PURE__ */ new Set();
 function entryDir(create) {
@@ -10768,12 +10806,21 @@ function assertWorkflowSafe(script, phaseName) {
     }
   }
 }
+var OWN_CONSTANTS = /* @__PURE__ */ new Set(["meta", "RUN", "ENGINE", "WORKLIST", "AGENTS", "BATCHES", "SCHEMA", "contract", "results"]);
+var oneLine = (s) => s.replace(/[\r\n\u2028\u2029]+/g, " ");
 function emitWorkflowScript(phase, emission, runAbs, engineAbs, smallWorklist, constants2 = {}) {
   const cli = brand().cli;
   const scriptPath = join17(runAbs, "orchestration", `${phase.name}.workflow.mjs`);
   const meta = { name: `${cli}-${phase.name}`, description: emission.description(phase.items), phases: [{ title: emission.title }] };
   const batches = phaseBatches(phase, emission, smallWorklist);
   const hint = emission.applyHint(runAbs, engineAbs, phase);
+  for (const name of Object.keys(constants2)) {
+    if (!/^[A-Za-z_$][\w$]*$/.test(name) || OWN_CONSTANTS.has(name)) {
+      throw new Error(
+        `workflow script for phase "${phase.name}": "${name}" is not a usable constant name \u2014 an identifier, other than ${[...OWN_CONSTANTS].join(", ")}.`
+      );
+    }
+  }
   const script = [
     `export const meta = ${JSON.stringify(meta)}`,
     ``,
@@ -10781,10 +10828,10 @@ function emitWorkflowScript(phase, emission, runAbs, engineAbs, smallWorklist, c
     `// Workflow tool for a one-call parallel fan-out:`,
     `// Workflow({ scriptPath: ${JSON.stringify(scriptPath)} }).`,
     `// Any other host: dispatch one subagent per batch with`,
-    `// ${join17(runAbs, "orchestration", "agents", `${emission.role}.md`)}, or follow RUNBOOK.md alone.`,
+    `// ${oneLine(join17(runAbs, "orchestration", "agents", `${emission.role}.md`))}, or follow RUNBOOK.md alone.`,
     `//`,
     `// Emitted by \`${cli} orchestrate\` from the CURRENT worklist. The worklist is the`,
-    `// source of truth: if it changes, re-run \`${cli} orchestrate --phase ${phase.name}\``,
+    `// source of truth: if it changes, re-run \`${cli} orchestrate --phase ${oneLine(phase.name)}\``,
     `// before launching this.`,
     ``,
     `// Constants for THIS run, injected at emit time \u2014 the harness forbids reading`,
@@ -10821,7 +10868,7 @@ function emitWorkflowScript(phase, emission, runAbs, engineAbs, smallWorklist, c
     ``,
     `// One-writer rule: this workflow only COLLECTS the subagents' fragments.`,
     `// The main agent runs the fold itself:`,
-    ...hint.map((l) => `//   ${l}`),
+    ...hint.map((l) => `//   ${oneLine(l)}`),
     `return { phase: ${JSON.stringify(phase.name)}, worklist: WORKLIST, results: results.filter(Boolean) }`,
     ``
   ].join("\n");
@@ -11398,37 +11445,31 @@ async function runStdioServer(adapter, opts = {}) {
     void p.finally(() => inFlight.delete(p));
     return p;
   };
-  let active2 = 0;
-  const waiting = [];
+  const slots = toolSlots();
   const queued = /* @__PURE__ */ new Map();
   let negotiated;
   const handleOpts = { notify: send };
   const runToolCall = async (msg, id, reply) => {
-    const ticket = { cancelled: false };
+    const ticket = new AbortController();
     queued.set(id, ticket);
+    let release;
     try {
-      while (active2 >= MAX_IN_FLIGHT) await new Promise((resolve9) => waiting.push(resolve9));
+      release = await slots.acquire(ticket.signal);
     } finally {
       if (queued.get(id) === ticket) queued.delete(id);
     }
-    if (ticket.cancelled) {
-      waiting.shift()?.();
-      return;
-    }
-    active2++;
+    if (!release) return;
     try {
       await server.handle(msg, reply, handleOpts);
     } finally {
-      active2--;
-      waiting.shift()?.();
+      release();
     }
   };
   const dispatch = async (msg, reply) => {
     if (msg !== null && typeof msg === "object" && !Array.isArray(msg)) {
       if (msg.method === "notifications/cancelled") {
         const target = msg.params?.requestId;
-        const ticket = typeof target === "string" || typeof target === "number" ? queued.get(target) : void 0;
-        if (ticket) ticket.cancelled = true;
+        if (typeof target === "string" || typeof target === "number") queued.get(target)?.abort();
       }
       if (msg.method === "tools/call" && (typeof msg.id === "string" || typeof msg.id === "number")) {
         await runToolCall(msg, msg.id, reply);
@@ -11717,7 +11758,7 @@ function brandEngine() {
 }
 
 // src/run.ts
-import { existsSync as existsSync8, mkdirSync as mkdirSync4, readFileSync as readFileSync10, readdirSync as readdirSync6 } from "fs";
+import { existsSync as existsSync8, mkdirSync as mkdirSync5, readFileSync as readFileSync10, readdirSync as readdirSync6 } from "fs";
 import { join as join6, resolve } from "path";
 
 // src/classification/nace.ts
@@ -15852,7 +15893,7 @@ function newRun(outRoot, label) {
   const id = runId();
   const root2 = resolve(outRoot);
   const dir2 = join6(root2, "runs", `${slug}-${id}`);
-  mkdirSync4(dir2, { recursive: true });
+  mkdirSync5(dir2, { recursive: true });
   return { root: root2, dir: dir2, slug, id };
 }
 function resolveRun(pathOrRoot) {
@@ -16948,7 +16989,7 @@ var frBoamp = {
 };
 
 // src/tenders/ocds-sources.ts
-import { mkdirSync as mkdirSync6, writeFileSync as writeFileSync7 } from "fs";
+import { mkdirSync as mkdirSync7, writeFileSync as writeFileSync7 } from "fs";
 import { join as join12 } from "path";
 
 // src/tenders/ocds.ts
@@ -17282,7 +17323,7 @@ async function deDay(day) {
   if (!res.ok || !res.bytes) return { ok: false, releases: [], error: res.error ?? `HTTP ${res.status}` };
   if (res.truncated) return { ok: false, releases: [], error: "the export exceeded the download cap" };
   const dir2 = join12(cacheDir(), "tenders", "de");
-  mkdirSync6(dir2, { recursive: true });
+  mkdirSync7(dir2, { recursive: true });
   const path = join12(dir2, `${day}.zip`);
   writeFileSync7(path, res.bytes);
   const releases = [];
@@ -19312,7 +19353,7 @@ function applyVerdicts(places, verdicts) {
 }
 
 // src/fixture.ts
-import { existsSync as existsSync13, mkdirSync as mkdirSync7 } from "fs";
+import { existsSync as existsSync13, mkdirSync as mkdirSync8 } from "fs";
 import { join as join13 } from "path";
 function loadFixture(dir2) {
   const target = readJsonSafe(join13(dir2, "target.json"));
@@ -19334,7 +19375,7 @@ function loadFixture(dir2) {
   };
 }
 function recordFixture(dir2, outcome, target) {
-  mkdirSync7(dir2, { recursive: true });
+  mkdirSync8(dir2, { recursive: true });
   writeArtifact(join13(dir2, "target.json"), JSON.stringify(target, null, 2) + "\n");
   writeArtifact(join13(dir2, "osm.json"), JSON.stringify(outcome.osm, null, 2) + "\n");
   writeArtifact(join13(dir2, "registry.json"), JSON.stringify(outcome.registry, null, 2) + "\n");
@@ -20083,7 +20124,7 @@ function describeSkips(outcome, limited = false) {
 }
 
 // src/pages.ts
-import { mkdirSync as mkdirSync8 } from "fs";
+import { mkdirSync as mkdirSync9 } from "fs";
 import { join as join20 } from "path";
 function pageDirFor(placeId) {
   return join20("pages", placeId.replace(/[^a-zA-Z0-9._-]/g, "_"));
@@ -20123,7 +20164,7 @@ async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
     "---",
     ""
   ].join("\n");
-  if (!isNoWrite()) mkdirSync8(join20(runDir, dir2), { recursive: true });
+  if (!isNoWrite()) mkdirSync9(join20(runDir, dir2), { recursive: true });
   writeArtifact(join20(runDir, extract), header2 + text3 + markupEvidence(result.html) + "\n");
   return {
     ok: true,
@@ -23530,7 +23571,7 @@ import { join as join31 } from "path";
 import { readFileSync as readFileSync22 } from "fs";
 
 // src/tenders/commands.ts
-import { copyFileSync, existsSync as existsSync22, mkdirSync as mkdirSync11, readFileSync as readFileSync21, readdirSync as readdirSync12 } from "fs";
+import { copyFileSync, existsSync as existsSync22, mkdirSync as mkdirSync12, readFileSync as readFileSync21, readdirSync as readdirSync12 } from "fs";
 import { join as join30 } from "path";
 
 // src/tenders/awards.ts
@@ -24237,7 +24278,7 @@ function runTenderCheck(input) {
 }
 
 // src/tenders/notice.ts
-import { mkdirSync as mkdirSync9, rmSync as rmSync6, writeFileSync as writeFileSync8 } from "fs";
+import { mkdirSync as mkdirSync10, rmSync as rmSync6, writeFileSync as writeFileSync8 } from "fs";
 import { tmpdir as tmpdir4 } from "os";
 import { join as join27 } from "path";
 var DOC_LINK = /href\s*=\s*["']([^"'#]+\.(?:pdf|docx?|odt|xlsx?|ods|zip|rtf)(?:\?[^"']*)?)["']/gi;
@@ -24299,7 +24340,7 @@ function storePage(runDir, t, store, title, url, role, text3, extractor) {
   const header2 = [`# ${id} \u2014 ${title}`, "", `- url: ${url}`, `- role: ${role}`, `- fetched: ${fetchedAt}`, `- extractor: ${extractor}`, "", "---", "", ""].join(
     "\n"
   );
-  if (!isNoWrite()) mkdirSync9(join27(runDir, dir2), { recursive: true });
+  if (!isNoWrite()) mkdirSync10(join27(runDir, dir2), { recursive: true });
   writeArtifact(join27(runDir, extract), header2 + text3 + "\n");
   return { id, url, role, title, fetchedAt, extractor, chars: text3.length, extract };
 }
@@ -24722,7 +24763,7 @@ function recount(manifest, tenders) {
 }
 
 // src/tenders/search.ts
-import { existsSync as existsSync21, mkdirSync as mkdirSync10, readFileSync as readFileSync20 } from "fs";
+import { existsSync as existsSync21, mkdirSync as mkdirSync11, readFileSync as readFileSync20 } from "fs";
 import { join as join29 } from "path";
 
 // src/tenders/dedupe.ts
@@ -24849,7 +24890,7 @@ async function runTenderSearch(q, connectors, opts = {}) {
   return { tenders: d.tenders, lanes, raw, merged: d.merged, pairs: d.pairs, notes, found: all.length };
 }
 function recordFixture2(dir2, raw, query) {
-  mkdirSync10(join29(dir2, "raw"), { recursive: true });
+  mkdirSync11(join29(dir2, "raw"), { recursive: true });
   for (const [id, out2] of Object.entries(raw)) writeArtifact(join29(dir2, "raw", `${id}.json`), JSON.stringify(out2, null, 2) + "\n");
   writeArtifact(join29(dir2, "query.json"), JSON.stringify(query, null, 2) + "\n");
 }
@@ -25249,7 +25290,7 @@ async function startTenders(input) {
   }
   const label = countries.length ? countries.slice(0, 4).join("-") + (countries.length > 4 ? "-more" : "") : "world";
   const { dir: dir2 } = newTenderRun(input.out, `${label}${cpv.length ? `-cpv${cpv.slice(0, 2).join("-")}` : ""}`);
-  if (!isNoWrite()) mkdirSync11(dir2, { recursive: true });
+  if (!isNoWrite()) mkdirSync12(dir2, { recursive: true });
   input.onProgress?.(`tenders: ${connectors.length} source(s) for ${countries.join(", ") || "every country they cover"}`);
   const res = await runTenderSearch(query, connectors, { fixture: input.fixture, onProgress: input.onProgress });
   if (input.record) recordFixture2(input.record, res.raw, query);
@@ -25263,7 +25304,7 @@ async function startTenders(input) {
   manifest.tenderCounts.mergedDuplicates = res.merged.length;
   manifest.tenderCounts.pairs = res.pairs.length;
   recount(manifest, res.tenders);
-  if (!isNoWrite()) mkdirSync11(join30(dir2, "raw"), { recursive: true });
+  if (!isNoWrite()) mkdirSync12(join30(dir2, "raw"), { recursive: true });
   for (const [id, out2] of Object.entries(res.raw)) writeJson2(dir2, join30("raw", `${id}.json`), out2);
   writeTenders(dir2, res.tenders);
   if (input.profilePath && profile) copyFileSync(input.profilePath, join30(dir2, "profile.json"));
