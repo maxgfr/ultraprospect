@@ -128,7 +128,10 @@ export function extractVatNumbers(text: string): Array<{ countryCode: string; va
       // regex, whose answer is the longest run of compacted digits — or, for
       // an alternation like LT's, the first branch that fits.
       let limit = start;
-      while (limit < start + 16 && !breaksAfter(limit)) limit++;
+      // The gap between the two-letter prefix and its digits is not inside the
+      // number: "USt-ID: DE - 811907980" and a prefix on its own line are how
+      // pages write it, and bounding there lost both.
+      while (limit < start + 16 && (limit <= start + 1 || !breaksAfter(limit))) limit++;
       let found: string | undefined;
       for (let end = limit; end > start + 2 && !found; end--) {
         const candidate = compact.slice(start, end + 1);

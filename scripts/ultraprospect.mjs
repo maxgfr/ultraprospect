@@ -15828,7 +15828,7 @@ function extractVatNumbers(text3) {
       if (before && /[A-Za-z]/.test(before)) continue;
       if (!/^[A-Z]{2}/.test(m[0])) continue;
       let limit = start;
-      while (limit < start + 16 && !breaksAfter(limit)) limit++;
+      while (limit < start + 16 && (limit <= start + 1 || !breaksAfter(limit))) limit++;
       let found;
       for (let end = limit; end > start + 2 && !found; end--) {
         const candidate = compact.slice(start, end + 1);

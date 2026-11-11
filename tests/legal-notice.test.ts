@@ -56,6 +56,13 @@ describe("extractVatNumbers", () => {
     expect(extractVatNumbers("USt-IdNr. DE 811 907 980")).toContainEqual({ countryCode: "de", value: "DE811907980" });
   });
 
+  it("reads a prefix written apart from its digits", () => {
+    expect(extractVatNumbers("USt-ID: DE - 811907980")).toContainEqual({ countryCode: "de", value: "DE811907980" });
+    expect(extractVatNumbers("USt-IdNr.\nDE\n811907980")).toContainEqual({ countryCode: "de", value: "DE811907980" });
+    // …without letting the digits that follow the number run into it.
+    expect(extractVatNumbers("CZ - 12345678 724 123 456").map((v) => v.value)).toEqual(["CZ12345678"]);
+  });
+
   it("does not read a number glued to a word as a VAT number", () => {
     expect(extractVatNumbers("ordersDE123456789 shipped")).toEqual([]);
   });
