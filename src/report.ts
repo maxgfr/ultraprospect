@@ -33,7 +33,12 @@ import { shortLabel, streetLine } from "./util.js";
  */
 export const mdCell = mdInline;
 
-const row = (cells: readonly unknown[]): string => `| ${cells.map(mdCell).join(" | ")} |`;
+/** Markup this module writes itself, kept out of the escaper that is for outside text. */
+class Markup {
+  constructor(readonly text: string) {}
+}
+const strong = (text: string) => new Markup(`**${text}**`);
+const row = (cells: readonly unknown[]): string => `| ${cells.map((c) => (c instanceof Markup ? c.text : mdCell(c))).join(" | ")} |`;
 
 function truncationBanner(manifest: RunManifest): string[] {
   if (!manifest.truncated) return [];
@@ -91,7 +96,7 @@ function coverageSection(manifest: RunManifest, s: RunSummary, places: readonly 
   l.push("|---|---|---:|---|---|");
   for (const lane of manifest.lanes) {
     const mode = lane.mode ?? (lane.lane === "registry" ? "not swept" : "—");
-    l.push(row([lane.lane, mode, lane.returned, lane.truncated ? "**no**" : "yes", lane.reason ?? ""]));
+    l.push(row([lane.lane, mode, lane.returned, lane.truncated ? strong("no") : "yes", lane.reason ?? ""]));
   }
   l.push("");
 

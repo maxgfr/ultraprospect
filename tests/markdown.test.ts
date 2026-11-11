@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { mdInline, mdLink } from "../src/markdown.js";
 import { buildReport } from "../src/report.js";
+import { emptyManifest } from "../src/run.js";
 import { analyseAwards, awardsMarkdown } from "../src/tenders/awards.js";
 import { tendersReport } from "../src/tenders/report.js";
 import { emptyTenderManifest } from "../src/tenders/run.js";
@@ -153,5 +154,24 @@ describe("the deliverables", () => {
       aliases: [],
     };
     assertInert(awardsMarkdown(analyseAwards([award]), { truncated: false, gaps: [], title: "x" }));
+  });
+});
+
+describe("what the escaper leaves alone", () => {
+  it("does not put a backslash inside an email or an identifier", () => {
+    expect(mdInline("jean_dupont@acme.example")).toBe("jean_dupont@acme.example");
+    expect(mdInline("https://x.example/a_b_c")).toBe("https://x.example/a_b_c");
+    // An underscore at a word's edge can still open emphasis, and is escaped.
+    expect(mdInline("_hidden_")).toBe("\\_hidden\\_");
+  });
+
+  it("keeps the report's own emphasis on a truncated lane", () => {
+    const report = buildReport([], {
+      ...emptyManifest("t"),
+      truncated: true,
+      lanes: [{ lane: "osm", requested: 0, returned: 3, truncated: true, reason: "a tile failed" }],
+    });
+    expect(report).toContain("| **no** |");
+    expect(report).not.toContain("\\*\\*no\\*\\*");
   });
 });

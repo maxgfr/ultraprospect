@@ -3944,11 +3944,11 @@ function looksLikeJunkExtraction(text3) {
   if (t.length >= 2e3) return void 0;
   const head = t.slice(0, 800);
   const hits = JUNK_PATTERNS.filter(([re]) => re.test(head));
-  const strong = hits.find(([, , kind]) => kind === "strong");
-  if (!strong) return void 0;
-  if (hits.length >= 2) return strong[1];
+  const strong2 = hits.find(([, , kind]) => kind === "strong");
+  if (!strong2) return void 0;
+  if (hits.length >= 2) return strong2[1];
   const prose = t.split("\n").filter((l) => l.trim().length >= 60 && !JUNK_PATTERNS.some(([re]) => re.test(l))).length;
-  return prose < 3 ? strong[1] : void 0;
+  return prose < 3 ? strong2[1] : void 0;
 }
 var JUNK_PATTERNS;
 var CHALLENGE_PAGES;
@@ -11759,7 +11759,7 @@ function brandEngine() {
 
 // src/markdown.ts
 function mdInline(value) {
-  return String(value ?? "").replace(/\s*[\r\n]+\s*/g, " ").trim().replace(/[\\`*_[\]<>|]/g, "\\$&").replace(/^([#>+=-])/, "\\$1").replace(/^(\d+)([.)])/, "$1\\$2");
+  return String(value ?? "").replace(/\s*[\r\n]+\s*/g, " ").trim().replace(/[\\`*[\]<>|]/g, "\\$&").replace(/(?<![\p{L}\p{N}])_|_(?![\p{L}\p{N}])/gu, "\\_").replace(/^([#>+=-])/, "\\$1").replace(/^(\d+)([.)])/, "$1\\$2");
 }
 function mdLink(text3, url) {
   const label = mdInline(text3);
@@ -24021,7 +24021,14 @@ ${s.notes.lines.length ? `<details><summary>Run notes (${s.notes.distinct === s.
 
 // src/report.ts
 var mdCell = mdInline;
-var row = (cells) => `| ${cells.map(mdCell).join(" | ")} |`;
+var Markup = class {
+  constructor(text3) {
+    this.text = text3;
+  }
+  text;
+};
+var strong = (text3) => new Markup(`**${text3}**`);
+var row = (cells) => `| ${cells.map((c) => c instanceof Markup ? c.text : mdCell(c)).join(" | ")} |`;
 function truncationBanner(manifest) {
   if (!manifest.truncated) return [];
   const lanes = manifest.lanes.filter((l) => l.truncated);
@@ -24060,7 +24067,7 @@ function coverageSection(manifest, s, places, selection) {
   l.push("|---|---|---:|---|---|");
   for (const lane of manifest.lanes) {
     const mode2 = lane.mode ?? (lane.lane === "registry" ? "not swept" : "\u2014");
-    l.push(row([lane.lane, mode2, lane.returned, lane.truncated ? "**no**" : "yes", lane.reason ?? ""]));
+    l.push(row([lane.lane, mode2, lane.returned, lane.truncated ? strong("no") : "yes", lane.reason ?? ""]));
   }
   l.push("");
   if (s.registry.byConnector.length) {

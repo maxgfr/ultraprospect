@@ -20,12 +20,18 @@
  * too, for the places a value does begin a line.
  */
 export function mdInline(value: unknown): string {
-  return String(value ?? "")
-    .replace(/\s*[\r\n]+\s*/g, " ")
-    .trim()
-    .replace(/[\\`*_[\]<>|]/g, "\\$&")
-    .replace(/^([#>+=-])/, "\\$1")
-    .replace(/^(\d+)([.)])/, "$1\\$2");
+  return (
+    String(value ?? "")
+      .replace(/\s*[\r\n]+\s*/g, " ")
+      .trim()
+      .replace(/[\\`*[\]<>|]/g, "\\$&")
+      // An underscore INSIDE a word opens nothing in CommonMark, and escaping it
+      // put a backslash into every `jean_dupont@…` a reader copies off the raw
+      // file. Only one at a word's edge is escaped.
+      .replace(/(?<![\p{L}\p{N}])_|_(?![\p{L}\p{N}])/gu, "\\_")
+      .replace(/^([#>+=-])/, "\\$1")
+      .replace(/^(\d+)([.)])/, "$1\\$2")
+  );
 }
 
 /**
