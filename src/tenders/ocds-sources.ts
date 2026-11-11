@@ -17,7 +17,7 @@
 //                        submission deadline at all. A German notice from here
 //                        is "status unknown" until its TED copy (merged by
 //                        procedure id) or its own page says otherwise.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { awaitHostSlot, cacheDir, httpGet, httpJson } from "../engine.js";
 import { politeUa } from "../net.js";
@@ -213,16 +213,7 @@ const DE = "https://oeffentlichevergabe.de/api/notice-exports";
 /** Days a single query may download. Each is ~1.8 MB; the lane says when it stopped. */
 export const DE_MAX_DAYS = 31;
 
-async function deDay(day: string): Promise<{ ok: boolean; releases: any[]; error?: string }> {
-  const url = `${DE}?pubDay=${day}&format=ocds.zip`;
-  await awaitHostSlot(url, 500);
-  const res = await httpGet(url, { binary: true, timeoutMs: 60_000, retries: 1, userAgent: politeUa(), maxBytes: 64 * 1024 * 1024 });
-  if (!res.ok || !res.bytes) return { ok: false, releases: [], error: res.error ?? `HTTP ${res.status}` };
-  if (res.truncated) return { ok: false, releases: [], error: "the export exceeded the download cap" };
-  const dir = join(cacheDir(), "tenders", "de");
-  mkdirSync(dir, { recursive: true });
-  const path = join(dir, `${day}.zip`);
-  writeFileSync(path, res.bytes);
+async function readDeZip(path: string): Promise<{ ok: boolean; releases: any[]; error?: string }> {
   const releases: any[] = [];
   try {
     for (const entry of await zipEntries(path)) {
@@ -241,6 +232,35 @@ async function deDay(day: string): Promise<{ ok: boolean; releases: any[]; error
     return { ok: false, releases, error: (e as Error).message };
   }
   return { ok: true, releases };
+}
+
+/**
+ * One day's export. A past day's export does not change, so a zip already in
+ * the cache for a day before yesterday is read back instead of downloaded
+ * again: a 30-day query re-run the next morning costs one download, not 31 of
+ * ~1.8 MB each. Yesterday's is always fetched, the newest export being the one
+ * that could still be replaced. A cached zip that does not read (a copy cut
+ * short) is fetched again rather than trusted.
+ */
+async function deDay(day: string, opts: { reuse?: boolean } = {}): Promise<{ ok: boolean; releases: any[]; error?: string }> {
+  const dir = join(cacheDir(), "tenders", "de");
+  const path = join(dir, `${day}.zip`);
+  if (opts.reuse && existsSync(path)) {
+    const cached = await readDeZip(path);
+    if (cached.ok) return cached;
+  }
+  const url = `${DE}?pubDay=${day}&format=ocds.zip`;
+  await awaitHostSlot(url, 500);
+  const res = await httpGet(url, { binary: true, timeoutMs: 60_000, retries: 1, userAgent: politeUa(), maxBytes: 64 * 1024 * 1024 });
+  if (!res.ok || !res.bytes) return { ok: false, releases: [], error: res.error ?? `HTTP ${res.status}` };
+  if (res.truncated) return { ok: false, releases: [], error: "the export exceeded the download cap" };
+  mkdirSync(dir, { recursive: true });
+  // Written aside and renamed, so an interrupted write never leaves a partial
+  // zip under the name a later run would reuse.
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, res.bytes);
+  renameSync(tmp, path);
+  return readDeZip(path);
 }
 
 function daysBetween(from: string, to: string): string[] {
@@ -269,9 +289,16 @@ export const deOeffentlichevergabe: TenderConnector = {
     const read = days.slice(0, DE_MAX_DAYS);
     const out: Tender[] = [];
     const notes: string[] = [];
+    // A window that starts after the last day with an export (a query for
+    // today only) downloads nothing, and an empty lane with no word reads as
+    // "Germany published nothing".
+    if (!days.length)
+      notes.push(
+        `oeffentlichevergabe.de: nothing was downloaded — the window starts ${from}, after ${to}, the newest day with an export (a day's export appears once the day is over).`,
+      );
     let failed = 0;
     for (const day of read) {
-      const res = await deDay(day);
+      const res = await deDay(day, { reuse: day < yesterday });
       if (!res.ok) {
         failed += 1;
         notes.push(`oeffentlichevergabe.de: ${day} could not be read (${res.error}).`);

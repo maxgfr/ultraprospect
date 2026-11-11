@@ -17526,7 +17526,7 @@ var frBoamp = {
 };
 
 // src/tenders/ocds-sources.ts
-import { mkdirSync as mkdirSync7, writeFileSync as writeFileSync7 } from "fs";
+import { existsSync as existsSync13, mkdirSync as mkdirSync7, renameSync as renameSync4, writeFileSync as writeFileSync7 } from "fs";
 import { join as join12 } from "path";
 
 // src/tenders/ocds.ts
@@ -17853,16 +17853,7 @@ var auAustender = {
 };
 var DE = "https://oeffentlichevergabe.de/api/notice-exports";
 var DE_MAX_DAYS = 31;
-async function deDay(day) {
-  const url = `${DE}?pubDay=${day}&format=ocds.zip`;
-  await awaitHostSlot(url, 500);
-  const res = await httpGet(url, { binary: true, timeoutMs: 6e4, retries: 1, userAgent: politeUa(), maxBytes: 64 * 1024 * 1024 });
-  if (!res.ok || !res.bytes) return { ok: false, releases: [], error: res.error ?? `HTTP ${res.status}` };
-  if (res.truncated) return { ok: false, releases: [], error: "the export exceeded the download cap" };
-  const dir2 = join12(cacheDir(), "tenders", "de");
-  mkdirSync7(dir2, { recursive: true });
-  const path = join12(dir2, `${day}.zip`);
-  writeFileSync7(path, res.bytes);
+async function readDeZip(path) {
   const releases = [];
   try {
     for (const entry of await zipEntries(path)) {
@@ -17880,6 +17871,24 @@ async function deDay(day) {
     return { ok: false, releases, error: e.message };
   }
   return { ok: true, releases };
+}
+async function deDay(day, opts = {}) {
+  const dir2 = join12(cacheDir(), "tenders", "de");
+  const path = join12(dir2, `${day}.zip`);
+  if (opts.reuse && existsSync13(path)) {
+    const cached = await readDeZip(path);
+    if (cached.ok) return cached;
+  }
+  const url = `${DE}?pubDay=${day}&format=ocds.zip`;
+  await awaitHostSlot(url, 500);
+  const res = await httpGet(url, { binary: true, timeoutMs: 6e4, retries: 1, userAgent: politeUa(), maxBytes: 64 * 1024 * 1024 });
+  if (!res.ok || !res.bytes) return { ok: false, releases: [], error: res.error ?? `HTTP ${res.status}` };
+  if (res.truncated) return { ok: false, releases: [], error: "the export exceeded the download cap" };
+  mkdirSync7(dir2, { recursive: true });
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync7(tmp, res.bytes);
+  renameSync4(tmp, path);
+  return readDeZip(path);
 }
 function daysBetween(from, to) {
   const out2 = [];
@@ -17904,9 +17913,13 @@ var deOeffentlichevergabe = {
     const read2 = days.slice(0, DE_MAX_DAYS);
     const out2 = [];
     const notes = [];
+    if (!days.length)
+      notes.push(
+        `oeffentlichevergabe.de: nothing was downloaded \u2014 the window starts ${from}, after ${to}, the newest day with an export (a day's export appears once the day is over).`
+      );
     let failed = 0;
     for (const day of read2) {
-      const res = await deDay(day);
+      const res = await deDay(day, { reuse: day < yesterday });
       if (!res.ok) {
         failed += 1;
         notes.push(`oeffentlichevergabe.de: ${day} could not be read (${res.error}).`);
@@ -19795,13 +19808,13 @@ function applyVerdicts(places, verdicts, todo = []) {
 }
 
 // src/fixture.ts
-import { existsSync as existsSync13, mkdirSync as mkdirSync8 } from "fs";
+import { existsSync as existsSync14, mkdirSync as mkdirSync8 } from "fs";
 import { join as join13 } from "path";
 function loadFixture(dir2) {
   const target = readJsonSafe(join13(dir2, "target.json"));
   if (!target) throw new Error(`${join13(dir2, "target.json")} is missing \u2014 a fixture needs the geocoded target it was recorded for`);
   for (const file of ["osm.json", "registry.json"]) {
-    if (!existsSync13(join13(dir2, file))) throw new Error(`${join13(dir2, file)} is missing \u2014 record it with \`ultraprospect scan --record <dir>\``);
+    if (!existsSync14(join13(dir2, file))) throw new Error(`${join13(dir2, file)} is missing \u2014 record it with \`ultraprospect scan --record <dir>\``);
   }
   const lane = (file) => {
     const value = readJsonSafe(join13(dir2, file));
@@ -22317,7 +22330,7 @@ function toCsv(places, opts = {}) {
 }
 
 // src/dossier.ts
-import { existsSync as existsSync14, readFileSync as readFileSync14 } from "fs";
+import { existsSync as existsSync15, readFileSync as readFileSync14 } from "fs";
 import { join as join21 } from "path";
 
 // src/classification/index.ts
@@ -22356,7 +22369,7 @@ function dossierPathFor(place) {
   return join21("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
 }
 function syncDossierCount(runDir, places, manifest) {
-  const onDisk = places.filter((p) => existsSync14(join21(runDir, dossierPathFor(p)))).length;
+  const onDisk = places.filter((p) => existsSync15(join21(runDir, dossierPathFor(p)))).length;
   if (manifest.counts.dossiers === onDisk) return;
   manifest.counts.dossiers = onDisk;
   writeRunManifest(runDir, manifest);
@@ -22536,7 +22549,7 @@ function buildDossierPacket(runDir, place, manifest) {
   for (const id of place.pages) {
     const rel = join21(pageDirFor(place.id), `${id}.md`);
     const abs = join21(runDir, rel);
-    if (!existsSync14(abs)) {
+    if (!existsSync15(abs)) {
       parts.push(`### ${id} \u2014 MISSING (${rel})`);
       parts.push("");
       parts.push("This page is listed on the place but its extract is not on disk. Do not cite it.");
@@ -22552,7 +22565,7 @@ function buildDossierPacket(runDir, place, manifest) {
 }
 
 // src/check.ts
-import { existsSync as existsSync15, readFileSync as readFileSync15, readdirSync as readdirSync9 } from "fs";
+import { existsSync as existsSync16, readFileSync as readFileSync15, readdirSync as readdirSync9 } from "fs";
 import { basename as basename3, join as join22 } from "path";
 var citationRe = () => /\[P(\d+)\]/g;
 var MODEL_MARK = /\[M\]/;
@@ -22612,7 +22625,7 @@ function runCheck(input) {
       const owners = pageOwners.get(id) ?? /* @__PURE__ */ new Set();
       owners.add(place.id);
       pageOwners.set(id, owners);
-      if (existsSync15(file)) pageText.set(id, readFileSync15(file, "utf8"));
+      if (existsSync16(file)) pageText.set(id, readFileSync15(file, "utf8"));
     }
   }
   const searchableText = /* @__PURE__ */ new Map();
@@ -22804,7 +22817,7 @@ function runCheck(input) {
     }
   }
   const dossierDir = join22(runDir, "dossiers");
-  const files = existsSync15(dossierDir) ? readdirSync9(dossierDir).filter((f) => f.endsWith(".md")) : [];
+  const files = existsSync16(dossierDir) ? readdirSync9(dossierDir).filter((f) => f.endsWith(".md")) : [];
   const byDossierName = new Map(places.map((p) => [basename3(dossierPathFor(p)), p]));
   let citations = 0;
   for (const file of files) {
@@ -22942,11 +22955,11 @@ function formatReport(report2) {
 }
 
 // src/render.ts
-import { existsSync as existsSync17, readFileSync as readFileSync17 } from "fs";
+import { existsSync as existsSync18, readFileSync as readFileSync17 } from "fs";
 import { join as join24 } from "path";
 
 // src/excerpts.ts
-import { existsSync as existsSync16, readFileSync as readFileSync16 } from "fs";
+import { existsSync as existsSync17, readFileSync as readFileSync16 } from "fs";
 import { join as join23 } from "path";
 function pageKey(placeId, pageId) {
   return `${placeId} ${pageId}`;
@@ -23039,7 +23052,7 @@ function collectEvidence(runDir, places) {
       }
       const path = join23(runDir, "pages", slug, `${pageId}.md`);
       if (!parsed.has(path)) {
-        parsed.set(path, existsSync16(path) ? parsePage(readFileSync16(path, "utf8")) : void 0);
+        parsed.set(path, existsSync17(path) ? parsePage(readFileSync16(path, "utf8")) : void 0);
       }
       const page2 = parsed.get(path);
       if (!page2) continue;
@@ -24162,7 +24175,7 @@ function readDossiers(runDir, places) {
   const out2 = /* @__PURE__ */ new Map();
   for (const place of places) {
     const path = join24(runDir, dossierPathFor(place));
-    if (existsSync17(path)) out2.set(place.id, readFileSync17(path, "utf8"));
+    if (existsSync18(path)) out2.set(place.id, readFileSync17(path, "utf8"));
   }
   return out2;
 }
@@ -24192,7 +24205,7 @@ import { join as join31 } from "path";
 import { readFileSync as readFileSync22 } from "fs";
 
 // src/tenders/commands.ts
-import { copyFileSync, existsSync as existsSync22, mkdirSync as mkdirSync12, readFileSync as readFileSync21, readdirSync as readdirSync12 } from "fs";
+import { copyFileSync, existsSync as existsSync23, mkdirSync as mkdirSync12, readFileSync as readFileSync21, readdirSync as readdirSync12 } from "fs";
 import { join as join30 } from "path";
 
 // src/tenders/awards.ts
@@ -24499,7 +24512,7 @@ function checklistMarkdown(country, aboveThreshold) {
 }
 
 // src/tenders/profile.ts
-import { existsSync as existsSync18, readFileSync as readFileSync18 } from "fs";
+import { existsSync as existsSync19, readFileSync as readFileSync18 } from "fs";
 var PROFILE_TEMPLATE = {
   company: { name: "<legal name>", legalId: "<SIREN / company number / VAT>", country: "fr", website: "https://\u2026" },
   offer: "<what you sell, in two or three sentences \u2014 the qualifier reads this against every notice>",
@@ -24544,7 +24557,7 @@ function validateProfile(raw) {
   return { profile: p, problems };
 }
 function loadProfile(path) {
-  if (!existsSync18(path)) return { problems: [{ field: "(file)", message: `no profile at ${path}` }] };
+  if (!existsSync19(path)) return { problems: [{ field: "(file)", message: `no profile at ${path}` }] };
   try {
     return validateProfile(JSON.parse(readFileSync18(path, "utf8")));
   } catch (e) {
@@ -24728,7 +24741,7 @@ function qualifySummary(t) {
 }
 
 // src/tenders/check.ts
-import { existsSync as existsSync19, readFileSync as readFileSync19, readdirSync as readdirSync10 } from "fs";
+import { existsSync as existsSync20, readFileSync as readFileSync19, readdirSync as readdirSync10 } from "fs";
 import { basename as basename5, join as join26 } from "path";
 
 // src/tenders/web.ts
@@ -25055,7 +25068,7 @@ var DATE = /(\d{4}-\d{2}-\d{2})|(\d{1,2})[./](\d{1,2})[./](\d{4})/g;
 var RETENDER = /(re-?tender|renewal|renouvellement|reconduction|wiederausschreibung|neuausschreibung|renovaci[oó]n)/i;
 function profileFromRun(runDir) {
   const p = join26(runDir, "profile.json");
-  if (!existsSync19(p)) return void 0;
+  if (!existsSync20(p)) return void 0;
   try {
     return JSON.parse(readFileSync19(p, "utf8"));
   } catch {
@@ -25092,7 +25105,7 @@ function runTenderCheck(input) {
     }
   }
   const bidsRoot = join26(runDir, "bids");
-  const dirs = existsSync19(bidsRoot) ? readdirSync10(bidsRoot, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name) : [];
+  const dirs = existsSync20(bidsRoot) ? readdirSync10(bidsRoot, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name) : [];
   for (const dir2 of dirs) {
     const t = byDir.get(dir2);
     if (!t) {
@@ -25101,7 +25114,7 @@ function runTenderCheck(input) {
     }
     for (const file of ["RESPONSE.md", "COMPLIANCE.md"]) {
       const path = join26(bidsRoot, dir2, file);
-      if (!existsSync19(path)) {
+      if (!existsSync20(path)) {
         if (file === "COMPLIANCE.md") warn("compliance-missing", `bids/${dir2}`, "no COMPLIANCE.md: the requirement-by-requirement check has not been written.");
         continue;
       }
@@ -25630,7 +25643,7 @@ ${rows}
 }
 
 // src/tenders/run.ts
-import { existsSync as existsSync20, readdirSync as readdirSync11 } from "fs";
+import { existsSync as existsSync21, readdirSync as readdirSync11 } from "fs";
 import { join as join28, resolve as resolve2 } from "path";
 function isTenderManifest(m) {
   return m?.kind === "tenders";
@@ -25654,13 +25667,13 @@ function emptyTenderManifest(label, query) {
 }
 function resolveTenderRun(pathOrRoot) {
   const p = resolve2(pathOrRoot);
-  if (existsSync20(join28(p, "manifest.json"))) {
+  if (existsSync21(join28(p, "manifest.json"))) {
     if (!isTenderManifest(readManifest(p)))
       throw new Error(`${p} is a territory run, not a tenders run \u2014 start one with \`ultraprospect tenders\``);
     return p;
   }
-  const runsDir = existsSync20(join28(p, "runs")) ? join28(p, "runs") : p;
-  if (!existsSync20(runsDir)) throw new Error(`no run directory at ${p}`);
+  const runsDir = existsSync21(join28(p, "runs")) ? join28(p, "runs") : p;
+  if (!existsSync21(runsDir)) throw new Error(`no run directory at ${p}`);
   const candidates2 = readdirSync11(runsDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => ({ name: e.name, m: readManifest(join28(runsDir, e.name)) })).filter((c) => isTenderManifest(c.m)).sort((a, b) => String(a.m.builtAt).localeCompare(String(b.m.builtAt)) || a.name.localeCompare(b.name));
   const newest = candidates2.at(-1);
   if (!newest) throw new Error(`no tenders run under ${runsDir} \u2014 start one with \`ultraprospect tenders\``);
@@ -25700,7 +25713,7 @@ function recount(manifest, tenders) {
 }
 
 // src/tenders/search.ts
-import { existsSync as existsSync21, mkdirSync as mkdirSync11, readFileSync as readFileSync20 } from "fs";
+import { existsSync as existsSync22, mkdirSync as mkdirSync11, readFileSync as readFileSync20 } from "fs";
 import { join as join29 } from "path";
 
 // src/tenders/dedupe.ts
@@ -25818,7 +25831,7 @@ async function runTenderSearch(q, connectors, opts = {}) {
     try {
       if (opts.fixture) {
         const file = join29(opts.fixture, "raw", `${c.id}.json`);
-        out2 = existsSync21(file) ? JSON.parse(readFileSync20(file, "utf8")) : { tenders: [], truncated: false, notes: [`${c.id}: no fixture recorded`] };
+        out2 = existsSync22(file) ? JSON.parse(readFileSync20(file, "utf8")) : { tenders: [], truncated: false, notes: [`${c.id}: no fixture recorded`] };
       } else {
         opts.onProgress?.(`  ${c.id}: asking\u2026`);
         out2 = await c.search(q);
@@ -25995,7 +26008,7 @@ async function foldWeb(runDir, input) {
   const manifest = requireTenderManifest(runDir);
   const tenders = readTenders(runDir);
   const todoPath = join30(runDir, "WEB.todo.json");
-  const todo = existsSync22(todoPath) ? JSON.parse(readFileSync21(todoPath, "utf8")) : writeWebTodo(runDir);
+  const todo = existsSync23(todoPath) ? JSON.parse(readFileSync21(todoPath, "utf8")) : writeWebTodo(runDir);
   const notes = [];
   let hits = input.hits ?? [];
   if (!hits.length && input.engineSearch) hits = await engineSearchWeb(todo, (n) => notes.push(n));
@@ -26022,7 +26035,7 @@ async function foldWeb(runDir, input) {
   manifest.tenderCounts.pairs = pairs.length;
   recount(manifest, all);
   writeTenders(runDir, all);
-  writeJson2(runDir, "TENDERS.todo.json", buildTendersTodo(all, pairs, existsSync22(join30(runDir, "profile.json")) ? "profile.json" : void 0));
+  writeJson2(runDir, "TENDERS.todo.json", buildTendersTodo(all, pairs, existsSync23(join30(runDir, "profile.json")) ? "profile.json" : void 0));
   writeRunManifest(runDir, manifest);
   return { ...outcome, notes };
 }
@@ -26037,7 +26050,7 @@ function applyVerdictsToRun(runDir, verdicts) {
     `tenders --apply: ${outcome.applied} verdict(s), ${outcome.merged} pair(s) merged${outcome.unknown.length ? `, ${outcome.unknown.length} unknown id(s)` : ""}${outcome.expired.length ? `, ${outcome.expired.length} go on an expired call refused` : ""}.`
   );
   writeTenders(runDir, tenders);
-  writeJson2(runDir, "TENDERS.todo.json", buildTendersTodo(tenders, pairs, existsSync22(join30(runDir, "profile.json")) ? "profile.json" : void 0));
+  writeJson2(runDir, "TENDERS.todo.json", buildTendersTodo(tenders, pairs, existsSync23(join30(runDir, "profile.json")) ? "profile.json" : void 0));
   writeRunManifest(runDir, manifest);
   return outcome;
 }
@@ -26073,7 +26086,7 @@ function checkTenderRun(runDir) {
 function renderTenderRun(runDir) {
   const manifest = requireTenderManifest(runDir);
   const tenders = readTenders(runDir);
-  manifest.tenderCounts.bids = existsSync22(join30(runDir, "bids")) ? readdirSync12(join30(runDir, "bids")).length : 0;
+  manifest.tenderCounts.bids = existsSync23(join30(runDir, "bids")) ? readdirSync12(join30(runDir, "bids")).length : 0;
   const files = [
     ["TENDERS.csv", tendersCsv(tenders)],
     ["tenders-ranked.json", JSON.stringify(rankTenders(tenders), null, 2) + "\n"],
