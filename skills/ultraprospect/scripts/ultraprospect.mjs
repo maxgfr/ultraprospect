@@ -19165,7 +19165,7 @@ async function runOnce(query, opts) {
         retries: 0
       });
       body = res.body ?? "";
-      if (res.status !== 0) answered3++;
+      if (res.status !== 0 || /timed? ?out|timeout|ETIMEDOUT|aborted/i.test(res.error ?? "")) answered3++;
       if (!res.ok && !body) {
         failures.push(`${mirror}: HTTP ${res.status}${res.status === 0 && res.error ? ` (${res.error})` : ""}`);
         continue;

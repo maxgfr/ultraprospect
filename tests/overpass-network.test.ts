@@ -57,6 +57,20 @@ describe("fetchOsmPois with no network", () => {
     expect(result.notes.some((n) => n.includes("ENOTFOUND"))).toBe(true);
   });
 
+  it("still splits an area whose every mirror timed out on it, because a timeout is a heavy query, not an outage", async () => {
+    // The root box is too heavy for the client timeout; its quadrants answer.
+    let call = 0;
+    respond = () => {
+      call++;
+      if (call <= MIRRORS.length) return { ok: false, status: 0, body: "", error: "request timed out after 105000 ms" };
+      return { ok: true, status: 200, body: '{"elements":[]}' };
+    };
+    const result = await fetchOsmPois(box, { mirrors: MIRRORS });
+    expect(result.reason ?? "").not.toMatch(/network/);
+    expect(result.notes.some((n) => n.includes("splitting"))).toBe(true);
+    expect(result.incomplete).toBe(false);
+  });
+
   it("does not fall back from the boundary to the bounding box either", async () => {
     respond = () => OFFLINE;
     const result = await fetchOsmPois({ ...box, osmType: "relation", osmId: 123 }, { mirrors: MIRRORS });

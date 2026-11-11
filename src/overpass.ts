@@ -264,7 +264,12 @@ async function runOnce(query: string, opts: OverpassOptions): Promise<RunOutcome
       // Status 0 is the engine's way of saying no response came back at all:
       // DNS, a refused or reset connection, or the client timeout. Its own
       // error string says which, and used to be dropped for a bare "HTTP 0".
-      if (res.status !== 0) answered++;
+      // A CLIENT TIMEOUT is the exception: the server took the query and was
+      // still working on it, which is a capacity answer (the area is heavy),
+      // not a network that is down. Counted as unanswered, three slow mirrors
+      // on a dense box were reported as an outage and the split that recovers
+      // a heavy area never ran.
+      if (res.status !== 0 || /timed? ?out|timeout|ETIMEDOUT|aborted/i.test(res.error ?? "")) answered++;
       if (!res.ok && !body) {
         failures.push(`${mirror}: HTTP ${res.status}${res.status === 0 && res.error ? ` (${res.error})` : ""}`);
         continue;
