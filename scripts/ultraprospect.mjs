@@ -16416,7 +16416,7 @@ function newRun(outRoot, label) {
   const id = runId();
   const root2 = resolve(outRoot);
   const dir2 = join6(root2, "runs", `${slug}-${id}`);
-  mkdirSync5(dir2, { recursive: true });
+  if (!isNoWrite()) mkdirSync5(dir2, { recursive: true });
   return { root: root2, dir: dir2, slug, id };
 }
 function resolveRun(pathOrRoot) {
@@ -19812,7 +19812,7 @@ function loadFixture(dir2) {
   };
 }
 function recordFixture(dir2, outcome, target) {
-  mkdirSync8(dir2, { recursive: true });
+  if (!isNoWrite()) mkdirSync8(dir2, { recursive: true });
   writeArtifact(join13(dir2, "target.json"), JSON.stringify(target, null, 2) + "\n");
   writeArtifact(join13(dir2, "osm.json"), JSON.stringify(outcome.osm, null, 2) + "\n");
   writeArtifact(join13(dir2, "registry.json"), JSON.stringify(outcome.registry, null, 2) + "\n");

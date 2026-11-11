@@ -13,7 +13,7 @@
 // proves the upstreams still speak the shape we recorded.
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { readJsonSafe, writeArtifact } from "./engine.js";
+import { isNoWrite, readJsonSafe, writeArtifact } from "./engine.js";
 import type { GeoTarget, OsmPoi } from "./types.js";
 import type { RegistryRecord } from "./registry/types.js";
 
@@ -60,7 +60,9 @@ export function loadFixture(dir: string): Fixture {
  * builder, so any catalogue edit would look like a regression.
  */
 export function recordFixture(dir: string, outcome: { osm: OsmPoi[]; registry: RegistryRecord[] }, target: GeoTarget): void {
-  mkdirSync(dir, { recursive: true });
+  // Under `--stdout` the three files are collected, not written, so the
+  // directory would be the only thing left on disk.
+  if (!isNoWrite()) mkdirSync(dir, { recursive: true });
   writeArtifact(join(dir, "target.json"), JSON.stringify(target, null, 2) + "\n");
   writeArtifact(join(dir, "osm.json"), JSON.stringify(outcome.osm, null, 2) + "\n");
   writeArtifact(join(dir, "registry.json"), JSON.stringify(outcome.registry, null, 2) + "\n");

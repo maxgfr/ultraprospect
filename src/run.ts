@@ -16,7 +16,7 @@
 // the upstreams have moved.
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { readJsonSafe, readManifest, runId, slugify, writeArtifact, writeManifest } from "./engine.js";
+import { isNoWrite, readJsonSafe, readManifest, runId, slugify, writeArtifact, writeManifest } from "./engine.js";
 import { connectorById } from "./registry/index.js";
 import { shortLabel } from "./util.js";
 import type { LaneCoverage, Place, RunManifest } from "./types.js";
@@ -44,7 +44,10 @@ export function newRun(outRoot: string, label: string): RunPaths {
   const id = runId();
   const root = resolve(outRoot);
   const dir = join(root, "runs", `${slug}-${id}`);
-  mkdirSync(dir, { recursive: true });
+  // `--stdout` promises to write nothing. Every artifact already honours it
+  // through the engine's writeArtifact, and an empty runs/<slug>-<id>/ left
+  // behind by this mkdir was the one thing on disk that did not.
+  if (!isNoWrite()) mkdirSync(dir, { recursive: true });
   return { root, dir, slug, id };
 }
 
