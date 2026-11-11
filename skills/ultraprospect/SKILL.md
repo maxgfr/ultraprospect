@@ -3,7 +3,7 @@ name: ultraprospect
 description: Build a sourced, territory-wide company prospect list with registry checks, qualification, and citation-aware exports — and find, qualify and draft answers to public calls for tenders across countries (TED, national portals, awards). Use only when the user explicitly asks for ultraprospect, a prospect list for a territory, or public tenders / appels d'offres to find or answer.
 license: MIT
 metadata:
-  version: 3.17.1
+  version: 3.17.2
 ---
 
 # ultraprospect — a territory, turned into prospects you can cite
