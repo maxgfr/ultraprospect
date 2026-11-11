@@ -99,6 +99,8 @@ export interface OverpassOptions {
   mirrors?: readonly string[];
   /** How many times a too-big area may be quartered. */
   maxSplitDepth?: number;
+  /** Pause before the one retry of a boundary query every mirror refused for capacity. */
+  areaRetryDelayMs?: number;
   /** Called with human-readable progress. */
   onNote?: (note: string) => void;
 }
@@ -114,6 +116,12 @@ export interface OverpassResult {
   incomplete: boolean;
   /** Why the lane is incomplete, in words a coverage entry can print. Set whenever `incomplete` is. */
   reason?: string;
+  /**
+   * The territory's boundary could not be queried, so its bounding box was swept
+   * instead. Every POI inside the boundary is there, and so are the ones between
+   * the boundary and the box — for Hamburg, Cuxhaven and Bremerhaven.
+   */
+  boundaryFallback?: boolean;
   /**
    * Features returned inside the bounding square but outside the `--radius`
    * disc, and therefore dropped. 0 for an area search, which has no radius.
@@ -353,6 +361,8 @@ export async function fetchOsmPois(target: GeoTarget, opts: OverpassOptions = {}
   const area = target.radiusM ? undefined : areaIdFor(target);
   const rootBbox = target.radiusM ? bboxAround(target.lat, target.lon, target.radiusM) : target.bbox;
 
+  let areaRetried = false;
+  let boundaryFallback = false;
   async function walk(bbox: [number, number, number, number], useArea: number | undefined, depth: number): Promise<void> {
     const query = buildQuery(useArea, bbox, opts);
     const { json, error, mirror, tooBig, unreachable } = await runOnce(query, opts);
@@ -374,7 +384,22 @@ export async function fetchOsmPois(target: GeoTarget, opts: OverpassOptions = {}
       // precision (a bbox for Vincennes clips into Paris), so it is recorded as
       // a note: the run is complete but its edges are not the commune's.
       if (useArea !== undefined) {
+        // A BUSY server is not a reason to give up the boundary. The bounding box
+        // of a real territory can be far larger than it: Hamburg's reaches the
+        // island of Neuwerk, and a live run that fell back on one saturated
+        // mirror returned 4 740 offices, 2 156 of them in Cuxhaven, Bremerhaven
+        // and Stade. So a capacity refusal earns the boundary one more try after
+        // a pause; only a query that is genuinely too big, or a second refusal,
+        // falls back.
+        if (!areaRetried && !isQueryTooBig(error)) {
+          areaRetried = true;
+          notes.push(`overpass: the administrative-area query was refused for capacity (${error}); retrying it once before falling back to the bounding box`);
+          opts.onNote?.("overpass: every mirror busy for the boundary query; retrying it once");
+          await new Promise((done) => setTimeout(done, opts.areaRetryDelayMs ?? 20_000));
+          return walk(bbox, useArea, depth);
+        }
         notes.push(`overpass: the administrative-area query failed (${error}); fell back to the bounding box, which extends past the commune boundary`);
+        boundaryFallback = true;
         opts.onNote?.("overpass: area query failed, falling back to bbox (edges will overshoot the boundary)");
         return walk(bbox, undefined, depth);
       }
@@ -420,6 +445,7 @@ export async function fetchOsmPois(target: GeoTarget, opts: OverpassOptions = {}
     notes,
     incomplete,
     ...(reasons.size ? { reason: [...reasons].join("; ") } : {}),
+    boundaryFallback,
     outsideRadius: dropped,
   };
 }

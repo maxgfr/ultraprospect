@@ -19247,6 +19247,8 @@ async function fetchOsmPois(target, opts = {}) {
   const reasons = /* @__PURE__ */ new Set();
   const area = target.radiusM ? void 0 : areaIdFor(target);
   const rootBbox = target.radiusM ? bboxAround(target.lat, target.lon, target.radiusM) : target.bbox;
+  let areaRetried = false;
+  let boundaryFallback = false;
   async function walk(bbox, useArea, depth) {
     const query = buildQuery(useArea, bbox, opts);
     const { json: json2, error, mirror, tooBig, unreachable } = await runOnce(query, opts);
@@ -19260,7 +19262,15 @@ async function fetchOsmPois(target, opts = {}) {
     }
     if (error) {
       if (useArea !== void 0) {
+        if (!areaRetried && !isQueryTooBig(error)) {
+          areaRetried = true;
+          notes.push(`overpass: the administrative-area query was refused for capacity (${error}); retrying it once before falling back to the bounding box`);
+          opts.onNote?.("overpass: every mirror busy for the boundary query; retrying it once");
+          await new Promise((done) => setTimeout(done, opts.areaRetryDelayMs ?? 2e4));
+          return walk(bbox, useArea, depth);
+        }
         notes.push(`overpass: the administrative-area query failed (${error}); fell back to the bounding box, which extends past the commune boundary`);
+        boundaryFallback = true;
         opts.onNote?.("overpass: area query failed, falling back to bbox (edges will overshoot the boundary)");
         return walk(bbox, void 0, depth);
       }
@@ -19297,6 +19307,7 @@ async function fetchOsmPois(target, opts = {}) {
     notes,
     incomplete,
     ...reasons.size ? { reason: [...reasons].join("; ") } : {},
+    boundaryFallback,
     outsideRadius: dropped
   };
 }
@@ -20177,7 +20188,11 @@ async function runScan(target, opts = {}) {
       requested: 0,
       returned: pois.length,
       truncated: osm.incomplete,
-      reason: osm.incomplete ? osm.reason ?? "at least one Overpass tile could not be fetched after the split budget ran out" : void 0,
+      // The coverage table is what a reader reads first, so a sweep of the
+      // bounding box in place of the boundary is said HERE, not only in a note:
+      // it reported "complete" with an empty note over a list that was 45% outside
+      // the territory on a live Hamburg run.
+      reason: osm.incomplete ? osm.reason ?? "at least one Overpass tile could not be fetched after the split budget ran out" : osm.boundaryFallback ? "the boundary query was refused, so the territory's BOUNDING BOX was swept: the list includes places outside the territory, near its edges" : void 0,
       partitions: osm.partitions
     });
     if (osm.mirrorsUsed.length) notes.push(`overpass: answered by ${osm.mirrorsUsed.join(", ")}`);

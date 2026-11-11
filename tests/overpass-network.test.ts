@@ -89,3 +89,35 @@ describe("fetchOsmPois with no network", () => {
     expect(result.reason).toMatch(/split budget/);
   });
 });
+
+describe("a boundary query refused for capacity", () => {
+  const territory = { ...box, osmType: "relation" as const, osmId: 62782 };
+  const BUSY = { ok: false, status: 504, body: "" };
+  const OK = { ok: true, status: 200, body: '{"elements":[{"type":"node","id":1,"lat":53.55,"lon":10,"tags":{"name":"Kontor","office":"company"}}]}' };
+
+  it("is retried once, and keeps the boundary when the second try is answered", async () => {
+    let call = 0;
+    respond = () => (++call <= MIRRORS.length ? BUSY : OK);
+    const result = await fetchOsmPois(territory, { mirrors: MIRRORS, areaRetryDelayMs: 0 });
+    expect(result.pois).toHaveLength(1);
+    expect(result.notes.some((n) => n.includes("retrying it once"))).toBe(true);
+    expect(result.notes.some((n) => n.includes("fell back"))).toBe(false);
+    expect(requested.every((u) => decodeURIComponent(u).includes("area("))).toBe(true);
+  });
+
+  it("falls back to the bounding box only after the retry is refused too", async () => {
+    let call = 0;
+    respond = () => (++call <= MIRRORS.length * 2 ? BUSY : OK);
+    const result = await fetchOsmPois(territory, { mirrors: MIRRORS, areaRetryDelayMs: 0 });
+    expect(result.notes.some((n) => n.includes("fell back"))).toBe(true);
+  });
+});
+
+describe("a sweep of the bounding box in place of the boundary", () => {
+  it("is flagged on the result, for the coverage table to say", async () => {
+    respond = (url) => (decodeURIComponent(url).includes("area(") ? { ok: false, status: 504, body: "" } : { ok: true, status: 200, body: '{"elements":[]}' });
+    const result = await fetchOsmPois({ ...box, osmType: "relation", osmId: 62782 }, { mirrors: MIRRORS, areaRetryDelayMs: 0 });
+    expect(result.boundaryFallback).toBe(true);
+    expect(result.incomplete).toBe(false);
+  });
+});

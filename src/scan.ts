@@ -323,7 +323,15 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
       requested: 0,
       returned: pois.length,
       truncated: osm.incomplete,
-      reason: osm.incomplete ? (osm.reason ?? "at least one Overpass tile could not be fetched after the split budget ran out") : undefined,
+      // The coverage table is what a reader reads first, so a sweep of the
+      // bounding box in place of the boundary is said HERE, not only in a note:
+      // it reported "complete" with an empty note over a list that was 45% outside
+      // the territory on a live Hamburg run.
+      reason: osm.incomplete
+        ? (osm.reason ?? "at least one Overpass tile could not be fetched after the split budget ran out")
+        : osm.boundaryFallback
+          ? "the boundary query was refused, so the territory's BOUNDING BOX was swept: the list includes places outside the territory, near its edges"
+          : undefined,
       partitions: osm.partitions,
     });
     if (osm.mirrorsUsed.length) notes.push(`overpass: answered by ${osm.mirrorsUsed.join(", ")}`);
