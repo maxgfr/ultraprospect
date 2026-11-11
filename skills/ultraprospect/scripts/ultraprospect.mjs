@@ -21482,14 +21482,20 @@ async function fetchBoard(board) {
 }
 async function fetchAllBoards(boards) {
   const out2 = [];
-  for (const board of boards) out2.push(...await fetchBoard(board));
-  const seen = /* @__PURE__ */ new Set();
-  return out2.filter((j) => {
-    const key = `${j.title}|${j.location ?? ""}`.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const seenUrls = /* @__PURE__ */ new Set();
+  const firstBoard = /* @__PURE__ */ new Map();
+  for (const [i, board] of boards.entries()) {
+    for (const j of await fetchBoard(board)) {
+      const titleKey = `${j.title}|${j.location ?? ""}`.toLowerCase();
+      const url = j.url?.trim();
+      const earlier = firstBoard.get(titleKey);
+      if (url ? seenUrls.has(url) || earlier !== void 0 && earlier !== i : earlier !== void 0) continue;
+      if (url) seenUrls.add(url);
+      if (earlier === void 0) firstBoard.set(titleKey, i);
+      out2.push(j);
+    }
+  }
+  return out2;
 }
 
 // src/people.ts

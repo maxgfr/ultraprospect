@@ -302,13 +302,28 @@ export async function fetchBoard(board: AtsBoard): Promise<JobPosting[]> {
 /** Read every board detected on a page. */
 export async function fetchAllBoards(boards: readonly AtsBoard[]): Promise<JobPosting[]> {
   const out: JobPosting[] = [];
-  for (const board of boards) out.push(...(await fetchBoard(board)));
-  // The same opening can appear on two boards during a migration.
-  const seen = new Set<string>();
-  return out.filter((j) => {
-    const key = `${j.title}|${j.location ?? ""}`.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const seenUrls = new Set<string>();
+  /** title|location -> the board that first advertised it. */
+  const firstBoard = new Map<string, number>();
+  for (const [i, board] of boards.entries()) {
+    for (const j of await fetchBoard(board)) {
+      // A posting's own URL is its identity (every board API here builds it
+      // from the posting id). Title and location are not: three openings for
+      // "Software Engineer, Hamburg" are three hires, and collapsing them on
+      // the title undercounted exactly the companies hiring hardest.
+      //
+      // Title and location still decide in two cases: a posting with no URL,
+      // which has nothing else to be told apart by; and the same opening on a
+      // SECOND board, which is how a migration between two ATS looks — the URLs
+      // differ because the boards do, not because the jobs do.
+      const titleKey = `${j.title}|${j.location ?? ""}`.toLowerCase();
+      const url = j.url?.trim();
+      const earlier = firstBoard.get(titleKey);
+      if (url ? seenUrls.has(url) || (earlier !== undefined && earlier !== i) : earlier !== undefined) continue;
+      if (url) seenUrls.add(url);
+      if (earlier === undefined) firstBoard.set(titleKey, i);
+      out.push(j);
+    }
+  }
+  return out;
 }

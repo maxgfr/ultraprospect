@@ -148,6 +148,36 @@ describe("fetchAllBoards", () => {
     };
     expect(await fetchAllBoards([{ provider: "greenhouse", token: "a", sourceUrl: "s" }])).toHaveLength(2);
   });
+
+  it("keeps three openings for one role when each has its own posting URL", async () => {
+    payloads["boards-api.greenhouse.io"] = {
+      jobs: [1, 2, 3].map((n) => ({ title: "Software Engineer", location: { name: "Hamburg" }, absolute_url: `https://boards.greenhouse.io/a/jobs/${n}` })),
+    };
+    expect(await fetchAllBoards([{ provider: "greenhouse", token: "a", sourceUrl: "s" }])).toHaveLength(3);
+  });
+
+  it("still folds the same posting URL, and same-titled postings that have no URL", async () => {
+    payloads["boards-api.greenhouse.io"] = {
+      jobs: [
+        { title: "Dev", location: { name: "Paris" }, absolute_url: "https://boards.greenhouse.io/a/jobs/1" },
+        { title: "Dev (renamed)", location: { name: "Paris" }, absolute_url: "https://boards.greenhouse.io/a/jobs/1" },
+        { title: "Ops", location: { name: "Paris" } },
+        { title: "Ops", location: { name: "Paris" } },
+      ],
+    };
+    const jobs = await fetchAllBoards([{ provider: "greenhouse", token: "a", sourceUrl: "s" }]);
+    expect(jobs.map((j) => j.title)).toEqual(["Dev", "Ops"]);
+  });
+
+  it("folds a migration even when both boards give the posting a URL", async () => {
+    payloads["boards-api.greenhouse.io"] = { jobs: [{ title: "Dev", location: { name: "Paris" }, absolute_url: "https://boards.greenhouse.io/a/jobs/1" }] };
+    payloads["api.lever.co"] = [{ text: "Dev", categories: { location: "Paris" }, hostedUrl: "https://jobs.lever.co/a/xyz" }];
+    const jobs = await fetchAllBoards([
+      { provider: "greenhouse", token: "a", sourceUrl: "s" },
+      { provider: "lever", token: "a", sourceUrl: "s" },
+    ]);
+    expect(jobs).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
