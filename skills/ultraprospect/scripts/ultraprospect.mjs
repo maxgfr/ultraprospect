@@ -11757,6 +11757,24 @@ function brandEngine() {
   });
 }
 
+// src/markdown.ts
+function mdInline(value) {
+  return String(value ?? "").replace(/\s*[\r\n]+\s*/g, " ").trim().replace(/[\\`*_[\]<>|]/g, "\\$&").replace(/^([#>+=-])/, "\\$1").replace(/^(\d+)([.)])/, "$1\\$2");
+}
+function mdLink(text3, url) {
+  const label = mdInline(text3);
+  if (!url) return label;
+  let href;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return label;
+    href = u.href.replace(/</g, "%3C").replace(/>/g, "%3E");
+  } catch {
+    return label;
+  }
+  return `[${label}](<${href}>)`;
+}
+
 // src/run.ts
 import { existsSync as existsSync8, mkdirSync as mkdirSync5, readFileSync as readFileSync10, readdirSync as readdirSync6 } from "fs";
 import { join as join6, resolve } from "path";
@@ -16563,7 +16581,8 @@ function section(title, lines) {
 }
 function buildDelta(delta, before, after) {
   const l = [];
-  l.push(`# What changed \u2014 ${shortLabel(after.slug)}`);
+  const md = mdInline;
+  l.push(`# What changed \u2014 ${md(shortLabel(after.slug))}`);
   l.push("");
   l.push(`Comparing the run of ${before.builtAt.slice(0, 10)} with the one of ${after.builtAt.slice(0, 10)}.`);
   l.push("");
@@ -16580,55 +16599,55 @@ function buildDelta(delta, before, after) {
   l.push(
     ...section(
       "Started hiring",
-      delta.startedHiring.map((x) => `- **${x.place.name}** \u2014 ${x.roles} open role(s)${x.place.website ? ` \xB7 ${x.place.website.url}` : ""}`)
+      delta.startedHiring.map((x) => `- **${md(x.place.name)}** \u2014 ${x.roles} open role(s)${x.place.website ? ` \xB7 ${md(x.place.website.url)}` : ""}`)
     )
   );
   l.push(
     ...section(
       "New roles at companies already hiring",
-      delta.newRoles.map((x) => `- **${x.place.name}** \u2014 ${x.titles.slice(0, 6).join(", ")}`)
+      delta.newRoles.map((x) => `- **${md(x.place.name)}** \u2014 ${x.titles.slice(0, 6).map(md).join(", ")}`)
     )
   );
   l.push(
     ...section(
       "New to the territory",
-      delta.appeared.map((p) => `- **${p.name}**${p.address.commune ? ` \u2014 ${p.address.commune}` : ""}`)
+      delta.appeared.map((p) => `- **${md(p.name)}**${p.address.commune ? ` \u2014 ${md(p.address.commune)}` : ""}`)
     )
   );
   l.push(
     ...section(
       "Now marked ceased by the register",
-      delta.closed.map((p) => `- **${p.name}** \u2014 ${p.registry?.connectorId ?? "register"} ${p.registry?.establishmentId ?? p.registry?.id ?? "?"}`)
+      delta.closed.map((p) => `- **${md(p.name)}** \u2014 ${md(p.registry?.connectorId ?? "register")} ${md(p.registry?.establishmentId ?? p.registry?.id ?? "?")}`)
     )
   );
   l.push(
     ...section(
       "Gone from the sweep",
-      delta.disappeared.map((p) => `- ${p.name}`)
+      delta.disappeared.map((p) => `- ${md(p.name)}`)
     )
   );
   l.push(
     ...section(
       "Now has a website",
-      delta.gotWebsite.map((p) => `- **${p.name}** \u2014 ${p.website?.url}`)
+      delta.gotWebsite.map((p) => `- **${md(p.name)}** \u2014 ${md(p.website?.url)}`)
     )
   );
   l.push(
     ...section(
       "Moved their website",
-      delta.siteChanged.map((x) => `- **${x.place.name}** \u2014 ${x.before} \u2192 ${x.after}`)
+      delta.siteChanged.map((x) => `- **${md(x.place.name)}** \u2014 ${md(x.before)} \u2192 ${md(x.after)}`)
     )
   );
   l.push(
     ...section(
       "Stopped hiring",
-      delta.stoppedHiring.map((p) => `- ${p.name}`)
+      delta.stoppedHiring.map((p) => `- ${md(p.name)}`)
     )
   );
   l.push(
     ...section(
       "Site went unreachable",
-      delta.wentDark.map((p) => `- ${p.name} \u2014 ${p.website?.url ?? ""}`)
+      delta.wentDark.map((p) => `- ${md(p.name)} \u2014 ${md(p.website?.url)}`)
     )
   );
   l.push("---");
@@ -23925,9 +23944,7 @@ ${s.notes.lines.length ? `<details><summary>Run notes (${s.notes.distinct === s.
 }
 
 // src/report.ts
-function mdCell(value) {
-  return String(value ?? "").replace(/\|/g, "\\|").replace(/\s*[\r\n]+\s*/g, " ").trim();
-}
+var mdCell = mdInline;
 var row = (cells) => `| ${cells.map(mdCell).join(" | ")} |`;
 function truncationBanner(manifest) {
   if (!manifest.truncated) return [];
@@ -23935,7 +23952,7 @@ function truncationBanner(manifest) {
   return [
     "> \u26A0 **This run does not cover the whole territory.**",
     ">",
-    ...lanes.map((l) => `> - **${l.lane}**: ${l.reason ?? "capped"} (${l.returned} returned)`),
+    ...lanes.map((l) => `> - **${l.lane}**: ${mdInline(l.reason ?? "capped")} (${l.returned} returned)`),
     ">",
     "> Treat every count below as a floor, not a total.",
     ""
@@ -24099,25 +24116,25 @@ function judgedSection(places, s) {
   if (!judged.length) return [];
   const l = [`## Judged (${judged.length} of ${s.total})`, ""];
   if (s.fit.byVerdict.length) {
-    l.push(s.fit.byVerdict.map(([verdict, n]) => `${n} ${verdict}`).join(" \xB7 "));
+    l.push(s.fit.byVerdict.map(([verdict, n]) => `${n} ${mdInline(verdict)}`).join(" \xB7 "));
     l.push("");
   }
   for (const [i, p] of judged.slice(0, SECTION_CAP).entries()) {
-    l.push(`### ${i + 1}. ${p.name} \u2014 ${p.score.fit} \xB7 ${p.score.total}`);
+    l.push(`### ${i + 1}. ${mdInline(p.name)} \u2014 ${mdInline(p.score.fit)} \xB7 ${p.score.total}`);
     l.push("");
-    const where = [streetLine(p.address), p.address.codePostal, p.address.commune].filter(Boolean).join(", ");
-    const contact = [p.contacts.emails[0], p.contacts.phones[0]].filter(Boolean).map((c) => `${c.value} [${c.from}]`);
-    const line = [where, p.website?.url, ...contact].filter(Boolean).join(" \xB7 ");
+    const where = mdInline([streetLine(p.address), p.address.codePostal, p.address.commune].filter(Boolean).join(", "));
+    const contact = [p.contacts.emails[0], p.contacts.phones[0]].filter(Boolean).map((c) => `${mdInline(c.value)} [${mdInline(c.from)}]`);
+    const line = [where, mdInline(p.website?.url), ...contact].filter(Boolean).join(" \xB7 ");
     if (line) {
       l.push(line);
       l.push("");
     }
     if (p.score.why) {
-      l.push(`**Why.** ${p.score.why}`);
+      l.push(`**Why.** ${mdInline(p.score.why)}`);
       l.push("");
     }
     if (p.score.angle) {
-      l.push(`**Angle.** ${p.score.angle}`);
+      l.push(`**Angle.** ${mdInline(p.score.angle)}`);
       l.push("");
     }
   }
@@ -24155,7 +24172,7 @@ function notesSection(s) {
   if (!s.notes.lines.length) return [];
   const header2 = s.notes.distinct === s.notes.emitted ? `## Run notes (${s.notes.emitted})` : `## Run notes (${s.notes.distinct} distinct of ${s.notes.emitted})`;
   const l = [header2, ""];
-  for (const n of s.notes.lines) l.push(`- ${n.count > 1 ? `\xD7${n.count} ` : ""}${n.text}`);
+  for (const n of s.notes.lines) l.push(`- ${n.count > 1 ? `\xD7${n.count} ` : ""}${mdInline(n.text)}`);
   const rest = s.notes.distinct - s.notes.lines.length;
   if (rest > 0) l.push(`- \u2026and ${rest} more distinct notes, in \`manifest.json\``);
   l.push("");
@@ -24164,10 +24181,10 @@ function notesSection(s) {
 function buildReport(places, manifest, opts = {}) {
   const s = summarise(places, manifest);
   const l = [];
-  l.push(`# ${shortLabel(manifest.target.label || manifest.slug)}`);
+  l.push(`# ${mdInline(shortLabel(manifest.target.label || manifest.slug))}`);
   l.push("");
   l.push(...truncationBanner(manifest));
-  l.push(`${manifest.target.label}`);
+  l.push(mdInline(manifest.target.label));
   l.push("");
   l.push(coverage(manifest).sentence);
   l.push("");
@@ -24406,26 +24423,28 @@ function analyseAwards(tenders, opts = {}) {
 var fmt = (n) => Math.round(n).toLocaleString("en-US").replace(/,/g, " ");
 function awardsMarkdown(a, opts) {
   const top = opts.top ?? 20;
-  const lines = [`# Awards \u2014 ${opts.title}`, ""];
+  const lines = [`# Awards \u2014 ${mdInline(opts.title)}`, ""];
   if (opts.truncated)
     lines.push(
       "> \u26A0 **This analysis is TRUNCATED**: at least one source stopped before the end of its answer. Rankings below are over what was read, not over the market.",
       ""
     );
-  if (opts.gaps.length) lines.push(`> Coverage: ${opts.gaps.join("; ")}.`, "");
+  if (opts.gaps.length) lines.push(`> Coverage: ${mdInline(opts.gaps.join("; "))}.`, "");
   lines.push(`${a.rows.length} award row(s) from ${new Set(a.rows.map((r) => r.tenderId)).size} notice(s).`, "");
   lines.push("## Who wins", "", "| Supplier | Identifier | Notices won | Total awarded | Buyers | Last win |", "|---|---|---:|---:|---:|---|");
   for (const s of a.suppliers.slice(0, top)) {
     lines.push(
-      `| ${s.name} | ${s.legalId ?? "name only \u2014 confirm before use"} | ${s.wins} | ${s.total ? `${fmt(s.total)} ${s.currency ?? ""}` : "\u2014"} | ${s.buyers.length} | ${s.lastWin ?? "\u2014"} |`
+      `| ${mdInline(s.name)} | ${mdInline(s.legalId ?? "name only \u2014 confirm before use")} | ${s.wins} | ${s.total ? mdInline(`${fmt(s.total)} ${s.currency ?? ""}`) : "\u2014"} | ${s.buyers.length} | ${mdInline(s.lastWin ?? "\u2014")} |`
     );
   }
   lines.push("", "## Who buys", "", "| Buyer | Awards | Total awarded | Distinct suppliers | Last award |", "|---|---:|---:|---:|---|");
   for (const b of a.buyers.slice(0, top))
-    lines.push(`| ${b.name} | ${b.awards} | ${b.total ? `${fmt(b.total)} ${b.currency ?? ""}` : "\u2014"} | ${b.suppliers.length} | ${b.lastAward ?? "\u2014"} |`);
+    lines.push(
+      `| ${mdInline(b.name)} | ${b.awards} | ${b.total ? mdInline(`${fmt(b.total)} ${b.currency ?? ""}`) : "\u2014"} | ${b.suppliers.length} | ${mdInline(b.lastAward ?? "\u2014")} |`
+    );
   if (Object.keys(a.medians).length) {
     lines.push("", "## Contract values", "");
-    for (const [c, m] of Object.entries(a.medians)) lines.push(`- median ${fmt(m.median)} ${c}, over ${m.n} notice(s) that publish a value`);
+    for (const [c, m] of Object.entries(a.medians)) lines.push(`- median ${fmt(m.median)} ${mdInline(c)}, over ${m.n} notice(s) that publish a value`);
   }
   lines.push("", `## Coming back to market \u2014 ${FORECAST_LABEL}`, "");
   lines.push(
@@ -24437,14 +24456,14 @@ function awardsMarkdown(a, opts) {
     lines.push("| Window (estimated) | Buyer | Contract | Incumbent | Ends | Notice |", "|---|---|---|---|---|---|");
     for (const r of a.upcoming.slice(0, top * 2)) {
       lines.push(
-        `| ${r.retenderWindow.from} \u2192 ${r.retenderWindow.to} | ${r.buyer} | ${r.title.slice(0, 80)} | ${r.supplier} | ${r.endsAt} | ${r.sourceUrl ? `[${r.tenderId}](${r.sourceUrl})` : r.tenderId} |`
+        `| ${r.retenderWindow.from} \u2192 ${r.retenderWindow.to} | ${mdInline(r.buyer)} | ${mdInline(r.title.slice(0, 80))} | ${mdInline(r.supplier)} | ${mdInline(r.endsAt)} | ${mdLink(r.tenderId, r.sourceUrl)} |`
       );
     }
   }
   lines.push("", `${a.withoutDuration} award row(s) publish no duration: no window was drawn for them, and none is guessed.`);
   if (a.lookalikes.length) {
     lines.push("", "## Names to confirm", "", "These suppliers appear by name only and look like an identified one. They were NOT merged:", "");
-    for (const l of a.lookalikes.slice(0, 30)) lines.push(`- "${l.a}" \u2194 ${l.b} (${Math.round(l.score * 100)}% alike)`);
+    for (const l of a.lookalikes.slice(0, 30)) lines.push(`- "${mdInline(l.a)}" \u2194 ${mdInline(l.b)} (${Math.round(l.score * 100)}% alike)`);
   }
   return lines.join("\n") + "\n";
 }
@@ -25638,17 +25657,17 @@ function coverageSentence(m) {
   return `${parts.join(". ")}.`;
 }
 function tendersReport(tenders, m) {
-  const lines = [`# Tenders \u2014 ${m.slug}`, ""];
+  const lines = [`# Tenders \u2014 ${mdInline(m.slug)}`, ""];
   if (m.truncated)
     lines.push(
       "> \u26A0 **This run is TRUNCATED.** At least one source stopped before the end of its answer; the lists below are what was read, not the market.",
       ""
     );
-  lines.push(coverageSentence(m), "");
+  lines.push(mdInline(coverageSentence(m)), "");
   lines.push("## Coverage", "", "| Source | Coverage | Kinds | Returned | Of | Partial | Why |", "|---|---|---|---:|---:|---|---|");
   for (const l of m.lanes) {
     lines.push(
-      `| ${l.connectorId} | ${COVERAGE_WORDS[l.coverage ?? ""] ?? l.coverage ?? ""} | ${(l.kinds ?? []).join(", ")} | ${l.returned} | ${l.total ?? "?"} | ${l.truncated ? "yes" : "no"} | ${l.reason ?? ""} |`
+      `| ${mdInline(l.connectorId)} | ${mdInline(COVERAGE_WORDS[l.coverage ?? ""] ?? l.coverage ?? "")} | ${mdInline((l.kinds ?? []).join(", "))} | ${l.returned} | ${l.total ?? "?"} | ${l.truncated ? "yes" : "no"} | ${mdInline(l.reason ?? "")} |`
     );
   }
   const ranked2 = rankTenders(tenders);
@@ -25662,7 +25681,7 @@ function tendersReport(tenders, m) {
   );
   for (const t of open3.slice(0, 200)) {
     lines.push(
-      `| ${t.verdict?.decision ?? "\u2014"} | ${t.verdict?.fit ?? "\u2014"} | ${t.deadline ?? "unknown \u2014 open it"} | ${t.country} | ${t.buyer.name || "?"} | ${t.sourceUrl ? `[${t.title.slice(0, 90)}](${t.sourceUrl})` : t.title.slice(0, 90)} | ${t.value ? `${Math.round(t.value.amount)} ${t.value.currency}${t.value.estimated ? " (est.)" : ""}` : "\u2014"} | ${t.connectorId} |`
+      `| ${mdInline(t.verdict?.decision ?? "\u2014")} | ${mdInline(t.verdict?.fit ?? "\u2014")} | ${mdInline(t.deadline ?? "unknown \u2014 open it")} | ${mdInline(t.country)} | ${mdInline(t.buyer.name || "?")} | ${mdLink(t.title.slice(0, 90), t.sourceUrl)} | ${t.value ? mdInline(`${Math.round(t.value.amount)} ${t.value.currency}${t.value.estimated ? " (est.)" : ""}`) : "\u2014"} | ${mdInline(t.connectorId)} |`
     );
   }
   const go = ranked2.filter((t) => t.verdict?.decision === "go");
@@ -25670,12 +25689,12 @@ function tendersReport(tenders, m) {
     lines.push("", "## Judged go", "");
     for (const t of go)
       lines.push(
-        `- **${t.title}** \u2014 ${t.buyer.name}, deadline ${t.deadline ?? "?"}: ${t.verdict.why}${t.verdict.blockers?.length ? ` Blockers: ${t.verdict.blockers.join("; ")}.` : ""}`
+        `- **${mdInline(t.title)}** \u2014 ${mdInline(t.buyer.name)}, deadline ${mdInline(t.deadline ?? "?")}: ${mdInline(t.verdict.why)}${t.verdict.blockers?.length ? ` Blockers: ${mdInline(t.verdict.blockers.join("; "))}.` : ""}`
       );
   }
   const awards = ranked2.filter((t) => t.kind === "award").length;
   if (awards) lines.push("", `${awards} award notice(s) are in this run \u2014 \`ultraprospect awards --run <dir>\` analyses them.`);
-  if (m.notes.length) lines.push("", "## Notes", "", ...m.notes.map((n) => `- ${n}`));
+  if (m.notes.length) lines.push("", "## Notes", "", ...m.notes.map((n) => `- ${mdInline(n)}`));
   lines.push("", "## Sources", "", ...m.licences.map((l) => `- ${l}`));
   return lines.join("\n") + "\n";
 }
@@ -25948,12 +25967,12 @@ function diffTenderRuns(before, after, opts = {}) {
   return delta;
 }
 function tenderDeltaMarkdown(d, before, after) {
-  const line = (t) => `- ${t.deadline ? `**${t.deadline}** \xB7 ` : ""}${t.title} \u2014 ${t.buyer.name || "?"} (${t.connectorId})${t.sourceUrl ? ` ${t.sourceUrl}` : ""}`;
-  const out2 = [`# Tenders watch \u2014 ${after.slug}`, "", `Between ${before.builtAt} and ${after.builtAt}.`, ""];
+  const line = (t) => `- ${t.deadline ? `**${mdInline(t.deadline)}** \xB7 ` : ""}${mdInline(t.title)} \u2014 ${mdInline(t.buyer.name || "?")} (${mdInline(t.connectorId)})${t.sourceUrl ? ` ${mdInline(t.sourceUrl)}` : ""}`;
+  const out2 = [`# Tenders watch \u2014 ${mdInline(after.slug)}`, "", `Between ${before.builtAt} and ${after.builtAt}.`, ""];
   if (before.truncated || after.truncated) out2.push("> \u26A0 One of the two runs is TRUNCATED: a notice missing from it may simply not have been read.", "");
   out2.push(`## New (${d.appeared.length})`, "", ...d.appeared.map(line), "");
   out2.push(`## Closing within two weeks (${d.closingSoon.length})`, "", ...d.closingSoon.map(line), "");
-  out2.push(`## Changed (${d.changed.length})`, "", ...d.changed.map((c) => `${line(c.after)} \u2014 ${c.what.join("; ")}`), "");
+  out2.push(`## Changed (${d.changed.length})`, "", ...d.changed.map((c) => `${line(c.after)} \u2014 ${mdInline(c.what.join("; "))}`), "");
   out2.push(
     `## Not returned this time (${d.notReturned.length})`,
     "",
@@ -26237,7 +26256,7 @@ async function runAwards(input) {
   if (identities.length) {
     md += "\n## Winners, confirmed against the register\n\n| Supplier | Identifier | Register | Legal name | Status | Activity | Size (register's own code or count) |\n|---|---|---|---|---|---|---|\n";
     for (const i of identities) {
-      md += `| ${i.supplier} | ${i.legalId} | ${i.connectorId ?? "\u2014"} | ${i.legalName ? i.sourceUrl ? `[${i.legalName}](${i.sourceUrl})` : i.legalName : i.refused ?? "\u2014"} | ${i.status ?? "\u2014"} | ${i.activity ?? "\u2014"} | ${i.employees ?? "\u2014"} |
+      md += `| ${mdInline(i.supplier)} | ${mdInline(i.legalId)} | ${mdInline(i.connectorId ?? "\u2014")} | ${i.legalName ? mdLink(i.legalName, i.sourceUrl) : mdInline(i.refused ?? "\u2014")} | ${mdInline(i.status ?? "\u2014")} | ${mdInline(i.activity ?? "\u2014")} | ${mdInline(i.employees ?? "\u2014")} |
 `;
     }
   }

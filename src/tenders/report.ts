@@ -4,6 +4,7 @@
 // run: which sources answered, which were partial, and which countries this run
 // could only see above the EU thresholds or not at all. There is no code path
 // that writes "all tenders in X".
+import { mdInline as md, mdLink } from "../markdown.js";
 import { csvRow } from "../util.js";
 import { tenderConnectorById } from "./index.js";
 import type { TenderManifest } from "./run.js";
@@ -80,17 +81,20 @@ export function coverageSentence(m: TenderManifest): string {
 }
 
 export function tendersReport(tenders: readonly Tender[], m: TenderManifest): string {
-  const lines: string[] = [`# Tenders — ${m.slug}`, ""];
+  // Titles, buyers, verdicts, deadlines and upstream reasons are text from
+  // outside: every one goes through the escaper (markdown.ts), in a cell, a
+  // bullet or a heading alike.
+  const lines: string[] = [`# Tenders — ${md(m.slug)}`, ""];
   if (m.truncated)
     lines.push(
       "> ⚠ **This run is TRUNCATED.** At least one source stopped before the end of its answer; the lists below are what was read, not the market.",
       "",
     );
-  lines.push(coverageSentence(m), "");
+  lines.push(md(coverageSentence(m)), "");
   lines.push("## Coverage", "", "| Source | Coverage | Kinds | Returned | Of | Partial | Why |", "|---|---|---|---:|---:|---|---|");
   for (const l of m.lanes as TenderLane[]) {
     lines.push(
-      `| ${l.connectorId} | ${COVERAGE_WORDS[l.coverage ?? ""] ?? l.coverage ?? ""} | ${(l.kinds ?? []).join(", ")} | ${l.returned} | ${l.total ?? "?"} | ${l.truncated ? "yes" : "no"} | ${l.reason ?? ""} |`,
+      `| ${md(l.connectorId)} | ${md(COVERAGE_WORDS[l.coverage ?? ""] ?? l.coverage ?? "")} | ${md((l.kinds ?? []).join(", "))} | ${l.returned} | ${l.total ?? "?"} | ${l.truncated ? "yes" : "no"} | ${md(l.reason ?? "")} |`,
     );
   }
   const ranked = rankTenders(tenders);
@@ -104,7 +108,7 @@ export function tendersReport(tenders: readonly Tender[], m: TenderManifest): st
   );
   for (const t of open.slice(0, 200)) {
     lines.push(
-      `| ${t.verdict?.decision ?? "—"} | ${t.verdict?.fit ?? "—"} | ${t.deadline ?? "unknown — open it"} | ${t.country} | ${t.buyer.name || "?"} | ${t.sourceUrl ? `[${t.title.slice(0, 90)}](${t.sourceUrl})` : t.title.slice(0, 90)} | ${t.value ? `${Math.round(t.value.amount)} ${t.value.currency}${t.value.estimated ? " (est.)" : ""}` : "—"} | ${t.connectorId} |`,
+      `| ${md(t.verdict?.decision ?? "—")} | ${md(t.verdict?.fit ?? "—")} | ${md(t.deadline ?? "unknown — open it")} | ${md(t.country)} | ${md(t.buyer.name || "?")} | ${mdLink(t.title.slice(0, 90), t.sourceUrl)} | ${t.value ? md(`${Math.round(t.value.amount)} ${t.value.currency}${t.value.estimated ? " (est.)" : ""}`) : "—"} | ${md(t.connectorId)} |`,
     );
   }
   const go = ranked.filter((t) => t.verdict?.decision === "go");
@@ -112,12 +116,12 @@ export function tendersReport(tenders: readonly Tender[], m: TenderManifest): st
     lines.push("", "## Judged go", "");
     for (const t of go)
       lines.push(
-        `- **${t.title}** — ${t.buyer.name}, deadline ${t.deadline ?? "?"}: ${t.verdict!.why}${t.verdict!.blockers?.length ? ` Blockers: ${t.verdict!.blockers.join("; ")}.` : ""}`,
+        `- **${md(t.title)}** — ${md(t.buyer.name)}, deadline ${md(t.deadline ?? "?")}: ${md(t.verdict!.why)}${t.verdict!.blockers?.length ? ` Blockers: ${md(t.verdict!.blockers.join("; "))}.` : ""}`,
       );
   }
   const awards = ranked.filter((t) => t.kind === "award").length;
   if (awards) lines.push("", `${awards} award notice(s) are in this run — \`ultraprospect awards --run <dir>\` analyses them.`);
-  if (m.notes.length) lines.push("", "## Notes", "", ...m.notes.map((n) => `- ${n}`));
+  if (m.notes.length) lines.push("", "## Notes", "", ...m.notes.map((n) => `- ${md(n)}`));
   lines.push("", "## Sources", "", ...m.licences.map((l) => `- ${l}`));
   return lines.join("\n") + "\n";
 }

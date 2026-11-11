@@ -7,6 +7,7 @@
 // TED's "722908-2026" and Find a Tender's "103248-2026" share a shape and name
 // different notices (see dedupe.ts), and keying on them let a new Find a
 // Tender notice match last run's TED notice and be reported "changed".
+import { mdInline as md } from "../markdown.js";
 import { procedureUuids } from "./dedupe.js";
 import type { TenderManifest } from "./run.js";
 import type { Tender } from "./types.js";
@@ -57,12 +58,12 @@ export function diffTenderRuns(before: readonly Tender[], after: readonly Tender
 
 export function tenderDeltaMarkdown(d: TenderDelta, before: TenderManifest, after: TenderManifest): string {
   const line = (t: Tender) =>
-    `- ${t.deadline ? `**${t.deadline}** · ` : ""}${t.title} — ${t.buyer.name || "?"} (${t.connectorId})${t.sourceUrl ? ` ${t.sourceUrl}` : ""}`;
-  const out = [`# Tenders watch — ${after.slug}`, "", `Between ${before.builtAt} and ${after.builtAt}.`, ""];
+    `- ${t.deadline ? `**${md(t.deadline)}** · ` : ""}${md(t.title)} — ${md(t.buyer.name || "?")} (${md(t.connectorId)})${t.sourceUrl ? ` ${md(t.sourceUrl)}` : ""}`;
+  const out = [`# Tenders watch — ${md(after.slug)}`, "", `Between ${before.builtAt} and ${after.builtAt}.`, ""];
   if (before.truncated || after.truncated) out.push("> ⚠ One of the two runs is TRUNCATED: a notice missing from it may simply not have been read.", "");
   out.push(`## New (${d.appeared.length})`, "", ...d.appeared.map(line), "");
   out.push(`## Closing within two weeks (${d.closingSoon.length})`, "", ...d.closingSoon.map(line), "");
-  out.push(`## Changed (${d.changed.length})`, "", ...d.changed.map((c) => `${line(c.after)} — ${c.what.join("; ")}`), "");
+  out.push(`## Changed (${d.changed.length})`, "", ...d.changed.map((c) => `${line(c.after)} — ${md(c.what.join("; "))}`), "");
   out.push(
     `## Not returned this time (${d.notReturned.length})`,
     "",

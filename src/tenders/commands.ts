@@ -6,6 +6,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { isNoWrite, readJsonSafe, writeArtifact } from "../engine.js";
+import { mdInline as mdc, mdLink } from "../markdown.js";
 import { newPageStore } from "../pages.js";
 import { connectorsFor } from "../registry/index.js";
 import type { LegalId, RegistryRecord } from "../registry/types.js";
@@ -396,7 +397,7 @@ export async function runAwards(input: AwardsInput): Promise<{ runDir: string; a
     md +=
       "\n## Winners, confirmed against the register\n\n| Supplier | Identifier | Register | Legal name | Status | Activity | Size (register's own code or count) |\n|---|---|---|---|---|---|---|\n";
     for (const i of identities) {
-      md += `| ${i.supplier} | ${i.legalId} | ${i.connectorId ?? "—"} | ${i.legalName ? (i.sourceUrl ? `[${i.legalName}](${i.sourceUrl})` : i.legalName) : (i.refused ?? "—")} | ${i.status ?? "—"} | ${i.activity ?? "—"} | ${i.employees ?? "—"} |\n`;
+      md += `| ${mdc(i.supplier)} | ${mdc(i.legalId)} | ${mdc(i.connectorId ?? "—")} | ${i.legalName ? mdLink(i.legalName, i.sourceUrl) : mdc(i.refused ?? "—")} | ${mdc(i.status ?? "—")} | ${mdc(i.activity ?? "—")} | ${mdc(i.employees ?? "—")} |\n`;
     }
   }
   const path = join(runDir, "AWARDS.md");

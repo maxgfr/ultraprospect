@@ -15,6 +15,7 @@
 // place here, and where it knows nothing the cell stays empty rather than
 // filling with a zero.
 import type { RowSelection } from "./csv.js";
+import { mdInline } from "./markdown.js";
 import { ranked } from "./score.js";
 import { coverage, summarise, type RunSummary } from "./summary.js";
 import type { Place, RunManifest } from "./types.js";
@@ -27,14 +28,10 @@ import { shortLabel, streetLine } from "./util.js";
  * every value in this document is upstream text nobody controls. The Hamburg
  * run shipped `| 5 | Schäfer | Group | 56 | strong |` — a real company, a real
  * report, a table that reads a score of "strong" and a fit of "?" from then on.
- * Newlines do the same thing one row at a time.
+ * Newlines do the same thing one row at a time. The same escaper serves the
+ * headings and bullets below: see markdown.ts.
  */
-export function mdCell(value: unknown): string {
-  return String(value ?? "")
-    .replace(/\|/g, "\\|")
-    .replace(/\s*[\r\n]+\s*/g, " ")
-    .trim();
-}
+export const mdCell = mdInline;
 
 const row = (cells: readonly unknown[]): string => `| ${cells.map(mdCell).join(" | ")} |`;
 
@@ -44,7 +41,7 @@ function truncationBanner(manifest: RunManifest): string[] {
   return [
     "> ⚠ **This run does not cover the whole territory.**",
     ">",
-    ...lanes.map((l) => `> - **${l.lane}**: ${l.reason ?? "capped"} (${l.returned} returned)`),
+    ...lanes.map((l) => `> - **${l.lane}**: ${mdInline(l.reason ?? "capped")} (${l.returned} returned)`),
     ">",
     "> Treat every count below as a floor, not a total.",
     "",
@@ -277,25 +274,25 @@ function judgedSection(places: readonly Place[], s: RunSummary): string[] {
 
   const l: string[] = [`## Judged (${judged.length} of ${s.total})`, ""];
   if (s.fit.byVerdict.length) {
-    l.push(s.fit.byVerdict.map(([verdict, n]) => `${n} ${verdict}`).join(" · "));
+    l.push(s.fit.byVerdict.map(([verdict, n]) => `${n} ${mdInline(verdict)}`).join(" · "));
     l.push("");
   }
   for (const [i, p] of judged.slice(0, SECTION_CAP).entries()) {
-    l.push(`### ${i + 1}. ${p.name} — ${p.score!.fit} · ${p.score!.total}`);
+    l.push(`### ${i + 1}. ${mdInline(p.name)} — ${mdInline(p.score!.fit)} · ${p.score!.total}`);
     l.push("");
-    const where = [streetLine(p.address), p.address.codePostal, p.address.commune].filter(Boolean).join(", ");
-    const contact = [p.contacts.emails[0], p.contacts.phones[0]].filter(Boolean).map((c) => `${c!.value} [${c!.from}]`);
-    const line = [where, p.website?.url, ...contact].filter(Boolean).join(" · ");
+    const where = mdInline([streetLine(p.address), p.address.codePostal, p.address.commune].filter(Boolean).join(", "));
+    const contact = [p.contacts.emails[0], p.contacts.phones[0]].filter(Boolean).map((c) => `${mdInline(c!.value)} [${mdInline(c!.from)}]`);
+    const line = [where, mdInline(p.website?.url), ...contact].filter(Boolean).join(" · ");
     if (line) {
       l.push(line);
       l.push("");
     }
     if (p.score!.why) {
-      l.push(`**Why.** ${p.score!.why}`);
+      l.push(`**Why.** ${mdInline(p.score!.why)}`);
       l.push("");
     }
     if (p.score!.angle) {
-      l.push(`**Angle.** ${p.score!.angle}`);
+      l.push(`**Angle.** ${mdInline(p.score!.angle)}`);
       l.push("");
     }
   }
@@ -346,7 +343,7 @@ function notesSection(s: RunSummary): string[] {
   // The count is the finding. Forty identical VIES lines say something about the
   // German register that one line does not, and printing them forty times says
   // it in the way that pushes every lane summary off the page.
-  for (const n of s.notes.lines) l.push(`- ${n.count > 1 ? `×${n.count} ` : ""}${n.text}`);
+  for (const n of s.notes.lines) l.push(`- ${n.count > 1 ? `×${n.count} ` : ""}${mdInline(n.text)}`);
   const rest = s.notes.distinct - s.notes.lines.length;
   if (rest > 0) l.push(`- …and ${rest} more distinct notes, in \`manifest.json\``);
   l.push("");
@@ -357,10 +354,10 @@ export function buildReport(places: readonly Place[], manifest: RunManifest, opt
   const s = summarise(places, manifest);
   const l: string[] = [];
 
-  l.push(`# ${shortLabel(manifest.target.label || manifest.slug)}`);
+  l.push(`# ${mdInline(shortLabel(manifest.target.label || manifest.slug))}`);
   l.push("");
   l.push(...truncationBanner(manifest));
-  l.push(`${manifest.target.label}`);
+  l.push(mdInline(manifest.target.label));
   l.push("");
   l.push(coverage(manifest).sentence);
   l.push("");

@@ -10,6 +10,7 @@
 // would conflate two questions — what is different, and what is reachable
 // today — and an upstream having a bad afternoon would show up as a town full
 // of closures.
+import { mdInline } from "./markdown.js";
 import { shortLabel } from "./run.js";
 import type { Place, RunManifest } from "./types.js";
 
@@ -120,7 +121,9 @@ function section(title: string, lines: readonly string[]): string[] {
 
 export function buildDelta(delta: Delta, before: RunManifest, after: RunManifest): string {
   const l: string[] = [];
-  l.push(`# What changed — ${shortLabel(after.slug)}`);
+  // Every name, title and URL below is upstream text: see markdown.ts.
+  const md = mdInline;
+  l.push(`# What changed — ${md(shortLabel(after.slug))}`);
   l.push("");
   // "the sweep" was wrong on every run outside France, where the register half
   // was confirmed company by company rather than enumerated. "run" is true in
@@ -152,55 +155,55 @@ export function buildDelta(delta: Delta, before: RunManifest, after: RunManifest
   l.push(
     ...section(
       "Started hiring",
-      delta.startedHiring.map((x) => `- **${x.place.name}** — ${x.roles} open role(s)${x.place.website ? ` · ${x.place.website.url}` : ""}`),
+      delta.startedHiring.map((x) => `- **${md(x.place.name)}** — ${x.roles} open role(s)${x.place.website ? ` · ${md(x.place.website.url)}` : ""}`),
     ),
   );
   l.push(
     ...section(
       "New roles at companies already hiring",
-      delta.newRoles.map((x) => `- **${x.place.name}** — ${x.titles.slice(0, 6).join(", ")}`),
+      delta.newRoles.map((x) => `- **${md(x.place.name)}** — ${x.titles.slice(0, 6).map(md).join(", ")}`),
     ),
   );
   l.push(
     ...section(
       "New to the territory",
-      delta.appeared.map((p) => `- **${p.name}**${p.address.commune ? ` — ${p.address.commune}` : ""}`),
+      delta.appeared.map((p) => `- **${md(p.name)}**${p.address.commune ? ` — ${md(p.address.commune)}` : ""}`),
     ),
   );
   l.push(
     ...section(
       "Now marked ceased by the register",
-      delta.closed.map((p) => `- **${p.name}** — ${p.registry?.connectorId ?? "register"} ${p.registry?.establishmentId ?? p.registry?.id ?? "?"}`),
+      delta.closed.map((p) => `- **${md(p.name)}** — ${md(p.registry?.connectorId ?? "register")} ${md(p.registry?.establishmentId ?? p.registry?.id ?? "?")}`),
     ),
   );
   l.push(
     ...section(
       "Gone from the sweep",
-      delta.disappeared.map((p) => `- ${p.name}`),
+      delta.disappeared.map((p) => `- ${md(p.name)}`),
     ),
   );
   l.push(
     ...section(
       "Now has a website",
-      delta.gotWebsite.map((p) => `- **${p.name}** — ${p.website?.url}`),
+      delta.gotWebsite.map((p) => `- **${md(p.name)}** — ${md(p.website?.url)}`),
     ),
   );
   l.push(
     ...section(
       "Moved their website",
-      delta.siteChanged.map((x) => `- **${x.place.name}** — ${x.before} → ${x.after}`),
+      delta.siteChanged.map((x) => `- **${md(x.place.name)}** — ${md(x.before)} → ${md(x.after)}`),
     ),
   );
   l.push(
     ...section(
       "Stopped hiring",
-      delta.stoppedHiring.map((p) => `- ${p.name}`),
+      delta.stoppedHiring.map((p) => `- ${md(p.name)}`),
     ),
   );
   l.push(
     ...section(
       "Site went unreachable",
-      delta.wentDark.map((p) => `- ${p.name} — ${p.website?.url ?? ""}`),
+      delta.wentDark.map((p) => `- ${md(p.name)} — ${md(p.website?.url)}`),
     ),
   );
 

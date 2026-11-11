@@ -16,6 +16,7 @@
 // - it is a window, not a date: the re-tender is usually published 6 to 12
 //   months before the end, and options to extend can push it out by years.
 //   The notice's own option clauses decide, and they are in its pages.
+import { mdInline as md, mdLink } from "../markdown.js";
 import { nameSimilarity, normalizeName } from "../util.js";
 import type { Tender, TenderAward } from "./types.js";
 import { dayOf } from "./util.js";
@@ -254,28 +255,31 @@ const fmt = (n: number) => Math.round(n).toLocaleString("en-US").replace(/,/g, "
 
 export function awardsMarkdown(a: AwardAnalysis, opts: { truncated: boolean; gaps: string[]; title: string; top?: number }): string {
   const top = opts.top ?? 20;
-  const lines: string[] = [`# Awards — ${opts.title}`, ""];
+  // Supplier, buyer and contract names are text from outside (markdown.ts).
+  const lines: string[] = [`# Awards — ${md(opts.title)}`, ""];
   if (opts.truncated)
     lines.push(
       "> ⚠ **This analysis is TRUNCATED**: at least one source stopped before the end of its answer. Rankings below are over what was read, not over the market.",
       "",
     );
-  if (opts.gaps.length) lines.push(`> Coverage: ${opts.gaps.join("; ")}.`, "");
+  if (opts.gaps.length) lines.push(`> Coverage: ${md(opts.gaps.join("; "))}.`, "");
   lines.push(`${a.rows.length} award row(s) from ${new Set(a.rows.map((r) => r.tenderId)).size} notice(s).`, "");
 
   lines.push("## Who wins", "", "| Supplier | Identifier | Notices won | Total awarded | Buyers | Last win |", "|---|---|---:|---:|---:|---|");
   for (const s of a.suppliers.slice(0, top)) {
     lines.push(
-      `| ${s.name} | ${s.legalId ?? "name only — confirm before use"} | ${s.wins} | ${s.total ? `${fmt(s.total)} ${s.currency ?? ""}` : "—"} | ${s.buyers.length} | ${s.lastWin ?? "—"} |`,
+      `| ${md(s.name)} | ${md(s.legalId ?? "name only — confirm before use")} | ${s.wins} | ${s.total ? md(`${fmt(s.total)} ${s.currency ?? ""}`) : "—"} | ${s.buyers.length} | ${md(s.lastWin ?? "—")} |`,
     );
   }
   lines.push("", "## Who buys", "", "| Buyer | Awards | Total awarded | Distinct suppliers | Last award |", "|---|---:|---:|---:|---|");
   for (const b of a.buyers.slice(0, top))
-    lines.push(`| ${b.name} | ${b.awards} | ${b.total ? `${fmt(b.total)} ${b.currency ?? ""}` : "—"} | ${b.suppliers.length} | ${b.lastAward ?? "—"} |`);
+    lines.push(
+      `| ${md(b.name)} | ${b.awards} | ${b.total ? md(`${fmt(b.total)} ${b.currency ?? ""}`) : "—"} | ${b.suppliers.length} | ${md(b.lastAward ?? "—")} |`,
+    );
 
   if (Object.keys(a.medians).length) {
     lines.push("", "## Contract values", "");
-    for (const [c, m] of Object.entries(a.medians)) lines.push(`- median ${fmt(m.median)} ${c}, over ${m.n} notice(s) that publish a value`);
+    for (const [c, m] of Object.entries(a.medians)) lines.push(`- median ${fmt(m.median)} ${md(c)}, over ${m.n} notice(s) that publish a value`);
   }
 
   lines.push("", `## Coming back to market — ${FORECAST_LABEL}`, "");
@@ -288,14 +292,14 @@ export function awardsMarkdown(a: AwardAnalysis, opts: { truncated: boolean; gap
     lines.push("| Window (estimated) | Buyer | Contract | Incumbent | Ends | Notice |", "|---|---|---|---|---|---|");
     for (const r of a.upcoming.slice(0, top * 2)) {
       lines.push(
-        `| ${r.retenderWindow!.from} → ${r.retenderWindow!.to} | ${r.buyer} | ${r.title.slice(0, 80)} | ${r.supplier} | ${r.endsAt} | ${r.sourceUrl ? `[${r.tenderId}](${r.sourceUrl})` : r.tenderId} |`,
+        `| ${r.retenderWindow!.from} → ${r.retenderWindow!.to} | ${md(r.buyer)} | ${md(r.title.slice(0, 80))} | ${md(r.supplier)} | ${md(r.endsAt)} | ${mdLink(r.tenderId, r.sourceUrl)} |`,
       );
     }
   }
   lines.push("", `${a.withoutDuration} award row(s) publish no duration: no window was drawn for them, and none is guessed.`);
   if (a.lookalikes.length) {
     lines.push("", "## Names to confirm", "", "These suppliers appear by name only and look like an identified one. They were NOT merged:", "");
-    for (const l of a.lookalikes.slice(0, 30)) lines.push(`- "${l.a}" ↔ ${l.b} (${Math.round(l.score * 100)}% alike)`);
+    for (const l of a.lookalikes.slice(0, 30)) lines.push(`- "${md(l.a)}" ↔ ${md(l.b)} (${Math.round(l.score * 100)}% alike)`);
   }
   return lines.join("\n") + "\n";
 }
