@@ -14,6 +14,7 @@ import { runCheck } from "../src/check.js";
 import { buildDossierPacket, dossierPathFor } from "../src/dossier.js";
 import { pageDirFor } from "../src/pages.js";
 import type { Place, RunManifest } from "../src/types.js";
+import { idSegment } from "../src/util.js";
 
 const ODD = "fr-sirene:302 474/648";
 
@@ -70,11 +71,14 @@ describe("page and dossier paths", () => {
     expect(report.counts.citations).toBe(1);
   });
 
-  it.each(["check.ts", "dossier.ts", "confirm.ts"])("src/%s reads page directories through pageDirFor, not a copy of its rule", (file) => {
-    const source = readFileSync(join(import.meta.dirname, "..", "src", file), "utf8");
-    // The only copy left in these files is dossierPathFor's own, in dossier.ts.
-    const copies = source.split("replace(/[^a-zA-Z0-9._-]/g").length - 1;
-    expect(copies).toBe(file === "dossier.ts" ? 1 : 0);
-    if (file !== "dossier.ts") expect(source).toContain("pageDirFor(");
+  it("keeps the id-to-directory rule in one place, idSegment in src/util.ts", () => {
+    // Every directory named after an id — pages, dossiers, bids — goes through
+    // one function, so a reader and the writer can never disagree.
+    const files = ["check.ts", "dossier.ts", "confirm.ts", "excerpts.ts", "pages.ts", "tenders/bid.ts"];
+    for (const file of files) {
+      const source = readFileSync(join(import.meta.dirname, "..", "src", file), "utf8");
+      expect(source.split("replace(/[^a-zA-Z0-9._-]/g").length - 1, file).toBe(0);
+    }
+    expect(idSegment("osm:n1/../x")).toBe("osm_n1_.._x");
   });
 });

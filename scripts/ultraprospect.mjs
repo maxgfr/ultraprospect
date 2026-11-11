@@ -13336,6 +13336,9 @@ function streetLine(a) {
   const prefixed = type ? new RegExp(`^${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name) : false;
   return [a.numero, prefixed ? void 0 : type, name].filter(Boolean).join(" ");
 }
+function idSegment(id) {
+  return id.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
 function decodeLoose(value) {
   try {
     return decodeURIComponent(value);
@@ -20311,7 +20314,7 @@ function noPeopleNote(removed) {
 import { mkdirSync as mkdirSync9 } from "fs";
 import { join as join15 } from "path";
 function pageDirFor(placeId) {
-  return join15("pages", placeId.replace(/[^a-zA-Z0-9._-]/g, "_"));
+  return join15("pages", idSegment(placeId));
 }
 var MIN_READABLE_CHARS = 120;
 function newPageStore(existing = []) {
@@ -22441,7 +22444,7 @@ function vocabularyOf(scheme) {
 
 // src/dossier.ts
 function dossierPathFor(place) {
-  return join21("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
+  return join21("dossiers", `${idSegment(place.id)}.md`);
 }
 function syncDossierCount(runDir, places, manifest) {
   const onDisk = places.filter((p) => existsSync15(join21(runDir, dossierPathFor(p)))).length;
@@ -23115,7 +23118,6 @@ function collectEvidence(runDir, places) {
   const parsed = /* @__PURE__ */ new Map();
   let budget = QUOTES_TOTAL;
   for (const place of places) {
-    const slug = place.id.replace(/[^a-zA-Z0-9._-]/g, "_");
     let placeQuotes = 0;
     const citations = citationsOf(place);
     for (const { pageId, value } of citations) {
@@ -23125,7 +23127,7 @@ function collectEvidence(runDir, places) {
         refs.set(pageKey(place.id, pageId), { url: `https://www.openstreetmap.org/${featureType}/${osm[2]}` });
         continue;
       }
-      const path = join23(runDir, "pages", slug, `${pageId}.md`);
+      const path = join23(runDir, pageDirFor(place.id), `${pageId}.md`);
       if (!parsed.has(path)) {
         parsed.set(path, existsSync17(path) ? parsePage(readFileSync16(path, "utf8")) : void 0);
       }
@@ -24692,7 +24694,7 @@ function profileMarkdown(p) {
 
 // src/tenders/bid.ts
 function bidDirFor(t) {
-  return join25("bids", t.id.replace(/[^a-zA-Z0-9._-]/g, "_"));
+  return join25("bids", idSegment(t.id));
 }
 var PREAMBLE = [
   "You are drafting a response to a public call for tenders.",

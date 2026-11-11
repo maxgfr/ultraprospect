@@ -16,11 +16,11 @@ import { pageDirFor } from "./pages.js";
 import { sizeBandLabel } from "./registry/index.js";
 import { writeRunManifest } from "./run.js";
 import type { Place, RunManifest } from "./types.js";
-import { streetLine } from "./util.js";
+import { streetLine, idSegment } from "./util.js";
 
 /** Where a place's write-up goes, relative to the run. `check` reads it from here too. */
 export function dossierPathFor(place: Place): string {
-  return join("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
+  return join("dossiers", `${idSegment(place.id)}.md`);
 }
 
 /**

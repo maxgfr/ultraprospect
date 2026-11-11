@@ -21,6 +21,7 @@
 // stop checking.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { pageDirFor } from "./pages.js";
 import type { Place } from "./types.js";
 
 /** The passage of one page that backs one cited value. */
@@ -204,7 +205,6 @@ export function collectEvidence(runDir: string, places: readonly Place[]): Evide
   let budget = QUOTES_TOTAL;
 
   for (const place of places) {
-    const slug = place.id.replace(/[^a-zA-Z0-9._-]/g, "_");
     let placeQuotes = 0;
     // EVERY citation gets its page read, not just the first ten. The file was
     // already being opened for the quotes; what is rationed is how much of it
@@ -217,7 +217,7 @@ export function collectEvidence(runDir: string, places: readonly Place[]): Evide
         refs.set(pageKey(place.id, pageId), { url: `https://www.openstreetmap.org/${featureType}/${osm[2]}` });
         continue;
       }
-      const path = join(runDir, "pages", slug, `${pageId}.md`);
+      const path = join(runDir, pageDirFor(place.id), `${pageId}.md`);
       if (!parsed.has(path)) {
         parsed.set(path, existsSync(path) ? parsePage(readFileSync(path, "utf8")) : undefined);
       }

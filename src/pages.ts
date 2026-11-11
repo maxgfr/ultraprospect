@@ -15,11 +15,11 @@ import { join } from "node:path";
 import { cachedFetchAndExtract, fetchAndExtract, isNoWrite, writeArtifact } from "./engine.js";
 import { hopGuard, politeUa, publicUrlRefusal } from "./net.js";
 import type { PageRecord, PageRole } from "./types.js";
-import { decodeLoose } from "./util.js";
+import { decodeLoose, idSegment } from "./util.js";
 
 /** Where a place's pages live inside the run, relative to its root. */
 export function pageDirFor(placeId: string): string {
-  return join("pages", placeId.replace(/[^a-zA-Z0-9._-]/g, "_"));
+  return join("pages", idSegment(placeId));
 }
 
 export interface FetchedPage {

@@ -346,6 +346,17 @@ export function streetLine(a: PostalAddress): string {
 }
 
 /**
+ * An id made safe to use as ONE path segment: anything but letters, digits,
+ * dot, underscore and hyphen becomes "_". `osm:n123` is `osm_n123`, and an id
+ * carrying a slash cannot reach outside the directory it is filed under.
+ * Every directory named after an id goes through this, so a reader and the
+ * writer can never disagree about where a file is.
+ */
+export function idSegment(id: string): string {
+  return id.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+/**
  * Percent-decode a value read off somebody else's page, or hand it back as it was.
  *
  * `decodeURIComponent` THROWS on a malformed escape, and a page is under no

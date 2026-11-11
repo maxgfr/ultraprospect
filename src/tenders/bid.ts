@@ -16,10 +16,11 @@ import { checklistMarkdown } from "./checklists.js";
 import { type BidderProfile, profileMarkdown } from "./profile.js";
 import type { TenderManifest } from "./run.js";
 import type { Tender } from "./types.js";
+import { idSegment } from "../util.js";
 import { deadlinePassed } from "./util.js";
 
 export function bidDirFor(t: Tender): string {
-  return join("bids", t.id.replace(/[^a-zA-Z0-9._-]/g, "_"));
+  return join("bids", idSegment(t.id));
 }
 
 const PREAMBLE = [
