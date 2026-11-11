@@ -15987,12 +15987,18 @@ async function get7(url, strict = false) {
   if (strict) return registerAnswer(CONNECTOR_ID11, res);
   return res.ok ? res.data : void 0;
 }
+function edgarNameKey(raw) {
+  return raw.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
 var tickerIndex;
 async function companyIndex(strict = false) {
   if (tickerIndex) return tickerIndex;
   const data = await get7(`${WWW}/files/company_tickers.json`, strict);
   if (!data || typeof data !== "object") return [];
-  tickerIndex = Object.values(data).map((e) => ({ cik: String(e?.cik_str ?? "").padStart(10, "0"), name: String(e?.title ?? ""), ticker: String(e?.ticker ?? "") })).filter((e) => e.cik && e.name);
+  tickerIndex = Object.values(data).map((e) => {
+    const name = String(e?.title ?? "");
+    return { cik: String(e?.cik_str ?? "").padStart(10, "0"), name, ticker: String(e?.ticker ?? ""), key: edgarNameKey(name) };
+  }).filter((e) => e.cik && e.name);
   return tickerIndex;
 }
 function resetCompanyIndex() {
@@ -16059,9 +16065,9 @@ var usEdgar = {
     if (!name) return [];
     const index = await companyIndex(true);
     if (index.length === 0) throw new RegisterUnreachable(CONNECTOR_ID11, "company_tickers.json came back empty");
-    const needle = name.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").trim();
+    const needle = edgarNameKey(name);
     if (needle.length < 3) return [];
-    const hits = index.filter((e) => e.name.toLowerCase().includes(needle)).slice(0, Math.min(10, query.limit ?? 5));
+    const hits = index.filter((e) => e.key.includes(needle)).slice(0, Math.min(10, query.limit ?? 5));
     if (hits.length === 0) return [];
     ctx?.onNote?.(usEdgarCoverageNote());
     const out2 = [];

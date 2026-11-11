@@ -71,15 +71,42 @@ async function get(url: string, strict = false): Promise<any> {
   return res.ok ? res.data : undefined;
 }
 
-/** cik -> {name, ticker}, from the bulk file. Cached for the process; it is ~200 KB and changes daily. */
-let tickerIndex: Array<{ cik: string; name: string; ticker: string }> | undefined;
+/** One row of `company_tickers.json`, with the name already in its comparable form. */
+interface EdgarIndexEntry {
+  cik: string;
+  name: string;
+  ticker: string;
+  /** `name` through `edgarNameKey`, computed once rather than per lookup per row. */
+  key: string;
+}
 
-export async function companyIndex(strict = false): Promise<Array<{ cik: string; name: string; ticker: string }>> {
+/**
+ * The form a company name is compared in, on BOTH sides.
+ *
+ * Only the query used to be normalised, and only half-way: punctuation became
+ * spaces that were never collapsed, so "Johnson & Johnson" became
+ * "johnson   johnson" and "AT&T" became "at t", and neither is a substring of
+ * the lowercase titles "johnson & johnson" and "at&t inc." it was compared with.
+ */
+function edgarNameKey(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** cik -> {name, ticker}, from the bulk file. Cached for the process; it is ~200 KB and changes daily. */
+let tickerIndex: EdgarIndexEntry[] | undefined;
+
+export async function companyIndex(strict = false): Promise<EdgarIndexEntry[]> {
   if (tickerIndex) return tickerIndex;
   const data = await get(`${WWW}/files/company_tickers.json`, strict);
   if (!data || typeof data !== "object") return [];
   tickerIndex = Object.values(data as Record<string, any>)
-    .map((e) => ({ cik: String(e?.cik_str ?? "").padStart(10, "0"), name: String(e?.title ?? ""), ticker: String(e?.ticker ?? "") }))
+    .map((e) => {
+      const name = String(e?.title ?? "");
+      return { cik: String(e?.cik_str ?? "").padStart(10, "0"), name, ticker: String(e?.ticker ?? ""), key: edgarNameKey(name) };
+    })
     .filter((e) => e.cik && e.name);
   return tickerIndex;
 }
@@ -165,12 +192,9 @@ export const usEdgar: RegistryConnector = {
     // full-text searches FILING CONTENTS, so "Whole Foods" returns every company
     // that ever mentioned Whole Foods in a filing. That is a different question,
     // and answering it here would attach a supplier's record to a shop.
-    const needle = name
-      .toLowerCase()
-      .replace(/[^a-z0-9 ]+/g, " ")
-      .trim();
+    const needle = edgarNameKey(name);
     if (needle.length < 3) return [];
-    const hits = index.filter((e) => e.name.toLowerCase().includes(needle)).slice(0, Math.min(10, query.limit ?? 5));
+    const hits = index.filter((e) => e.key.includes(needle)).slice(0, Math.min(10, query.limit ?? 5));
     if (hits.length === 0) return [];
     ctx?.onNote?.(usEdgarCoverageNote());
 
