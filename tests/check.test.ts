@@ -253,19 +253,21 @@ describe("citations", () => {
   });
 
   it("does not demand a citation on structure", () => {
-    // Headings, separators, bulleted labels, a table's scaffolding and fenced
-    // blocks make no claims. Demanding ids on them teaches whoever writes the
+    // Headings, separators, bulleted labels and a table's scaffolding make no
+    // claims. Demanding ids on them teaches whoever writes the
     // dossier to sprinkle ids to silence the gate, and then the ids stop
     // meaning anything.
     //
     // What is NOT structure any more: a block quote and a table's data row. Both
     // used to be exempt wholesale, which let `> Revenue was 500 million euros.`
     // and `| Revenue | 500 million |` ship uncited — so the quote here is marked
-    // `[M]` and the table is scaffolding only. See
+    // `[M]` and the table is scaffolding only. A fenced block is not structure
+    // either — wrapping a claim in ``` does not stop it being one — so the
+    // fence here carries a citation like any paragraph. See
     // tests/check-ownership-and-claims.test.ts for the claims that policy holds.
     writeDossier(
       "osm:n1",
-      "# Title\n\n## Section\n\n---\n\n- **Contacts.**\n\n> a quote [M]\n\n```\nsome code that is quite long and would otherwise look like a claim\n```\n\n| a | b |\n| --- | --- |\n",
+      "# Title\n\n## Section\n\n---\n\n- **Contacts.**\n\n> a quote [M]\n\n```\nsome code that is quite long and would otherwise look like a claim [M]\n```\n\n| a | b |\n| --- | --- |\n",
     );
     expect(runCheck({ runDir, places: [place()], manifest: manifest() }).ok).toBe(true);
   });

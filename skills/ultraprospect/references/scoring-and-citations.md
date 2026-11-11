@@ -65,10 +65,12 @@ the run's `osm.json`, a direct URL when the URL itself is the cited source, or a
 lane name such as `registry` for open register data. These forms are provenance
 in `places.json`; only stored page ids use the dossier's `[P#]` grammar.
 
-Structure is exempt: headings, separators, short bullet labels, block quotes,
-table rows and fenced code make no claims. Demanding ids on them would teach
-whoever writes the dossier to sprinkle ids to silence the gate, and then the ids
-stop meaning anything.
+Structure is exempt: headings, separators, the template's bold section labels
+and a table's header and separator make no claims. Demanding ids on them would
+teach whoever writes the dossier to sprinkle ids to silence the gate, and then
+the ids stop meaning anything. Everything else is a claim — prose, a bullet, a
+block quote, a table's data row, a fenced block (one unit, however many lines),
+and a heading that carries a digit or a currency sign (`### Revenue is €5M`).
 
 ## What `check` refuses
 

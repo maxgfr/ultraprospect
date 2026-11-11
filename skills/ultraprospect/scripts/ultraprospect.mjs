@@ -22507,10 +22507,13 @@ function isTableSeparator(t) {
   return t.includes("|") && t.includes("-") && /^[|\s:-]+$/.test(t);
 }
 var LIST_ITEM = /^(?:[-*+]|\d+[.)])\s+/;
+function isClaimingHeading(t) {
+  return t.startsWith("#") && /[\p{N}\p{Sc}]/u.test(t);
+}
 function isStructural(line, next = "") {
   const t = line.trim();
   if (t.length === 0) return true;
-  if (t.startsWith("#") || t.startsWith("```")) return true;
+  if (t.startsWith("#") && !isClaimingHeading(t)) return true;
   if (/^[-*_]{3,}$/.test(t)) return true;
   if (isTableSeparator(t)) return true;
   if (isTableRow(t) && isTableSeparator(next)) return true;
@@ -22834,7 +22837,11 @@ function factualParagraphs(text3) {
       inFence = !inFence;
       continue;
     }
-    if (inFence) continue;
+    if (inFence) {
+      if (buffer.length === 0) start = i;
+      buffer.push(line.trim());
+      continue;
+    }
     if (line.trim() === "") {
       flush();
       continue;
@@ -22844,6 +22851,13 @@ function factualParagraphs(text3) {
     if (buffer.length && quoted !== isQuote) flush();
     quoted = isQuote;
     const next = (lines[i + 1] ?? "").trim().replace(/^(?:>\s*)+/, "");
+    if (isClaimingHeading(t)) {
+      flush();
+      start = i;
+      buffer.push(t);
+      flush();
+      continue;
+    }
     if (isStructural(t, next)) {
       flush();
       continue;

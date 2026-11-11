@@ -81,9 +81,21 @@ function isTableSeparator(t: string): boolean {
 const LIST_ITEM = /^(?:[-*+]|\d+[.)])\s+/;
 
 /**
+ * A heading that states a figure: `### Revenue is €5M`.
+ *
+ * A title names a section and claims nothing, so a heading is structure — until
+ * it carries a number or a currency sign. Then it is the most citable sentence
+ * in the dossier written in the largest type, and exempting it let a whole
+ * uncited write-up pass as a stack of headings.
+ */
+function isClaimingHeading(t: string): boolean {
+  return t.startsWith("#") && /[\p{N}\p{Sc}]/u.test(t);
+}
+
+/**
  * Lines that are structure rather than assertion.
  *
- * A heading, a table's header, a separator, a fenced block: none of these make
+ * A heading without a figure, a table's header, a separator: none of these make
  * a factual claim, and demanding a citation on them would train whoever writes
  * the dossier to sprinkle ids to silence the gate — which is worse than no
  * gate, because the ids would stop meaning anything.
@@ -105,7 +117,7 @@ const LIST_ITEM = /^(?:[-*+]|\d+[.)])\s+/;
 function isStructural(line: string, next = ""): boolean {
   const t = line.trim();
   if (t.length === 0) return true;
-  if (t.startsWith("#") || t.startsWith("```")) return true;
+  if (t.startsWith("#") && !isClaimingHeading(t)) return true;
   if (/^[-*_]{3,}$/.test(t)) return true;
   if (isTableSeparator(t)) return true;
   if (isTableRow(t) && isTableSeparator(next)) return true;
@@ -586,12 +598,19 @@ export function factualParagraphs(text: string): { line: number; text: string }[
   };
 
   for (const [i, line] of lines.entries()) {
+    // A fenced block is ONE unit, held to a citation like any paragraph. It used
+    // to be skipped outright, so wrapping a whole uncited dossier in ``` passed
+    // the gate: a fence changes how text is drawn, not whether it asserts.
     if (line.trim().startsWith("```")) {
       flush();
       inFence = !inFence;
       continue;
     }
-    if (inFence) continue;
+    if (inFence) {
+      if (buffer.length === 0) start = i;
+      buffer.push(line.trim());
+      continue;
+    }
     if (line.trim() === "") {
       flush();
       continue;
@@ -601,6 +620,15 @@ export function factualParagraphs(text: string): { line: number; text: string }[
     if (buffer.length && quoted !== isQuote) flush();
     quoted = isQuote;
     const next = (lines[i + 1] ?? "").trim().replace(/^(?:>\s*)+/, "");
+    // A heading with a figure in it is a claim of its own: it closes the
+    // paragraph before it and must not borrow the citation of the one after.
+    if (isClaimingHeading(t)) {
+      flush();
+      start = i;
+      buffer.push(t);
+      flush();
+      continue;
+    }
     // A heading, a rule, a table's scaffolding: structure closes the paragraph
     // before it and is not a claim in its own right.
     if (isStructural(t, next)) {

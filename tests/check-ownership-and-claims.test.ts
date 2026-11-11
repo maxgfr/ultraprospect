@@ -16,13 +16,15 @@
 //    ``Employees: `500` `` hides its figure in a code span. The gate now asks
 //    what a unit IS, not how much of it there is: prose, a data row and quoted
 //    text all need a `[P#]` or an `[M]`, and only genuine Markdown structure —
-//    headings, rules, fences, a table's scaffolding, a bare link, a bulleted
-//    section label — is exempt.
+//    headings without a figure, rules, a table's scaffolding, a bare link, a
+//    bulleted section label — is exempt. A fenced block and a heading that
+//    states a number are claims like any other paragraph.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type CheckReport, runCheck } from "../src/check.js";
+import { DOSSIER_TEMPLATE } from "../src/dossier.js";
 import type { OsmPoi, Place, RunManifest } from "../src/types.js";
 
 let runDir: string;
@@ -358,8 +360,8 @@ describe("a short line can still be a claim", () => {
   });
 
   it("leaves genuine structure alone", () => {
-    // Headings, rules, a table's header and separator, bulleted section labels,
-    // fenced blocks and bare links assert nothing. Demanding ids on them would
+    // Headings, rules, a table's header and separator, bulleted section labels
+    // and bare links assert nothing. Demanding ids on them would
     // teach whoever writes the dossier to sprinkle ids to silence the gate, and
     // then the ids stop meaning anything. Everything that is not one of these —
     // including the quoted line here, which is why it carries [M] — is a claim.
@@ -381,11 +383,45 @@ describe("a short line can still be a claim", () => {
       "> worth a call about their booking software [M]",
       "",
       "- https://acme.fr/contact",
-      "",
-      "```",
-      "a fenced block whose contents look exactly like an uncited factual claim about revenue",
-      "```",
     ]);
+    expect(check([p()]).errors).toEqual([]);
+  });
+
+  it("holds a fenced block to a citation, as one unit", () => {
+    // A fence used to be skipped outright, so a whole uncited dossier wrapped in
+    // ``` passed the gate. Its contents are one paragraph: one citation anywhere
+    // in it covers it, none anywhere fails it.
+    writeDossier("osm:n1", ["# Company", "", "```", "Revenue is 5 million euros.", "", "Fifty staff.", "```"]);
+    const r = check([p()]);
+    expect(rules(r)).toEqual(["claim-uncited"]);
+    expect(r.errors[0]!.where).toMatch(/:4$/);
+
+    writeDossier("osm:n1", ["# Company", "", "```", "Revenue is 5 million euros.", "", "Fifty staff. [P1]", "```"]);
+    expect(check([p()]).errors).toEqual([]);
+  });
+
+  it.each(["### Revenue is €5M", "## Founded in 1987", "# Turnover £ unknown"])("treats a heading that states a figure as a claim: %s", (heading) => {
+    // A title claims nothing; a number in a title does. And it is its own
+    // claim: the citation on the paragraph below must not cover it.
+    writeDossier("osm:n1", ["# Company", "", heading, "Acme sells pizzas. [P1]"]);
+    const r = check([p()]);
+    expect(rules(r)).toEqual(["claim-uncited"]);
+    expect(r.errors[0]!.where).toMatch(/:3$/);
+
+    writeDossier("osm:n1", ["# Company", "", `${heading} [P1]`, "Acme sells pizzas. [P1]"]);
+    expect(check([p()]).errors).toEqual([]);
+  });
+
+  it("passes the dossier template once each of its paragraphs is cited", () => {
+    // The skeleton `dossier` prints, filled in the way it asks: its title and
+    // section labels must stay structure under the stricter heading rule.
+    const filled = DOSSIER_TEMPLATE.replace("<company name>", "Acme")
+      .replaceAll("[P2]", "[P1]")
+      .trim()
+      .split("\n\n")
+      .map((para) => (para.startsWith("#") || /\[P\d+\]|\[M\]/.test(para) ? para : `${para} [P1]`))
+      .join("\n\n");
+    writeDossier("osm:n1", filled.split("\n"));
     expect(check([p()]).errors).toEqual([]);
   });
 
