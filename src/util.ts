@@ -47,7 +47,7 @@ export function tokenSet(s: string): Set<string> {
   return new Set(s.split(" ").filter((t) => t.length > 1));
 }
 
-export function jaccard(a: Set<string>, b: Set<string>): number {
+export function jaccard(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
   if (a.size === 0 || b.size === 0) return 0;
   let inter = 0;
   for (const t of a) if (b.has(t)) inter++;
@@ -177,8 +177,11 @@ export function isGenericTradeName(raw: string): boolean {
  * to be a name and is not a generic trade noun.
  */
 export function isNameContained(a: string, b: string): boolean {
-  const ta = tokenSet(a);
-  const tb = tokenSet(b);
+  return areTokensContained(tokenSet(a), tokenSet(b));
+}
+
+/** `isNameContained` on token sets already built. */
+function areTokensContained(ta: ReadonlySet<string>, tb: ReadonlySet<string>): boolean {
   if (ta.size === 0 || tb.size === 0) return false;
   const [small, large] = ta.size <= tb.size ? [ta, tb] : [tb, ta];
   for (const t of small) if (!large.has(t)) return false;
@@ -220,18 +223,43 @@ export function nameVariants(raw: string): string[] {
  * that combined measure.
  */
 export function nameSimilarity(a: string, b: string): number {
+  return preparedSimilarity(prepareName(a), prepareName(b));
+}
+
+/**
+ * A name with everything `nameSimilarity` derives from it computed once: its
+ * variants, each normalised, tokenised and cut into trigrams.
+ *
+ * The matcher compares one POI with every register name within 150 m and each
+ * of those names with every POI near it, so deriving these per PAIR repeated
+ * the same regex passes hundreds of times per name in a dense centre.
+ */
+export interface PreparedName {
+  raw: string;
+  /** Non-empty normal forms only: a variant that is pure boilerplate carries no signal. */
+  variants: readonly { norm: string; tokens: ReadonlySet<string>; grams: ReadonlySet<string> }[];
+}
+
+export function prepareName(raw: string): PreparedName {
+  const variants = [];
+  for (const v of nameVariants(raw)) {
+    const norm = normalizeName(v);
+    if (norm) variants.push({ norm, tokens: tokenSet(norm), grams: trigrams(norm) });
+  }
+  return { raw, variants };
+}
+
+/** `nameSimilarity` on two prepared names. The same measure, step for step. */
+export function preparedSimilarity(a: PreparedName, b: PreparedName): number {
   let best = 0;
-  for (const va of nameVariants(a)) {
-    for (const vb of nameVariants(b)) {
-      const na = normalizeName(va);
-      const nb = normalizeName(vb);
-      if (!na || !nb) continue;
-      if (na === nb) return 1;
+  for (const va of a.variants) {
+    for (const vb of b.variants) {
+      if (va.norm === vb.norm) return 1;
       // Just below an exact match: the qualifier could still be a different
       // branch of the same brand, which is a distinction the address decides.
-      const contained = isNameContained(na, nb) ? 0.88 : 0;
-      const tok = jaccard(tokenSet(na), tokenSet(nb));
-      const tri = jaccard(trigrams(na), trigrams(nb));
+      const contained = areTokensContained(va.tokens, vb.tokens) ? 0.88 : 0;
+      const tok = jaccard(va.tokens, vb.tokens);
+      const tri = jaccard(va.grams, vb.grams);
       best = Math.max(best, contained, tok, tri);
       if (best >= 1) return 1;
     }
@@ -241,10 +269,15 @@ export function nameSimilarity(a: string, b: string): number {
 
 /** The variant of `candidates` that best matches `probe`, with its score. */
 export function bestNameMatch(probe: string, candidates: readonly string[]): { name?: string; score: number } {
+  return bestPreparedMatch(prepareName(probe), candidates.map(prepareName));
+}
+
+/** `bestNameMatch` on prepared names. */
+export function bestPreparedMatch(probe: PreparedName, candidates: readonly PreparedName[]): { name?: string; score: number } {
   let best = { name: undefined as string | undefined, score: 0 };
   for (const c of candidates) {
-    const score = nameSimilarity(probe, c);
-    if (score > best.score) best = { name: c, score };
+    const score = preparedSimilarity(probe, c);
+    if (score > best.score) best = { name: c.raw, score };
   }
   return best;
 }

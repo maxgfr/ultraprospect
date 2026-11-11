@@ -13233,9 +13233,7 @@ function isGenericTradeName(raw) {
   const tokens = [...tokenSet(normalizeName(raw))].filter((t) => !CONNECTIVES.has(t));
   return tokens.length > 0 && tokens.every((t) => GENERIC_TRADE_WORDS.has(t));
 }
-function isNameContained(a, b) {
-  const ta = tokenSet(a);
-  const tb = tokenSet(b);
+function areTokensContained(ta, tb) {
   if (ta.size === 0 || tb.size === 0) return false;
   const [small, large] = ta.size <= tb.size ? [ta, tb] : [tb, ta];
   for (const t of small) if (!large.has(t)) return false;
@@ -13256,27 +13254,35 @@ function nameVariants(raw) {
   return [...new Set(variants.filter(Boolean))];
 }
 function nameSimilarity(a, b) {
+  return preparedSimilarity(prepareName(a), prepareName(b));
+}
+function prepareName(raw) {
+  const variants = [];
+  for (const v of nameVariants(raw)) {
+    const norm2 = normalizeName(v);
+    if (norm2) variants.push({ norm: norm2, tokens: tokenSet(norm2), grams: trigrams(norm2) });
+  }
+  return { raw, variants };
+}
+function preparedSimilarity(a, b) {
   let best = 0;
-  for (const va of nameVariants(a)) {
-    for (const vb of nameVariants(b)) {
-      const na = normalizeName(va);
-      const nb = normalizeName(vb);
-      if (!na || !nb) continue;
-      if (na === nb) return 1;
-      const contained = isNameContained(na, nb) ? 0.88 : 0;
-      const tok = jaccard(tokenSet(na), tokenSet(nb));
-      const tri = jaccard(trigrams(na), trigrams(nb));
+  for (const va of a.variants) {
+    for (const vb of b.variants) {
+      if (va.norm === vb.norm) return 1;
+      const contained = areTokensContained(va.tokens, vb.tokens) ? 0.88 : 0;
+      const tok = jaccard(va.tokens, vb.tokens);
+      const tri = jaccard(va.grams, vb.grams);
       best = Math.max(best, contained, tok, tri);
       if (best >= 1) return 1;
     }
   }
   return best;
 }
-function bestNameMatch(probe, candidates2) {
+function bestPreparedMatch(probe, candidates2) {
   let best = { name: void 0, score: 0 };
   for (const c of candidates2) {
-    const score = nameSimilarity(probe, c);
-    if (score > best.score) best = { name: c, score };
+    const score = preparedSimilarity(probe, c);
+    if (score > best.score) best = { name: c.raw, score };
   }
   return best;
 }
@@ -19546,16 +19552,23 @@ function sameStreet(a, b, bType) {
   const nb = norm2(bType ? `${bType} ${b}` : b);
   return na.length > 2 && na === nb;
 }
-function scorePair(poi, rec) {
+function poiNames(poi) {
+  const brand2 = poi.tags.brand ?? poi.tags.operator ?? "";
+  return { name: poi.name ? prepareName(poi.name) : void 0, brand: brand2 ? prepareName(brand2) : void 0 };
+}
+function recordNames(rec) {
+  return { names: registerNames(rec).map(prepareName), trading: (rec.tradingNames ?? []).map(prepareName) };
+}
+function scorePrepared(poi, rec, poiSide, recSide) {
   const distanceM = typeof rec.lat === "number" && typeof rec.lon === "number" ? haversineM(poi.lat, poi.lon, rec.lat, rec.lon) : Number.POSITIVE_INFINITY;
   const zero = { score: 0, parts: { distance: 0, name: 0, enseigne: 0, address: 0 }, distanceM };
   if (!Number.isFinite(distanceM) || distanceM > MAX_DISTANCE_M) return zero;
-  const poiName = poi.name ?? "";
-  const best = poiName ? bestNameMatch(poiName, registerNames(rec)) : { name: void 0, score: 0 };
+  const pn = poiSide();
+  const rn = recSide();
+  const best = pn.name ? bestPreparedMatch(pn.name, rn.names) : { name: void 0, score: 0 };
   const nameScore = best.score;
-  const brand2 = poi.tags.brand ?? poi.tags.operator ?? "";
-  const trading = rec.tradingNames ?? [];
-  const enseigneScore = brand2 && trading.length ? Math.max(0, ...trading.map((e) => nameSimilarity(brand2, e))) : 0;
+  const brand2 = pn.brand;
+  const enseigneScore = brand2 && rn.trading.length ? Math.max(0, ...rn.trading.map((e) => preparedSimilarity(brand2, e))) : 0;
   const pa = poiAddress(poi);
   const numberAgrees = Boolean(
     pa.numero && rec.address.numero && pa.numero.replace(/\s/g, "").toLowerCase() === rec.address.numero.replace(/\s/g, "").toLowerCase()
@@ -19671,11 +19684,19 @@ function matchLanes(pois, records, refKeys = []) {
   const scored = [];
   const usedPoi = new Set(identifiers.declared.map((identifier) => identifier.poiId));
   const usedRec = new Set(identifiers.merged.keys());
+  const recNames = /* @__PURE__ */ new Map();
+  const namesOf3 = (rec) => {
+    let names = recNames.get(rec);
+    if (!names) recNames.set(rec, names = recordNames(rec));
+    return names;
+  };
   for (const poi of pois) {
     if (usedPoi.has(poi.id)) continue;
+    let mine;
+    const poiSide = () => mine ??= poiNames(poi);
     for (const rec of nearby(index, poi.lat, poi.lon)) {
       if (usedRec.has(recordKey(rec))) continue;
-      const s = scorePair(poi, rec);
+      const s = scorePrepared(poi, rec, poiSide, () => namesOf3(rec));
       if (s.score >= MERGE_LOW) scored.push({ poi, rec, s });
     }
   }

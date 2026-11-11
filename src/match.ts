@@ -24,7 +24,7 @@
 import type { MatchCandidate, MatchTodo, OsmPoi, Place, PostalAddress } from "./types.js";
 import type { RegistryConnector, RegistryRecord } from "./registry/types.js";
 import { recordKey } from "./registry/types.js";
-import { bestNameMatch, foldAccents, haversineM, nameSimilarity } from "./util.js";
+import { bestPreparedMatch, foldAccents, haversineM, type PreparedName, prepareName, preparedSimilarity } from "./util.js";
 
 /** Beyond this, two records are not the same shopfront whatever they are called. */
 export const MAX_DISTANCE_M = 150;
@@ -128,6 +128,27 @@ export interface PairScore {
   matchedName?: string;
 }
 
+/** The names of a POI, prepared once however many records it is scored against. */
+interface PoiNames {
+  name?: PreparedName;
+  brand?: PreparedName;
+}
+
+/** The names of a register record, prepared once however many POIs it is scored against. */
+interface RecordNames {
+  names: PreparedName[];
+  trading: PreparedName[];
+}
+
+function poiNames(poi: OsmPoi): PoiNames {
+  const brand = poi.tags.brand ?? poi.tags.operator ?? "";
+  return { name: poi.name ? prepareName(poi.name) : undefined, brand: brand ? prepareName(brand) : undefined };
+}
+
+function recordNames(rec: RegistryRecord): RecordNames {
+  return { names: registerNames(rec).map(prepareName), trading: (rec.tradingNames ?? []).map(prepareName) };
+}
+
 /**
  * Score one OSM POI against one register establishment.
  *
@@ -135,24 +156,39 @@ export interface PairScore {
  * case, and the reason a dense area does not collapse into nonsense.
  */
 export function scorePair(poi: OsmPoi, rec: RegistryRecord): PairScore {
+  return scorePrepared(
+    poi,
+    rec,
+    () => poiNames(poi),
+    () => recordNames(rec),
+  );
+}
+
+/**
+ * `scorePair`, with each side's names supplied by the caller.
+ *
+ * Lazily, because most pairs in a dense area fail the distance gate and never
+ * need a name at all.
+ */
+function scorePrepared(poi: OsmPoi, rec: RegistryRecord, poiSide: () => PoiNames, recSide: () => RecordNames): PairScore {
   const distanceM = typeof rec.lat === "number" && typeof rec.lon === "number" ? haversineM(poi.lat, poi.lon, rec.lat, rec.lon) : Number.POSITIVE_INFINITY;
   const zero: PairScore = { score: 0, parts: { distance: 0, name: 0, enseigne: 0, address: 0 }, distanceM };
   if (!Number.isFinite(distanceM) || distanceM > MAX_DISTANCE_M) return zero;
 
-  const poiName = poi.name ?? "";
+  const pn = poiSide();
+  const rn = recSide();
   // Which of the register's names actually matched is carried out of here, not
   // just how well. The adjudication file used to print `nomComplet` whatever
   // scored — so "Crèche Jean Burgeat <-> COMMUNE DE VINCENNES" appeared as an
   // obvious no, when the 0.67 had come from the enseigne "CRECHE BURGEAT" and
   // the pair was an obvious yes. The agent was being shown the wrong evidence.
-  const best = poiName ? bestNameMatch(poiName, registerNames(rec)) : { name: undefined, score: 0 };
+  const best = pn.name ? bestPreparedMatch(pn.name, rn.names) : { name: undefined, score: 0 };
   const nameScore = best.score;
   // The brand tag is a separate signal from the name: a franchise is mapped as
   // `brand=Carrefour` with `name=Carrefour City Vincennes`, and the register
   // files it under an enseigne rather than a denomination.
-  const brand = poi.tags.brand ?? poi.tags.operator ?? "";
-  const trading = rec.tradingNames ?? [];
-  const enseigneScore = brand && trading.length ? Math.max(0, ...trading.map((e: string) => nameSimilarity(brand, e))) : 0;
+  const brand = pn.brand;
+  const enseigneScore = brand && rn.trading.length ? Math.max(0, ...rn.trading.map((e) => preparedSimilarity(brand, e))) : 0;
 
   const pa = poiAddress(poi);
   const numberAgrees = Boolean(
@@ -354,11 +390,21 @@ export function matchLanes(pois: readonly OsmPoi[], records: readonly RegistryRe
   const usedPoi = new Set(identifiers.declared.map((identifier) => identifier.poiId));
   const usedRec = new Set(identifiers.merged.keys());
 
+  // Each record's names are prepared the first time a POI within reach needs
+  // them, then reused by every other POI near it.
+  const recNames = new Map<RegistryRecord, RecordNames>();
+  const namesOf = (rec: RegistryRecord): RecordNames => {
+    let names = recNames.get(rec);
+    if (!names) recNames.set(rec, (names = recordNames(rec)));
+    return names;
+  };
   for (const poi of pois) {
     if (usedPoi.has(poi.id)) continue;
+    let mine: PoiNames | undefined;
+    const poiSide = () => (mine ??= poiNames(poi));
     for (const rec of nearby(index, poi.lat, poi.lon)) {
       if (usedRec.has(recordKey(rec))) continue;
-      const s = scorePair(poi, rec);
+      const s = scorePrepared(poi, rec, poiSide, () => namesOf(rec));
       if (s.score >= MERGE_LOW) scored.push({ poi, rec, s });
     }
   }
