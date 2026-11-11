@@ -13,7 +13,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { cachedFetchAndExtract, fetchAndExtract, isNoWrite, writeArtifact } from "./engine.js";
-import { politeUa } from "./net.js";
+import { hopGuard, politeUa, publicUrlRefusal } from "./net.js";
 import type { PageRecord, PageRole } from "./types.js";
 import { decodeLoose } from "./util.js";
 
@@ -46,7 +46,7 @@ export function newPageStore(existing: readonly PageRecord[] = []): PageStore {
 /**
  * Why a fetch produced no citable page.
  *
- * The three are worth telling apart, and each one was found in real use:
+ * The four are worth telling apart, and each one was found in real use:
  *
  *   `no-readable-text` — `restaurant-elgringo.fr` answers HTTP 200 with 37
  *     bytes, a JavaScript shell with no server-rendered content. Reporting that
@@ -58,13 +58,28 @@ export function newPageStore(existing: readonly PageRecord[] = []): PageStore {
  *     went onto a prospect record as evidence.
  *   `unreachable` — nothing answered: DNS, TLS, connection refused, or a status
  *     the engine could not even read (0). There is no page to describe.
+ *   `not-public` — WE declined to send the request: the URL, or a redirect it
+ *     led to, is not an http(s) address on a public host (see `publicUrlRefusal`
+ *     in src/net.ts). `why` says which rule, in words a note can print. It is a
+ *     refusal of ours and must be reported as one: the engine answers a vetoed
+ *     request with status 0, and reading that as `unreachable` would record a
+ *     decision this tool made as a fact about somebody's website.
  *
  * The distinction is the same one this tool insists on everywhere else: a
  * REFUSAL is not an ABSENCE, and neither is a rendering limitation.
  */
-export type FetchFailure = { reason: "unreachable" } | { reason: "refused"; status: number } | { reason: "no-readable-text"; status: number; chars: number };
+export type FetchFailure =
+  | { reason: "unreachable" }
+  | { reason: "refused"; status: number }
+  | { reason: "no-readable-text"; status: number; chars: number }
+  | { reason: "not-public"; why: string };
 
 export type FetchOutcome = { ok: true; page: FetchedPage } | ({ ok: false } & FetchFailure);
+
+/** A failure in the words a note prints. Only a refusal of ours carries more than its name. */
+export function describeFailure(failure: FetchFailure): string {
+  return failure.reason === "not-public" ? `refused, ${failure.why}` : failure.reason;
+}
 
 /**
  * Fetch a URL and store it as a citable page.
@@ -94,12 +109,34 @@ export async function fetchPage(
   // identifying one is for OSM and data.gouv (see src/net.ts); plenty of
   // commercial hosts serve a challenge page to anything that looks automated,
   // and a prospect's marketing site is not community infrastructure.
+  //
+  // PUBLIC HOSTS ONLY, on both paths, and not to the same depth.
+  //
+  // The uncached fetcher takes the engine's `authorizeUrl` hook, so the guard is
+  // asked about the URL and about every redirect it leads to. The hook records
+  // what it refused, because the engine reports a vetoed request as status 0 —
+  // indistinguishable, afterwards, from a host that never answered.
+  //
+  // `cachedFetchAndExtract` accepts no such hook. There the URL itself is
+  // checked before the call and REDIRECTS ARE NOT COVERED: a public host that
+  // answers 302 to a private address is still followed on this path. Closing
+  // that needs the hook on the engine's cached fetch.
+  const hops = opts.keepHtml ? hopGuard(url) : undefined;
+  if (!hops?.authorizeUrl) {
+    const why = await publicUrlRefusal(url);
+    if (why) return { ok: false, reason: "not-public", why };
+  }
+
   let result: Awaited<ReturnType<typeof fetchAndExtract>>;
   try {
-    result = opts.keepHtml ? await fetchAndExtract(url, { keepHtml: true }) : await cachedFetchAndExtract(url);
+    result = opts.keepHtml
+      ? await fetchAndExtract(url, { keepHtml: true, ...(hops?.authorizeUrl ? { authorizeUrl: hops.authorizeUrl } : {}) })
+      : await cachedFetchAndExtract(url);
   } catch {
     return { ok: false, reason: "unreachable" };
   }
+  const refusedHop = hops?.refusal();
+  if (refusedHop) return { ok: false, reason: "not-public", why: refusedHop };
 
   const text = (result.text ?? "").trim();
   const status = result.status ?? 0;

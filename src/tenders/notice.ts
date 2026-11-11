@@ -20,8 +20,8 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { docFormatForUrl, extractDocument, extractPdf, httpGet, isNoWrite, writeArtifact } from "../engine.js";
-import { politeUa } from "../net.js";
-import { fetchPage, pageDirFor, type PageStore } from "../pages.js";
+import { hopGuard, politeUa } from "../net.js";
+import { describeFailure, fetchPage, pageDirFor, type PageStore } from "../pages.js";
 import type { PageRecord } from "../types.js";
 import { foldAccents } from "../util.js";
 import { readZipMember, zipEntries } from "../zip.js";
@@ -205,13 +205,26 @@ async function fetchDocument(
   max: number,
 ): Promise<{ pages: PageRecord[]; texts?: string[]; note?: string }> {
   if (/\.zip(\?|$)/i.test(url)) {
-    const res = await httpGet(url, { binary: true, timeoutMs: 90_000, retries: 1, userAgent: politeUa(), maxBytes: 80 * 1024 * 1024 });
+    // An archive link is scraped off a buyer platform's page, or taken from the
+    // notice's own "documents" field: it is fetched under the public-host
+    // guard, redirects included, like every page fetchPage reads.
+    const hops = hopGuard(url);
+    const res = await httpGet(url, {
+      binary: true,
+      timeoutMs: 90_000,
+      retries: 1,
+      userAgent: politeUa(),
+      maxBytes: 80 * 1024 * 1024,
+      authorizeUrl: hops.authorizeUrl,
+    });
+    const refusal = hops.refusal();
+    if (refusal) return { pages: [], note: `${url}: refused, ${refusal}` };
     if (!res.ok || !res.bytes) return { pages: [], note: `${url}: ${res.error ?? `HTTP ${res.status}`}` };
     if (res.truncated) return { pages: [], note: `${url}: archive larger than the download cap` };
     return zipMembers(runDir, t, store, url, res.bytes, max);
   }
   const r = await fetchPage(runDir, t.id, url, "document", store);
-  return r.ok ? { pages: [r.page.record], texts: [r.page.text] } : { pages: [], note: `${url}: ${r.reason}` };
+  return r.ok ? { pages: [r.page.record], texts: [r.page.text] } : { pages: [], note: `${url}: ${describeFailure(r)}` };
 }
 
 export async function readNotice(runDir: string, t: Tender, store: PageStore, opts: { documents?: boolean; maxPages?: number } = {}): Promise<NoticeOutcome> {
@@ -233,12 +246,12 @@ export async function readNotice(runDir: string, t: Tender, store: PageStore, op
     if (d.ok) {
       pages.push(d.page.record);
       haveNoticeText = true;
-    } else notes.push(`notice document ${noticeDocument}: ${d.reason}`);
+    } else notes.push(`notice document ${noticeDocument}: ${describeFailure(d)}`);
   }
   if (!haveNoticeText && t.sourceUrl && !have(t.sourceUrl)) {
     const r = await fetchPage(runDir, t.id, t.sourceUrl, "notice", store);
     if (r.ok) pages.push(r.page.record);
-    else notes.push(`notice page ${t.sourceUrl}: ${r.reason}`);
+    else notes.push(`notice page ${t.sourceUrl}: ${describeFailure(r)}`);
     const xml = t.national?.xml;
     if (!r.ok && typeof xml === "string" && !have(xml)) {
       const x = await fetchPage(runDir, t.id, xml, "notice", store);
@@ -258,7 +271,7 @@ export async function readNotice(runDir: string, t: Tender, store: PageStore, op
     } else {
       const landing = await fetchPage(runDir, t.id, url, "document", store, { keepHtml: true });
       if (!landing.ok) {
-        notes.push(`documents page ${url}: ${landing.reason}`);
+        notes.push(`documents page ${url}: ${describeFailure(landing)}`);
       } else {
         pages.push(landing.page.record);
         const links = [...(landing.page.html ?? "").matchAll(DOC_LINK)]

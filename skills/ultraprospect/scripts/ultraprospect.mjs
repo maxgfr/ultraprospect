@@ -11816,9 +11816,124 @@ function naceSection(code) {
 }
 
 // src/net.ts
+import { lookup as lookup2 } from "dns/promises";
 var CONTACT_URL = "https://github.com/maxgfr/ultraprospect";
 function politeUa() {
   return `ultraprospect/${VERSION} (+${CONTACT_URL})`;
+}
+var dnsResolver = async (hostname) => (await lookup2(hostname, { all: true })).map((a) => a.address);
+var hostResolver = dnsResolver;
+var RESOLVE_TIMEOUT_MS = 5e3;
+function privateHostsAllowed(env2 = process.env) {
+  return /^(?:1|true|yes|on)$/i.test((env2.ULTRAPROSPECT_ALLOW_PRIVATE_HOSTS ?? "").trim());
+}
+function ipv4Octets(text3) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(text3);
+  if (!m) return void 0;
+  const octets = m.slice(1).map(Number);
+  return octets.every((n) => n <= 255) ? octets : void 0;
+}
+function privateV4(octets) {
+  const [a, b] = octets;
+  if (a === 0) return "in 0.0.0.0/8, this machine's own network";
+  if (a === 127) return "a loopback address";
+  if (a === 10) return "a private address (10.0.0.0/8)";
+  if (a === 172 && b >= 16 && b <= 31) return "a private address (172.16.0.0/12)";
+  if (a === 192 && b === 168) return "a private address (192.168.0.0/16)";
+  if (a === 169 && b === 254) return "a link-local address (169.254.0.0/16, where cloud metadata is served)";
+  if (a === 100 && b >= 64 && b <= 127) return "a carrier-grade NAT address (100.64.0.0/10)";
+  return void 0;
+}
+function ipv6Groups(raw) {
+  let text3 = raw.replace(/^\[|\]$/g, "").replace(/%.*$/, "").toLowerCase();
+  if (!text3.includes(":")) return void 0;
+  const dotted = /^(.*:)(\d{1,3}(?:\.\d{1,3}){3})$/.exec(text3);
+  if (dotted) {
+    const o = ipv4Octets(dotted[2]);
+    if (!o) return void 0;
+    text3 = `${dotted[1]}${(o[0] << 8 | o[1]).toString(16)}:${(o[2] << 8 | o[3]).toString(16)}`;
+  }
+  const halves = text3.split("::");
+  if (halves.length > 2) return void 0;
+  const parse2 = (part) => part === "" ? [] : part.split(":").map((g) => /^[0-9a-f]{1,4}$/.test(g) ? Number.parseInt(g, 16) : Number.NaN);
+  const head = parse2(halves[0]);
+  const tail = halves.length === 2 ? parse2(halves[1]) : [];
+  const gap = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  if (gap < 0) return void 0;
+  const groups = [...head, ...new Array(gap).fill(0), ...tail];
+  return groups.length === 8 && groups.every((g) => Number.isFinite(g)) ? groups : void 0;
+}
+function privateV6(groups) {
+  const g = groups;
+  const leadingZeros = (n) => g.slice(0, n).every((x) => x === 0);
+  if (leadingZeros(7) && g[7] === 0) return "the unspecified address";
+  if (leadingZeros(7) && g[7] === 1) return "a loopback address";
+  if ((g[0] & 65024) === 64512) return "a unique local address (fc00::/7)";
+  if ((g[0] & 65472) === 65152) return "a link-local address (fe80::/10)";
+  if (leadingZeros(5) && g[5] === 65535 || leadingZeros(6)) {
+    const inner = privateV4([g[6] >> 8, g[6] & 255, g[7] >> 8, g[7] & 255]);
+    if (inner) return `${inner}, written as IPv6`;
+  }
+  return void 0;
+}
+function isIpLiteral(host) {
+  return ipv4Octets(host) !== void 0 || ipv6Groups(host) !== void 0;
+}
+function privateAddressReason(address) {
+  const v4 = ipv4Octets(address);
+  if (v4) return privateV4(v4);
+  const v6 = ipv6Groups(address);
+  return v6 ? privateV6(v6) : void 0;
+}
+async function resolved(hostname, resolve4) {
+  let timer;
+  const late = new Promise((done) => {
+    timer = setTimeout(() => done([]), RESOLVE_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([resolve4(hostname), late]);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function publicUrlRefusal(url, resolve4 = hostResolver) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return "it is not a URL";
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return `its scheme (${parsed.protocol.replace(/:$/, "")}) is not http or https`;
+  if (privateHostsAllowed()) return void 0;
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  if (host === "localhost" || host.endsWith(".localhost")) return `${host} is this machine`;
+  if (host.endsWith(".local") || host.endsWith(".internal")) return `${host} is a name on a private network`;
+  const literal = privateAddressReason(host);
+  if (literal) return `${host} is ${literal}`;
+  if (isIpLiteral(host)) return void 0;
+  for (const address of await resolved(host, resolve4)) {
+    const why = privateAddressReason(address);
+    if (why) return `${host} resolves to ${address}, ${why}`;
+  }
+  return void 0;
+}
+var authorizePublicUrl = async (url) => await publicUrlRefusal(url) === void 0;
+function publicUrlAuthorizer() {
+  return privateHostsAllowed() ? void 0 : authorizePublicUrl;
+}
+function hopGuard(url) {
+  let refused;
+  if (privateHostsAllowed()) return { authorizeUrl: void 0, refusal: () => void 0 };
+  return {
+    authorizeUrl: async (target) => {
+      const why = await publicUrlRefusal(target);
+      if (why) refused = target === url ? why : `it redirects to ${target}, and ${why}`;
+      return why === void 0;
+    },
+    refusal: () => refused
+  };
 }
 
 // src/registry/upstream.ts
@@ -20352,13 +20467,23 @@ function newPageStore(existing = []) {
   const highest = existing.reduce((max, p) => Math.max(max, Number.parseInt(p.id.slice(1), 10) || 0), 0);
   return { next: highest + 1 };
 }
+function describeFailure(failure) {
+  return failure.reason === "not-public" ? `refused, ${failure.why}` : failure.reason;
+}
 async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
+  const hops = opts.keepHtml ? hopGuard(url) : void 0;
+  if (!hops?.authorizeUrl) {
+    const why = await publicUrlRefusal(url);
+    if (why) return { ok: false, reason: "not-public", why };
+  }
   let result;
   try {
-    result = opts.keepHtml ? await fetchAndExtract(url, { keepHtml: true }) : await cachedFetchAndExtract(url);
+    result = opts.keepHtml ? await fetchAndExtract(url, { keepHtml: true, ...hops?.authorizeUrl ? { authorizeUrl: hops.authorizeUrl } : {} }) : await cachedFetchAndExtract(url);
   } catch {
     return { ok: false, reason: "unreachable" };
   }
+  const refusedHop = hops?.refusal();
+  if (refusedHop) return { ok: false, reason: "not-public", why: refusedHop };
   const text3 = (result.text ?? "").trim();
   const status = result.status ?? 0;
   if (status === 0) return { ok: false, reason: "unreachable" };
@@ -20831,7 +20956,18 @@ async function runResolve(runDir, places, store, opts = {}) {
     saidByEngine.add(n);
     note(`resolve: the keyless fallback reports \u2014 ${n}`);
   };
-  const outcome = { pages: /* @__PURE__ */ new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unreadable: 0, unchanged: 0, socials: 0, socialOnly: 0, notes };
+  const outcome = {
+    pages: /* @__PURE__ */ new Map(),
+    corroborated: 0,
+    rejected: 0,
+    jsOnly: 0,
+    unreadable: 0,
+    refused: 0,
+    unchanged: 0,
+    socials: 0,
+    socialOnly: 0,
+    notes
+  };
   const locale = searchLocaleFor(opts.countryCode, opts.lang);
   if (opts.useEngineSearch && locale) note(`resolve: the keyless fallback will search in ${locale}`);
   const shared = sharedAddressesIn(places);
@@ -20874,6 +21010,11 @@ async function runResolve(runDir, places, store, opts = {}) {
       }
       if (kind === "directory") continue;
       const fetched = await fetchPage2(runDir, place.id, url, "home", store);
+      if (!fetched.ok && fetched.reason === "not-public") {
+        outcome.refused++;
+        note(`resolve: ${place.name} \u2014 ${url} was not requested: ${fetched.why}. Only public http(s) hosts are fetched.`);
+        continue;
+      }
       if (!fetched.ok) {
         if (fetched.reason !== "no-readable-text") {
           outcome.unreadable++;
@@ -20915,7 +21056,7 @@ async function runResolve(runDir, places, store, opts = {}) {
     if (place.webPresence === "social-only") outcome.socialOnly++;
   }
   note(
-    `resolve: ${outcome.corroborated} corroborated, ${outcome.rejected} fetched but unverified, ${outcome.jsOnly} reachable but JavaScript-only, ${outcome.unreadable} candidate(s) refused or unreachable, ${outcome.socials} social profile(s), ${outcome.unchanged} left without a site`
+    `resolve: ${outcome.corroborated} corroborated, ${outcome.rejected} fetched but unverified, ${outcome.jsOnly} reachable but JavaScript-only, ${outcome.unreadable} candidate(s) refused or unreachable, ${outcome.socials} social profile(s), ${outcome.unchanged} left without a site` + (outcome.refused ? `, ${outcome.refused} candidate(s) not requested because their address is not a public one` : "")
   );
   if (outcome.socialOnly) {
     note(`resolve: ${outcome.socialOnly} place(s) whose only proven presence is a social profile \u2014 a state, not a gap`);
@@ -21448,7 +21589,7 @@ function enrichable(places) {
 }
 async function readSitemap(homeUrl) {
   try {
-    const sitemap = await fetchSitemap(homeUrl, { max: 3 });
+    const sitemap = await fetchSitemap(homeUrl, { max: 3, authorizeUrl: publicUrlAuthorizer() });
     const entries = sitemap?.urls ?? [];
     const lastmods = entries.map((u) => u.lastmod).filter((d) => Boolean(d));
     return {
@@ -21491,12 +21632,18 @@ async function enrichOne(runDir, place, store, opts) {
   const home = place.website.url;
   const fetched = [];
   const boards = [];
-  const robots = await fetchRobots(home).catch(() => void 0);
+  const robots = await fetchRobots(home, { authorizeUrl: publicUrlAuthorizer() }).catch(() => void 0);
   const allowed = (url) => robots ? isAllowed(robots, url) : true;
   const sitemap = await readSitemap(home);
   const homeOutcome = await fetchPage2(runDir, place.id, home, "home", store, { keepHtml: true });
   if (!homeOutcome.ok) {
-    return { pages: [], jobs: 0, reachable: false, why: homeOutcome.reason };
+    return {
+      pages: [],
+      jobs: 0,
+      reachable: false,
+      why: homeOutcome.reason,
+      refusal: homeOutcome.reason === "not-public" ? homeOutcome.why : void 0
+    };
   }
   const homePage = homeOutcome.page;
   fetched.push(homePage);
@@ -21589,7 +21736,16 @@ async function runEnrich(runDir, places, store, opts) {
     targets = [...targets].sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0));
   }
   if (opts.limit) targets = targets.slice(0, opts.limit);
-  const outcome = { enriched: 0, skipped: places.length - targets.length, unreachable: 0, jsOnly: 0, pagesFetched: 0, jobsFound: 0, notes };
+  const outcome = {
+    enriched: 0,
+    skipped: places.length - targets.length,
+    unreachable: 0,
+    refused: 0,
+    jsOnly: 0,
+    pagesFetched: 0,
+    jobsFound: 0,
+    notes
+  };
   if (targets.length === 0) {
     note("enrich: no place has a corroborated website yet \u2014 run `resolve` first");
     return outcome;
@@ -21610,6 +21766,13 @@ async function runEnrich(runDir, places, store, opts) {
       outcome.unreachable++;
       note(
         `enrich: ${place.name} \u2014 reading ${place.website?.url} failed (${"error" in result ? result.error : "unknown error"}). This says nothing about whether the site is up.`
+      );
+      return;
+    }
+    if (!result.reachable && result.why === "not-public") {
+      outcome.refused++;
+      note(
+        `enrich: ${place.name} \u2014 ${place.website?.url} was not requested: ${"refusal" in result ? result.refusal : "its address is not a public one"}. Only public http(s) hosts are fetched.`
       );
       return;
     }
@@ -21646,7 +21809,7 @@ async function runEnrich(runDir, places, store, opts) {
     outcome.jobsFound += result.jobs;
   });
   note(
-    `enrich: ${outcome.enriched} site(s) read, ${outcome.pagesFetched} page(s) stored, ${outcome.jobsFound} opening(s), ${outcome.unreachable} unreachable` + (outcome.jsOnly ? ` (of which ${outcome.jsOnly} answer but serve no text without a browser)` : "")
+    `enrich: ${outcome.enriched} site(s) read, ${outcome.pagesFetched} page(s) stored, ${outcome.jobsFound} opening(s), ${outcome.unreachable} unreachable` + (outcome.jsOnly ? ` (of which ${outcome.jsOnly} answer but serve no text without a browser)` : "") + (outcome.refused ? `, ${outcome.refused} not requested because their address is not a public one` : "")
   );
   return outcome;
 }
@@ -24578,6 +24741,10 @@ async function foldWebHits(runDir, hits, todo, store, known, opts = {}) {
     const item = todo?.items.find((i) => i.country === country);
     const userTerms = item?.terms ?? [];
     const res = await fetchPage2(runDir, id, url, "notice", store);
+    if (!res.ok && res.reason === "not-public") {
+      rejected.push({ url, why: describeFailure(res) });
+      continue;
+    }
     fetched += 1;
     if (!res.ok) {
       unreadable.push({ url, why: res.reason === "refused" ? `HTTP ${res.status}` : res.reason });
@@ -24897,13 +25064,23 @@ async function zipMembers(runDir, t, store, url, bytes, max) {
 }
 async function fetchDocument(runDir, t, store, url, max) {
   if (/\.zip(\?|$)/i.test(url)) {
-    const res = await httpGet(url, { binary: true, timeoutMs: 9e4, retries: 1, userAgent: politeUa(), maxBytes: 80 * 1024 * 1024 });
+    const hops = hopGuard(url);
+    const res = await httpGet(url, {
+      binary: true,
+      timeoutMs: 9e4,
+      retries: 1,
+      userAgent: politeUa(),
+      maxBytes: 80 * 1024 * 1024,
+      authorizeUrl: hops.authorizeUrl
+    });
+    const refusal = hops.refusal();
+    if (refusal) return { pages: [], note: `${url}: refused, ${refusal}` };
     if (!res.ok || !res.bytes) return { pages: [], note: `${url}: ${res.error ?? `HTTP ${res.status}`}` };
     if (res.truncated) return { pages: [], note: `${url}: archive larger than the download cap` };
     return zipMembers(runDir, t, store, url, res.bytes, max);
   }
   const r = await fetchPage2(runDir, t.id, url, "document", store);
-  return r.ok ? { pages: [r.page.record], texts: [r.page.text] } : { pages: [], note: `${url}: ${r.reason}` };
+  return r.ok ? { pages: [r.page.record], texts: [r.page.text] } : { pages: [], note: `${url}: ${describeFailure(r)}` };
 }
 async function readNotice(runDir, t, store, opts = {}) {
   const max = opts.maxPages ?? 12;
@@ -24920,12 +25097,12 @@ async function readNotice(runDir, t, store, opts = {}) {
     if (d.ok) {
       pages.push(d.page.record);
       haveNoticeText = true;
-    } else notes.push(`notice document ${noticeDocument}: ${d.reason}`);
+    } else notes.push(`notice document ${noticeDocument}: ${describeFailure(d)}`);
   }
   if (!haveNoticeText && t.sourceUrl && !have2(t.sourceUrl)) {
     const r = await fetchPage2(runDir, t.id, t.sourceUrl, "notice", store);
     if (r.ok) pages.push(r.page.record);
-    else notes.push(`notice page ${t.sourceUrl}: ${r.reason}`);
+    else notes.push(`notice page ${t.sourceUrl}: ${describeFailure(r)}`);
     const xml = t.national?.xml;
     if (!r.ok && typeof xml === "string" && !have2(xml)) {
       const x = await fetchPage2(runDir, t.id, xml, "notice", store);
@@ -24944,7 +25121,7 @@ async function readNotice(runDir, t, store, opts = {}) {
     } else {
       const landing = await fetchPage2(runDir, t.id, url, "document", store, { keepHtml: true });
       if (!landing.ok) {
-        notes.push(`documents page ${url}: ${landing.reason}`);
+        notes.push(`documents page ${url}: ${describeFailure(landing)}`);
       } else {
         pages.push(landing.page.record);
         const links = [...(landing.page.html ?? "").matchAll(DOC_LINK)].map((m) => {
@@ -26068,7 +26245,7 @@ function createAdapter() {
           if (typeof args.radius === "string" && radiusM === void 0) {
             throw new ToolError(`radius ${JSON.stringify(args.radius)} is not a distance \u2014 use 800, 800m or 2km`);
           }
-          const resolved = await resolveWhere(str3(args.query, "query"), {
+          const resolved2 = await resolveWhere(str3(args.query, "query"), {
             country: typeof args.country === "string" ? args.country : void 0,
             radiusM,
             // The refusal below tells the caller to pass `pick`, and until now
@@ -26076,15 +26253,15 @@ function createAdapter() {
             // over MCP and never scanned.
             pick: typeof args.pick === "number" ? clampInt(args.pick, 1, 5, 1) : void 0
           });
-          if (!resolved.ok) throw new ToolError(`${resolved.reason}. Call ultraprospect_where first, then pass its pick.`);
-          const outcome = await runScan(resolved.target, {
+          if (!resolved2.ok) throw new ToolError(`${resolved2.reason}. Call ultraprospect_where first, then pass its pick.`);
+          const outcome = await runScan(resolved2.target, {
             sections: typeof args.section === "string" ? args.section.split(",").map((s) => s.trim()) : void 0,
             legalForms: typeof args.legalForms === "string" ? args.legalForms.split(",").map((s) => s.trim()) : void 0,
             excludeLegalForms: typeof args.excludeLegalForms === "string" ? args.excludeLegalForms.split(",").map((s) => s.trim()) : void 0,
             minEmployees: typeof args.minEmployees === "number" ? args.minEmployees : void 0,
             maxResults: typeof args.maxResults === "number" ? clampInt(args.maxResults, 1, 1e4, 3e3) : void 0
           });
-          const run = newRun(typeof args.out === "string" ? args.out : DEFAULT_OUT, resolved.target.label);
+          const run = newRun(typeof args.out === "string" ? args.out : DEFAULT_OUT, resolved2.target.label);
           writeScan(run.dir, outcome);
           return {
             text: JSON.stringify(

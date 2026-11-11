@@ -559,6 +559,11 @@ export interface ResolveOutcome {
    * report a door we could not open as a company with no web presence.
    */
   unreadable: number;
+  /**
+   * Candidates this tool declined to request: not http(s), or not on a public
+   * host. Apart from `unreadable`, because no host was asked anything.
+   */
+  refused: number;
   unchanged: number;
   socials: number;
   notes: string[];
@@ -851,7 +856,18 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
     saidByEngine.add(n);
     note(`resolve: the keyless fallback reports — ${n}`);
   };
-  const outcome: ResolveOutcome = { pages: new Map(), corroborated: 0, rejected: 0, jsOnly: 0, unreadable: 0, unchanged: 0, socials: 0, socialOnly: 0, notes };
+  const outcome: ResolveOutcome = {
+    pages: new Map(),
+    corroborated: 0,
+    rejected: 0,
+    jsOnly: 0,
+    unreadable: 0,
+    refused: 0,
+    unchanged: 0,
+    socials: 0,
+    socialOnly: 0,
+    notes,
+  };
 
   const locale = searchLocaleFor(opts.countryCode, opts.lang);
   if (opts.useEngineSearch && locale) note(`resolve: the keyless fallback will search in ${locale}`);
@@ -909,6 +925,14 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
       if (kind === "directory") continue;
 
       const fetched = await fetchPage(runDir, place.id, url, "home", store);
+      if (!fetched.ok && fetched.reason === "not-public") {
+        // A candidate from a search hit or an OSM tag that points at this
+        // machine or its network. Declined here, and said so by name: counted
+        // with the unreachable ones it would read as a host that was down.
+        outcome.refused++;
+        note(`resolve: ${place.name} — ${url} was not requested: ${fetched.why}. Only public http(s) hosts are fetched.`);
+        continue;
+      }
       if (!fetched.ok) {
         // A host that turned us away, or never answered, teaches us NOTHING
         // about whose site this is — so it must not become the place's website,
@@ -986,7 +1010,8 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
   note(
     `resolve: ${outcome.corroborated} corroborated, ${outcome.rejected} fetched but unverified, ` +
       `${outcome.jsOnly} reachable but JavaScript-only, ${outcome.unreadable} candidate(s) refused or unreachable, ` +
-      `${outcome.socials} social profile(s), ${outcome.unchanged} left without a site`,
+      `${outcome.socials} social profile(s), ${outcome.unchanged} left without a site` +
+      (outcome.refused ? `, ${outcome.refused} candidate(s) not requested because their address is not a public one` : ""),
   );
   // Called out on its own line because it is the one outcome that reads as a
   // gap and is not: these businesses HAVE a web presence, it is simply not a

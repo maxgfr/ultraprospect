@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll } from "vitest";
 import { brandEngine } from "../src/engine.js";
+import { setHostResolver } from "../src/net.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "ultraprospect-test-"));
 process.env.ULTRAPROSPECT_CACHE_DIR = join(scratch, "cache");
@@ -35,6 +36,18 @@ process.env.ULTRAPROSPECT_POLITE_DELAY_MS = "0";
 // Branding here also makes the unit suite resolve the same env vars, cache root
 // and User-Agent that the CLI does, which is the point of a test harness.
 brandEngine();
+
+// NO DNS EITHER. Before it fetches a URL the tool asks whether its host is a
+// public one, and for a name that means resolving it (src/net.ts). The suite's
+// pages live on names like `beispiel.example`, so a real resolver would send a
+// query per test to whatever DNS server the machine has — network access by
+// another door, and a different answer on a captive portal that resolves
+// everything. The resolver installed here knows no host at all, which the guard
+// reads as "does not resolve" and lets through. A test about the guard itself
+// passes its own resolver to `publicUrlRefusal`, or swaps this one and puts it
+// back.
+export const NO_DNS = async (): Promise<string[]> => [];
+setHostResolver(NO_DNS);
 
 beforeAll(() => {
   global.fetch = (async (input: any) => {

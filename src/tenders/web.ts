@@ -20,7 +20,7 @@
 // the status is "unknown", and the report says to open the notice.
 import { createHash } from "node:crypto";
 import { search } from "../engine.js";
-import { fetchPage, type PageStore } from "../pages.js";
+import { describeFailure, fetchPage, type PageStore } from "../pages.js";
 import { foldAccents } from "../util.js";
 import type { Tender } from "./types.js";
 import { type DateOrder, numericDays, statusFromDeadline } from "./util.js";
@@ -374,6 +374,13 @@ export async function foldWebHits(
     const item = todo?.items.find((i) => i.country === country);
     const userTerms = item?.terms ?? [];
     const res = await fetchPage(runDir, id, url, "notice", store);
+    if (!res.ok && res.reason === "not-public") {
+      // A hit is whatever a search engine or an agent pooled. One that points
+      // at a private address was never requested: a rejection, with its reason,
+      // not a page that could not be read.
+      rejected.push({ url, why: describeFailure(res) });
+      continue;
+    }
     fetched += 1;
     if (!res.ok) {
       unreadable.push({ url, why: res.reason === "refused" ? `HTTP ${(res as any).status}` : res.reason });

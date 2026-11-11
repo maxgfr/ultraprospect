@@ -22,6 +22,7 @@
 // if a claim cannot point at a page on disk, it does not survive the gate.
 import { fetchSitemap, isAllowed, mapLimit, fetchRobots } from "./engine.js";
 import { detectBoards, fetchAllBoards, type AtsBoard } from "./ats.js";
+import { publicUrlAuthorizer } from "./net.js";
 import { fetchPage, type FetchedPage, type PageStore } from "./pages.js";
 import { peopleFrom } from "./people.js";
 import { buildSignals, extractEmails, extractPhones, extractSocials, roleOf, sameOriginLinks } from "./signals.js";
@@ -154,6 +155,11 @@ export interface EnrichOutcome {
   enriched: number;
   skipped: number;
   unreachable: number;
+  /**
+   * Sites this tool declined to request because their address is not a public
+   * one. Kept out of `unreachable`: nothing was asked, so nothing is known.
+   */
+  refused: number;
   /** Reachable, but served no text without a browser. Not the same as absent. */
   jsOnly: number;
   pagesFetched: number;
@@ -174,7 +180,9 @@ interface SiteMap {
 
 async function readSitemap(homeUrl: string): Promise<SiteMap> {
   try {
-    const sitemap = await fetchSitemap(homeUrl, { max: 3 });
+    // The sitemap names its own children and robots.txt names the sitemap, so
+    // both are followed under the public-host guard, redirects included.
+    const sitemap = await fetchSitemap(homeUrl, { max: 3, authorizeUrl: publicUrlAuthorizer() });
     const entries = sitemap?.urls ?? [];
     const lastmods = entries.map((u: { lastmod?: string }) => u.lastmod).filter((d): d is string => Boolean(d));
     return {
@@ -233,7 +241,7 @@ async function enrichOne(
   place: Place,
   store: PageStore,
   opts: EnrichOptions,
-): Promise<{ pages: PageRecord[]; jobs: number; reachable: boolean; why?: string }> {
+): Promise<{ pages: PageRecord[]; jobs: number; reachable: boolean; why?: string; refusal?: string }> {
   const home = place.website!.url;
   const fetched: FetchedPage[] = [];
   const boards: AtsBoard[] = [];
@@ -242,7 +250,7 @@ async function enrichOne(
   // following a citation rather than crawling, which is the distinction
   // webindex draws too — but everything we DISCOVER and then follow is a crawl,
   // and gets checked.
-  const robots = await fetchRobots(home).catch(() => undefined);
+  const robots = await fetchRobots(home, { authorizeUrl: publicUrlAuthorizer() }).catch(() => undefined);
   const allowed = (url: string) => (robots ? isAllowed(robots, url) : true);
 
   const sitemap = await readSitemap(home);
@@ -252,7 +260,13 @@ async function enrichOne(
     // "Unreachable" and "answers, but is a JavaScript shell" are different
     // facts about a prospect, and the second one is actionable: the site is
     // there, a human can open it, only the machine could not read it.
-    return { pages: [], jobs: 0, reachable: false, why: homeOutcome.reason };
+    return {
+      pages: [],
+      jobs: 0,
+      reachable: false,
+      why: homeOutcome.reason,
+      refusal: homeOutcome.reason === "not-public" ? homeOutcome.why : undefined,
+    };
   }
   const homePage = homeOutcome.page;
   fetched.push(homePage);
@@ -379,7 +393,16 @@ export async function runEnrich(runDir: string, places: Place[], store: PageStor
   }
   if (opts.limit) targets = targets.slice(0, opts.limit);
 
-  const outcome: EnrichOutcome = { enriched: 0, skipped: places.length - targets.length, unreachable: 0, jsOnly: 0, pagesFetched: 0, jobsFound: 0, notes };
+  const outcome: EnrichOutcome = {
+    enriched: 0,
+    skipped: places.length - targets.length,
+    unreachable: 0,
+    refused: 0,
+    jsOnly: 0,
+    pagesFetched: 0,
+    jobsFound: 0,
+    notes,
+  };
   if (targets.length === 0) {
     note("enrich: no place has a corroborated website yet — run `resolve` first");
     return outcome;
@@ -408,6 +431,16 @@ export async function runEnrich(runDir: string, places: Place[], store: PageStor
       outcome.unreachable++;
       note(
         `enrich: ${place.name} — reading ${place.website?.url} failed (${"error" in result ? result.error : "unknown error"}). This says nothing about whether the site is up.`,
+      );
+      return;
+    }
+    if (!result.reachable && result.why === "not-public") {
+      // Our refusal, not the site's silence: no request left this machine, so
+      // the place is neither counted as unreachable nor marked `siteReachable:
+      // false`. Both would state something about a site nobody asked.
+      outcome.refused++;
+      note(
+        `enrich: ${place.name} — ${place.website?.url} was not requested: ${"refusal" in result ? result.refusal : "its address is not a public one"}. Only public http(s) hosts are fetched.`,
       );
       return;
     }
@@ -448,7 +481,8 @@ export async function runEnrich(runDir: string, places: Place[], store: PageStor
 
   note(
     `enrich: ${outcome.enriched} site(s) read, ${outcome.pagesFetched} page(s) stored, ${outcome.jobsFound} opening(s), ${outcome.unreachable} unreachable` +
-      (outcome.jsOnly ? ` (of which ${outcome.jsOnly} answer but serve no text without a browser)` : ""),
+      (outcome.jsOnly ? ` (of which ${outcome.jsOnly} answer but serve no text without a browser)` : "") +
+      (outcome.refused ? `, ${outcome.refused} not requested because their address is not a public one` : ""),
   );
   return outcome;
 }
