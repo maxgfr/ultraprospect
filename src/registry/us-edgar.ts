@@ -95,20 +95,55 @@ function edgarNameKey(raw: string): string {
     .trim();
 }
 
-/** cik -> {name, ticker}, from the bulk file. Cached for the process; it is ~200 KB and changes daily. */
-let tickerIndex: EdgarIndexEntry[] | undefined;
+/**
+ * cik -> {name, ticker}, from the bulk file. Cached for the process; it is ~200 KB and changes daily.
+ *
+ * The PROMISE is cached, not its result. `confirm` looks rows up concurrently,
+ * and with the result cached every lookup that started before the first fetch
+ * finished fetched the whole file again.
+ */
+let tickerIndex: Promise<EdgarIndexEntry[]> | undefined;
 
-export async function companyIndex(strict = false): Promise<EdgarIndexEntry[]> {
-  if (tickerIndex) return tickerIndex;
+async function loadCompanyIndex(strict: boolean): Promise<EdgarIndexEntry[]> {
   const data = await get(`${WWW}/files/company_tickers.json`, strict);
   if (!data || typeof data !== "object") return [];
-  tickerIndex = Object.values(data as Record<string, any>)
+  return Object.values(data as Record<string, any>)
     .map((e) => {
       const name = String(e?.title ?? "");
       return { cik: String(e?.cik_str ?? "").padStart(10, "0"), name, ticker: String(e?.ticker ?? ""), key: edgarNameKey(name) };
     })
     .filter((e) => e.cik && e.name);
-  return tickerIndex;
+}
+
+/**
+ * The index, fetched once for every concurrent caller.
+ *
+ * The shared fetch is always STRICT — an HTTP failure rejects rather than
+ * answering an empty index — and each caller decides what a failure means to
+ * it: `verifyId` (strict) lets it through so `confirm` records EDGAR as not
+ * asked, a name lookup reads it as no hit, as it always has.
+ */
+export function companyIndex(strict = false): Promise<EdgarIndexEntry[]> {
+  const shared = sharedCompanyIndex();
+  return strict ? shared : shared.catch(() => []);
+}
+
+function sharedCompanyIndex(): Promise<EdgarIndexEntry[]> {
+  if (tickerIndex) return tickerIndex;
+  const pending = loadCompanyIndex(true).then(
+    (index) => {
+      // A failed or empty answer is not kept, so the next lookup asks again —
+      // unless a reset already replaced this promise with a newer one.
+      if (index.length === 0 && tickerIndex === pending) tickerIndex = undefined;
+      return index;
+    },
+    (e) => {
+      if (tickerIndex === pending) tickerIndex = undefined;
+      throw e;
+    },
+  );
+  tickerIndex = pending;
+  return pending;
 }
 
 /** Exposed for the tests: the module-level cache must not leak between cases. */

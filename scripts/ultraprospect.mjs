@@ -15991,15 +15991,32 @@ function edgarNameKey(raw) {
   return raw.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 var tickerIndex;
-async function companyIndex(strict = false) {
-  if (tickerIndex) return tickerIndex;
+async function loadCompanyIndex(strict) {
   const data = await get7(`${WWW}/files/company_tickers.json`, strict);
   if (!data || typeof data !== "object") return [];
-  tickerIndex = Object.values(data).map((e) => {
+  return Object.values(data).map((e) => {
     const name = String(e?.title ?? "");
     return { cik: String(e?.cik_str ?? "").padStart(10, "0"), name, ticker: String(e?.ticker ?? ""), key: edgarNameKey(name) };
   }).filter((e) => e.cik && e.name);
-  return tickerIndex;
+}
+function companyIndex(strict = false) {
+  const shared = sharedCompanyIndex();
+  return strict ? shared : shared.catch(() => []);
+}
+function sharedCompanyIndex() {
+  if (tickerIndex) return tickerIndex;
+  const pending = loadCompanyIndex(true).then(
+    (index) => {
+      if (index.length === 0 && tickerIndex === pending) tickerIndex = void 0;
+      return index;
+    },
+    (e) => {
+      if (tickerIndex === pending) tickerIndex = void 0;
+      throw e;
+    }
+  );
+  tickerIndex = pending;
+  return pending;
 }
 function resetCompanyIndex() {
   tickerIndex = void 0;

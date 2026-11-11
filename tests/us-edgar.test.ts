@@ -6,6 +6,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls: string[] = [];
+/** Set to make the next ticker-file request fail. */
+let failIndex = false;
 
 /** Real rows of company_tickers.json, including Alphabet's two tickers on one CIK. */
 const TICKERS = {
@@ -23,7 +25,13 @@ vi.mock("../src/engine.js", async (importOriginal) => ({
     // Yield once, so two lookups started together are both in flight before
     // the index answers — the race a cached RESULT does not cover.
     await new Promise((r) => setTimeout(r, 1));
-    if (url.endsWith("/files/company_tickers.json")) return { ok: true, status: 200, data: TICKERS };
+    if (url.endsWith("/files/company_tickers.json")) {
+      if (failIndex) {
+        failIndex = false;
+        return { ok: false, status: 503, data: undefined };
+      }
+      return { ok: true, status: 200, data: TICKERS };
+    }
     const cik = url.match(/CIK(\d+)\.json$/)?.[1];
     const row = Object.values(TICKERS).find((t) => String(t.cik_str).padStart(10, "0") === cik);
     return row ? { ok: true, status: 200, data: { cik, name: row.title } } : { ok: false, status: 404, data: undefined };
@@ -34,8 +42,11 @@ const { usEdgar, resetCompanyIndex } = await import("../src/registry/us-edgar.js
 
 beforeEach(() => {
   calls.length = 0;
+  failIndex = false;
   resetCompanyIndex();
 });
+
+const indexFetches = () => calls.filter((u) => u.endsWith("/files/company_tickers.json")).length;
 
 describe("us-edgar lookup", () => {
   it("finds a company whose name has an ampersand in it", async () => {
@@ -51,5 +62,21 @@ describe("us-edgar lookup", () => {
     const hits = await usEdgar.lookup!({ names: ["Alphabet"], countryCode: "us" }, {});
     expect(hits.map((r) => r.id)).toEqual(["0001652044"]);
     expect(calls.filter((u) => u.includes("/submissions/")).length).toBe(1);
+  });
+
+  it("fetches the index once for two lookups that start together", async () => {
+    await Promise.all([
+      usEdgar.lookup!({ names: ["Alphabet"], countryCode: "us" }, {}),
+      usEdgar.lookup!({ names: ["Johnson & Johnson"], countryCode: "us" }, {}),
+    ]);
+    expect(indexFetches()).toBe(1);
+  });
+
+  it("does not keep a failed index fetch, so the next lookup asks again", async () => {
+    failIndex = true;
+    // An outage is reported as one (confirm then records EDGAR as not asked), never as "no match".
+    await expect(usEdgar.lookup!({ names: ["Alphabet"], countryCode: "us" }, {})).rejects.toThrow(/HTTP 503/);
+    expect((await usEdgar.lookup!({ names: ["Alphabet"], countryCode: "us" }, {})).map((r) => r.id)).toEqual(["0001652044"]);
+    expect(indexFetches()).toBe(2);
   });
 });
