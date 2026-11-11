@@ -23,7 +23,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type CheckReport, runCheck } from "../src/check.js";
+import { type CheckReport, factualParagraphs, runCheck } from "../src/check.js";
 import { DOSSIER_TEMPLATE } from "../src/dossier.js";
 import type { OsmPoi, Place, RunManifest } from "../src/types.js";
 
@@ -435,5 +435,17 @@ describe("a short line can still be a claim", () => {
   it("still rejects a wrapped SHORT-lined paragraph with no citation anywhere in it", () => {
     writeDossier("osm:n1", ["# Company", "", "Acme is a pizzeria in", "Vincennes with a menu of", "more than fifty pizzas."]);
     expect(rules(check([p()]))).toEqual(["claim-uncited"]);
+  });
+});
+
+describe("headings with a figure in them", () => {
+  it("lets the document's title and a section number through, and still holds a figure in a heading to a citation", () => {
+    expect(factualParagraphs("# Studio 54\n\nNothing else here.").map((p) => p.text)).not.toContain("# Studio 54");
+    expect(factualParagraphs("# Response — Fourniture de 12 véhicules (marché 2026-014)\n").map((p) => p.text)).toEqual([]);
+    expect(factualParagraphs("# Acme\n\n## 1. Understanding of the need\n").map((p) => p.text)).toEqual([]);
+    // Only the FIRST level-one heading is a title.
+    expect(factualParagraphs("# Acme\n\n### Revenue is €5M\n").map((p) => p.text)).toEqual(["### Revenue is €5M"]);
+    expect(factualParagraphs("# Acme\n\n# Founded in 1987\n").map((p) => p.text)).toEqual(["# Founded in 1987"]);
+    expect(factualParagraphs("# Acme\n\n## 2. Staff of 40\n").map((p) => p.text)).toEqual(["## 2. Staff of 40"]);
   });
 });

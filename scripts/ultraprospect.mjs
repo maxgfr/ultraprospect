@@ -22718,8 +22718,14 @@ function isTableSeparator(t) {
   return t.includes("|") && t.includes("-") && /^[|\s:-]+$/.test(t);
 }
 var LIST_ITEM = /^(?:[-*+]|\d+[.)])\s+/;
-function isClaimingHeading(t) {
-  return t.startsWith("#") && /[\p{N}\p{Sc}]/u.test(t);
+function isClaimingHeading(t, isTitle = false) {
+  if (!t.startsWith("#")) return false;
+  if (isTitle) return false;
+  const body = t.replace(/^(#+\s*)\d+(?:\.\d+)*[.)]\s+/, "$1");
+  return /[\p{N}\p{Sc}]/u.test(body);
+}
+function isTitleLine(t) {
+  return /^#\s/.test(t);
 }
 function isStructural(line, next = "") {
   const t = line.trim();
@@ -23035,6 +23041,7 @@ function factualParagraphs(text3) {
   let start = 0;
   let buffer = [];
   let quoted = false;
+  let titled = false;
   const flush = () => {
     if (buffer.length === 0) return;
     const paragraph2 = buffer.join(" ");
@@ -23062,14 +23069,16 @@ function factualParagraphs(text3) {
     if (buffer.length && quoted !== isQuote) flush();
     quoted = isQuote;
     const next = (lines[i + 1] ?? "").trim().replace(/^(?:>\s*)+/, "");
-    if (isClaimingHeading(t)) {
+    const isTitle = !titled && isTitleLine(t);
+    if (isTitle) titled = true;
+    if (isClaimingHeading(t, isTitle)) {
       flush();
       start = i;
       buffer.push(t);
       flush();
       continue;
     }
-    if (isStructural(t, next)) {
+    if (isTitle || isStructural(t, next)) {
       flush();
       continue;
     }

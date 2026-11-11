@@ -90,8 +90,21 @@ const LIST_ITEM = /^(?:[-*+]|\d+[.)])\s+/;
  * in the dossier written in the largest type, and exempting it let a whole
  * uncited write-up pass as a stack of headings.
  */
-function isClaimingHeading(t: string): boolean {
-  return t.startsWith("#") && /[\p{N}\p{Sc}]/u.test(t);
+function isClaimingHeading(t: string, isTitle = false): boolean {
+  if (!t.startsWith("#")) return false;
+  // The document's title names its subject, and a subject can carry a figure:
+  // `# Studio 54`, `# 3M France`, the `# Response — Fourniture de 12 véhicules
+  // (marché 2026-014)` the bid packet prescribes. Holding that line to a
+  // citation failed the tool's own templates.
+  if (isTitle) return false;
+  // A section number is numbering, not a figure: `## 1. Understanding of the need`.
+  const body = t.replace(/^(#+\s*)\d+(?:\.\d+)*[.)]\s+/, "$1");
+  return /[\p{N}\p{Sc}]/u.test(body);
+}
+
+/** The first level-one heading of a document is its title. */
+function isTitleLine(t: string): boolean {
+  return /^#\s/.test(t);
 }
 
 /**
@@ -591,6 +604,7 @@ export function factualParagraphs(text: string): { line: number; text: string }[
   let start = 0;
   let buffer: string[] = [];
   let quoted = false;
+  let titled = false;
   const flush = () => {
     if (buffer.length === 0) return;
     const paragraph = buffer.join(" ");
@@ -624,7 +638,9 @@ export function factualParagraphs(text: string): { line: number; text: string }[
     const next = (lines[i + 1] ?? "").trim().replace(/^(?:>\s*)+/, "");
     // A heading with a figure in it is a claim of its own: it closes the
     // paragraph before it and must not borrow the citation of the one after.
-    if (isClaimingHeading(t)) {
+    const isTitle = !titled && isTitleLine(t);
+    if (isTitle) titled = true;
+    if (isClaimingHeading(t, isTitle)) {
       flush();
       start = i;
       buffer.push(t);
@@ -633,7 +649,7 @@ export function factualParagraphs(text: string): { line: number; text: string }[
     }
     // A heading, a rule, a table's scaffolding: structure closes the paragraph
     // before it and is not a claim in its own right.
-    if (isStructural(t, next)) {
+    if (isTitle || isStructural(t, next)) {
       flush();
       continue;
     }
