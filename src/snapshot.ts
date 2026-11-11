@@ -44,7 +44,7 @@
 // five million rows: the mapper runs once per snapshot instead of once per query,
 // and a record that repeats its own register number four times costs a gigabyte
 // to say the same thing.
-import { createReadStream, createWriteStream } from "node:fs";
+import { createReadStream, createWriteStream, linkSync } from "node:fs";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
@@ -495,16 +495,43 @@ function takeIngestLock(connectorId: string, target: string): () => void {
     }
     let holder: { pid?: number; startedAt?: string } = {};
     let age = 0;
+    let seen = "";
     try {
       age = Date.now() - statSync(path).mtimeMs;
-      holder = JSON.parse(readFileSync(path, "utf8"));
+      seen = readFileSync(path, "utf8");
+      holder = JSON.parse(seen);
     } catch {
       // Unreadable or empty: possibly another process between creating the lock
       // and writing it. Not stale on that alone — only by age.
     }
     const dead = typeof holder.pid === "number" && !pidAlive(holder.pid);
     if (dead || age > INGEST_LOCK_MAX_AGE_MS) {
-      rmSync(path, { force: true });
+      // TAKEN OVER BY RENAME, and only if it is still the lock judged stale.
+      // Removing the path outright let two processes that both saw the same
+      // dead holder each delete it — the second deleting the FIRST one's fresh
+      // lock — and both go on to ingest. A rename moves one particular file;
+      // if what was moved is not what was read, somebody took the lock in
+      // between, and it is put back.
+      const aside = `${path}.stale-${process.pid}-${Date.now()}`;
+      try {
+        renameSync(path, aside);
+      } catch {
+        continue; // Gone already: try to take it.
+      }
+      let moved = "";
+      try {
+        moved = readFileSync(aside, "utf8");
+      } catch {
+        // Unreadable: treated as not the one judged stale.
+      }
+      if (moved !== seen) {
+        try {
+          linkSync(aside, path);
+        } catch {
+          // Somebody holds the path already; theirs stands.
+        }
+      }
+      rmSync(aside, { force: true });
       continue;
     }
     throw new Error(

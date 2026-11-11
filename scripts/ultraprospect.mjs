@@ -13994,7 +13994,7 @@ var frSirene = {
 };
 
 // src/snapshot.ts
-import { createReadStream as createReadStream2, createWriteStream } from "fs";
+import { createReadStream as createReadStream2, createWriteStream, linkSync as linkSync2 } from "fs";
 import { closeSync as closeSync2, existsSync as existsSync4, mkdirSync as mkdirSync2, openSync as openSync2, readFileSync as readFileSync6, readdirSync as readdirSync4, renameSync as renameSync2, rmSync as rmSync3, statSync as statSync6, writeFileSync as writeFileSync6, writeSync as writeSync2 } from "fs";
 import { createInterface as createInterface2 } from "readline";
 import { Readable } from "stream";
@@ -14583,14 +14583,33 @@ function takeIngestLock(connectorId, target) {
     }
     let holder = {};
     let age = 0;
+    let seen = "";
     try {
       age = Date.now() - statSync6(path).mtimeMs;
-      holder = JSON.parse(readFileSync6(path, "utf8"));
+      seen = readFileSync6(path, "utf8");
+      holder = JSON.parse(seen);
     } catch {
     }
     const dead4 = typeof holder.pid === "number" && !pidAlive2(holder.pid);
     if (dead4 || age > INGEST_LOCK_MAX_AGE_MS) {
-      rmSync3(path, { force: true });
+      const aside = `${path}.stale-${process.pid}-${Date.now()}`;
+      try {
+        renameSync2(path, aside);
+      } catch {
+        continue;
+      }
+      let moved = "";
+      try {
+        moved = readFileSync6(aside, "utf8");
+      } catch {
+      }
+      if (moved !== seen) {
+        try {
+          linkSync2(aside, path);
+        } catch {
+        }
+      }
+      rmSync3(aside, { force: true });
       continue;
     }
     throw new Error(
