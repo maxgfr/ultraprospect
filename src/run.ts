@@ -182,6 +182,7 @@ export function emptyManifest(label: string): RunManifest {
       mergedByIdentifier: 0,
       undecided: 0,
       withWebsite: 0,
+      corroboratedWebsites: 0,
       enrichedTier1: 0,
       enrichedTier2: 0,
       confirmed: 0,

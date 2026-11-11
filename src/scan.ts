@@ -509,6 +509,7 @@ export async function runScan(target: GeoTarget, opts: ScanOptions = {}): Promis
     mergedByIdentifier: [...merged.values()].filter((decision) => decision.by === "identifier").length,
     undecided: undecided.length,
     withWebsite: places.filter((p) => p.website?.url).length,
+    corroboratedWebsites: places.filter((p) => p.website?.confidence === "corroborated").length,
   };
   manifest.licences = licencesFor(lanes);
   manifest.truncated = lanes.some((l) => l.truncated);

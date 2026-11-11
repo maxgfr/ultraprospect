@@ -381,7 +381,18 @@ export interface RunManifest {
     /** Cross-lane merges made from an exact identifier declared in OSM. */
     mergedByIdentifier: number;
     undecided: number;
+    /**
+     * Places with a website on record, however it got there: declared in OSM,
+     * found by `resolve`, corroborated or not. It only grows as work is done.
+     */
     withWebsite: number;
+    /**
+     * Places whose website `resolve` proved belongs to them. Absent on a
+     * manifest written before this count existed. `withWebsite` used to be
+     * overwritten with this number after `resolve`, so the same field meant
+     * "declared" after a scan (1 365 in Hamburg) and "proved" after resolve (35).
+     */
+    corroboratedWebsites?: number;
     enrichedTier1: number;
     enrichedTier2: number;
     /** Places a register confirmed after the fact, outside a sweep. */

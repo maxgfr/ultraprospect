@@ -16491,6 +16491,7 @@ function emptyManifest(label) {
       mergedByIdentifier: 0,
       undecided: 0,
       withWebsite: 0,
+      corroboratedWebsites: 0,
       enrichedTier1: 0,
       enrichedTier2: 0,
       confirmed: 0,
@@ -20220,7 +20221,8 @@ async function runScan(target, opts = {}) {
     merged: claimed.size,
     mergedByIdentifier: [...merged.values()].filter((decision) => decision.by === "identifier").length,
     undecided: undecided.length,
-    withWebsite: places.filter((p) => p.website?.url).length
+    withWebsite: places.filter((p) => p.website?.url).length,
+    corroboratedWebsites: places.filter((p) => p.website?.confidence === "corroborated").length
   };
   manifest.licences = licencesFor(lanes);
   manifest.truncated = lanes.some((l) => l.truncated);
@@ -28297,7 +28299,8 @@ async function cmdResolve(values, bools) {
   });
   writePlaces(runDir, places);
   const manifest = requireManifest(runDir);
-  manifest.counts.withWebsite = places.filter((p) => p.website?.confidence === "corroborated").length;
+  manifest.counts.withWebsite = places.filter((p) => p.website?.url).length;
+  manifest.counts.corroboratedWebsites = places.filter((p) => p.website?.confidence === "corroborated").length;
   manifest.notes.push(...outcome.notes);
   writeRunManifest(runDir, manifest);
   if (bools.has("json")) {

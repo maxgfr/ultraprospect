@@ -992,7 +992,11 @@ async function cmdResolve(values: Record<string, string>, bools: ReadonlySet<str
 
   writePlaces(runDir, places);
   const manifest = requireManifest(runDir);
-  manifest.counts.withWebsite = places.filter((p) => p.website?.confidence === "corroborated").length;
+  // Two counts, each keeping one meaning. Overwriting `withWebsite` with the
+  // corroborated number made it fall as work was done: 1 365 sites on record
+  // after a Hamburg scan, 35 after resolve proved some of them.
+  manifest.counts.withWebsite = places.filter((p) => p.website?.url).length;
+  manifest.counts.corroboratedWebsites = places.filter((p) => p.website?.confidence === "corroborated").length;
   manifest.notes.push(...outcome.notes);
   writeRunManifest(runDir, manifest);
 
