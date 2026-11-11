@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import {
   extractHandelsregister,
+  extractNorwegianOrgNumbers,
   extractLegalIds,
   extractSpanishNif,
   extractUkCompanyNumber,
@@ -123,7 +124,54 @@ describe("isNorwegianOrgNumber", () => {
   });
 });
 
+describe("extractNorwegianOrgNumbers", () => {
+  it("reads every way a Norwegian site writes the organisation number", () => {
+    for (const written of [
+      "Org.nr. 923 609 016",
+      "Org. nr.: 923609016",
+      "Org nr 923 609 016",
+      "Orgnr: 923609016",
+      "Organisasjonsnummer: 923 609 016",
+      "Organisasjonsnr. 923 609 016",
+      "Foretaksregisteret NO 923 609 016 MVA",
+      "Equinor ASA · Org.nr. 923 609 016",
+    ]) {
+      expect(extractNorwegianOrgNumbers(written), written).toEqual([{ kind: "orgnr", value: "923609016" }]);
+    }
+  });
+
+  it("reads the VAT form on its own, and reports one number once whatever forms it takes", () => {
+    expect(extractNorwegianOrgNumbers("Equinor ASA, NO 923 609 016 MVA")).toEqual([{ kind: "vat", value: "NO923609016MVA" }]);
+    expect(extractNorwegianOrgNumbers("Org.nr. 923 609 016 · MVA: NO 923 609 016 MVA")).toEqual([{ kind: "orgnr", value: "923609016" }]);
+  });
+
+  it("refuses nine digits that fail the mod-11 check, and the start of a longer number", () => {
+    // Equinor's number with its check digit changed is nobody's.
+    expect(extractNorwegianOrgNumbers("Org.nr. 923 609 017")).toEqual([]);
+    expect(extractNorwegianOrgNumbers("Org.nr. 9236090161")).toEqual([]);
+    // A phone number without the words that introduce an organisation number.
+    expect(extractNorwegianOrgNumbers("Telefon 923 609 016")).toEqual([]);
+  });
+
+  it("goes past an invalid number to a valid one on the same page", () => {
+    expect(extractNorwegianOrgNumbers("Org.nr. 123 456 789. Morselskap: org.nr. 984 851 006")).toEqual([{ kind: "orgnr", value: "984851006" }]);
+  });
+});
+
 describe("extractLegalIds", () => {
+  it("reads a Norwegian organisation number on a Norwegian run, filed under Norway", () => {
+    // LEGAL_NOTICE_COUNTRIES has always said Norwegian sites must publish one,
+    // and with no pattern to read it every Norwegian run then reported that not
+    // one site had.
+    expect(legalIdCoverage("no").expected).toBe(true);
+    expect(extractLegalIds("Equinor ASA, Forusbeen 50, 4035 Stavanger. Org.nr. 923 609 016", "no", "P2")).toEqual([
+      { kind: "orgnr", value: "923609016", countryCode: "no", from: "P2" },
+    ]);
+    expect(extractLegalIds("NO 923 609 016 MVA", "no")).toEqual([{ kind: "vat", value: "NO923609016MVA", countryCode: "no", from: undefined }]);
+    // Not tried on another country's run, like every national pattern.
+    expect(extractLegalIds("Org.nr. 923 609 016", "de")).toEqual([]);
+  });
+
   it("puts the national register number before the VAT number", () => {
     // The register number identifies the company in the register this tool
     // would query; a VAT number identifies a taxpayer.

@@ -183,6 +183,45 @@ export function isNorwegianOrgNumber(digits: string): boolean {
   return check === Number(digits[8]);
 }
 
+/**
+ * Every Norwegian organisation number a page publishes.
+ *
+ * Norwegian sites print it as "Org.nr. 923 609 016", "Org. nr: 923609016",
+ * "Organisasjonsnummer 923 609 016" or "Foretaksregisteret NO 923 609 016 MVA",
+ * and the VAT form on its own as "NO 923 609 016 MVA" (MVA is the VAT
+ * register). All of them carry the same nine digits, so one number is
+ * returned once whichever forms it appears in — `confirm` asks one question per
+ * number, not per spelling.
+ *
+ * Only numbers that pass the mod-11 check are returned. Nine digits after
+ * "Org.nr" that fail it are a typo or something else entirely, and asking the
+ * register about them can only produce a stranger.
+ */
+export function extractNorwegianOrgNumbers(text: string): Array<{ kind: "orgnr" | "vat"; value: string }> {
+  const out: Array<{ kind: "orgnr" | "vat"; value: string; digits: string }> = [];
+  // Three groups of three, a space or a no-break space between them, and not
+  // the first nine digits of a longer number.
+  const nine = String.raw`(\d{3}[ \u00a0]?\d{3}[ \u00a0]?\d{3})(?!\d)`;
+  const keyword = new RegExp(
+    String.raw`\b(?:Org(?:anisasjons)?\.?\s*nr\.?|Organisasjonsnummer|Foretaksregisteret)[\s:.,\u2013\u2014-]{0,6}(?:NO[ \u00a0]?)?${nine}`,
+    "gi",
+  );
+  // "NO" in capitals only: matched case-insensitively it would be the English
+  // word in "no 123 456 789", which is an order or phone number.
+  const vat = new RegExp(String.raw`(?<![A-Za-z])NO[ \u00a0]?${nine}[ \u00a0]?[Mm][Vv][Aa]\b`, "g");
+  const add = (kind: "orgnr" | "vat", raw: string) => {
+    const digits = raw.replace(/\D/g, "");
+    if (!isNorwegianOrgNumber(digits) || out.some((o) => o.digits === digits)) return;
+    out.push({ kind, value: kind === "vat" ? `NO${digits}MVA` : digits, digits });
+  };
+  // Keyword forms first: one that is also followed by MVA is reported as the
+  // organisation number, which is what the page called it, and the bare VAT
+  // form only when no keyword form already carried the same digits.
+  for (const m of text.matchAll(keyword)) add("orgnr", m[1]!);
+  for (const m of text.matchAll(vat)) add("vat", m[1]!);
+  return out.map(({ kind, value }) => ({ kind, value }));
+}
+
 /** A Spanish CIF/NIF, from the words that introduce it. Distinct from the VAT form, which prefixes ES. */
 export function extractSpanishNif(text: string): string | undefined {
   // Spanish pages write it "CIF", "C.I.F." and "N.I.F." about equally often.
@@ -222,6 +261,14 @@ export function extractLegalIds(text: string, countryCode: string | undefined, p
   if (cc === "es" || !cc) {
     const es = extractSpanishNif(text);
     if (es) push({ kind: "nif", value: es, countryCode: "es", from: pageId });
+  }
+  // Norway is in LEGAL_NOTICE_COUNTRIES, so the coverage note told every
+  // Norwegian run that sites must publish a registration number — and with no
+  // pattern to read one, each run then reported that not one site had. Both
+  // kinds are ones no-brreg's `verifyId` answers; Norway is not in VIES, so
+  // the "vat" form goes to the Norwegian register and nowhere else.
+  if (cc === "no" || !cc) {
+    for (const no of extractNorwegianOrgNumbers(text)) push({ kind: no.kind, value: no.value, countryCode: "no", from: pageId });
   }
 
   for (const vat of extractVatNumbers(text)) {

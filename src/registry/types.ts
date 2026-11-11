@@ -145,7 +145,7 @@ export interface RegistryRecord {
 
 /** A legal identifier read off a company's own site, before anyone has confirmed it. */
 export interface LegalId {
-  /** "vat" | "siren" | "siret" | "company-number" | "hrb" | "lei" | "cik" … */
+  /** "vat" | "siren" | "siret" | "company-number" | "hrb" | "orgnr" | "lei" | "cik" … */
   kind: string;
   value: string;
   /** ISO-3166-1 alpha-2, lowercased. Decides which authority is asked. */

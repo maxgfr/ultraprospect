@@ -498,6 +498,29 @@ describe("runConfirm — which authority is asked, and how often", () => {
     expect(asked).toEqual(["gr:EL030440244"]);
   });
 
+  it("sends a Norwegian organisation number to the Norwegian register and attaches its answer", async () => {
+    // Norway was in LEGAL_NOTICE_COUNTRIES with no extractor behind it, so a
+    // Norwegian run read nothing off any site and confirmed nothing by number.
+    const equinor = rec({ connectorId: "no-brreg", id: "923609016", legalName: "EQUINOR ASA", names: ["EQUINOR ASA"], countryCode: "no" });
+    const asked: string[] = [];
+    selection.confirm = [
+      fake({
+        id: "no-brreg",
+        countries: ["no"],
+        verifyId: async (id) => {
+          asked.push(`${id.countryCode}:${id.kind}:${id.value}`);
+          return id.value === "923609016" ? equinor : undefined;
+        },
+      }),
+    ];
+    const p = place({ name: "Equinor", pages: ["P1"], address: { commune: "Stavanger" } });
+    const dir = runWithPage(p.id, "P1", "Kontakt oss\nEquinor ASA, Forusbeen 50, 4035 Stavanger\nOrg.nr. 923 609 016");
+    const outcome = await runConfirm(dir, [p], { countryCode: "no" });
+    expect(asked).toEqual(["no:orgnr:923609016"]);
+    expect(outcome.verified).toBe(1);
+    expect(p.registry?.legalName).toBe("EQUINOR ASA");
+  });
+
   it("asks about one identifier once, however many pages print it", async () => {
     // A VAT number sits in every page's footer. A live Hamburg run put the same
     // one to VIES three times, a second apiece, for the same answer.

@@ -15783,6 +15783,23 @@ function isNorwegianOrgNumber(digits) {
   const check = remainder === 0 ? 0 : 11 - remainder;
   return check === Number(digits[8]);
 }
+function extractNorwegianOrgNumbers(text3) {
+  const out2 = [];
+  const nine = String.raw`(\d{3}[ \u00a0]?\d{3}[ \u00a0]?\d{3})(?!\d)`;
+  const keyword = new RegExp(
+    String.raw`\b(?:Org(?:anisasjons)?\.?\s*nr\.?|Organisasjonsnummer|Foretaksregisteret)[\s:.,\u2013\u2014-]{0,6}(?:NO[ \u00a0]?)?${nine}`,
+    "gi"
+  );
+  const vat = new RegExp(String.raw`(?<![A-Za-z])NO[ \u00a0]?${nine}[ \u00a0]?[Mm][Vv][Aa]\b`, "g");
+  const add2 = (kind, raw) => {
+    const digits = raw.replace(/\D/g, "");
+    if (!isNorwegianOrgNumber(digits) || out2.some((o) => o.digits === digits)) return;
+    out2.push({ kind, value: kind === "vat" ? `NO${digits}MVA` : digits, digits });
+  };
+  for (const m of text3.matchAll(keyword)) add2("orgnr", m[1]);
+  for (const m of text3.matchAll(vat)) add2("vat", m[1]);
+  return out2.map(({ kind, value }) => ({ kind, value }));
+}
 function extractSpanishNif(text3) {
   const m = /\b(?:C\.?I\.?F\.?|N\.?I\.?F\.?)\s*[:.]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])\b/i.exec(text3);
   return m?.[1]?.toUpperCase();
@@ -15808,6 +15825,9 @@ function extractLegalIds(text3, countryCode, pageId) {
   if (cc === "es" || !cc) {
     const es = extractSpanishNif(text3);
     if (es) push({ kind: "nif", value: es, countryCode: "es", from: pageId });
+  }
+  if (cc === "no" || !cc) {
+    for (const no of extractNorwegianOrgNumbers(text3)) push({ kind: no.kind, value: no.value, countryCode: "no", from: pageId });
   }
   for (const vat of extractVatNumbers(text3)) {
     push({ kind: "vat", value: vat.value, countryCode: vat.countryCode === "el" ? "gr" : vat.countryCode, from: pageId });

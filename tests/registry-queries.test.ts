@@ -52,6 +52,7 @@ const { gleif } = await import("../src/registry/gleif.js");
 const { noBrreg } = await import("../src/registry/no-brreg.js");
 const { plKrs } = await import("../src/registry/pl-krs.js");
 const { usEdgar, resetCompanyIndex } = await import("../src/registry/us-edgar.js");
+const { extractLegalIds } = await import("../src/legal-notice.js");
 
 const ctx = { keys: {} as Record<string, string | undefined> };
 
@@ -144,6 +145,21 @@ describe("no-brreg", () => {
     expect(await noBrreg.verifyId!({ kind: "orgnr", value: "9236090161", countryCode: "no" }, ctx)).toBeUndefined();
     expect(await noBrreg.verifyId!({ kind: "vat", value: "NO 923 609 016 0 MVA", countryCode: "no" }, ctx)).toBeUndefined();
     expect(calls).toHaveLength(0);
+  });
+
+  it("answers both kinds the Norwegian legal-notice extractor emits", async () => {
+    // `confirm` hands each extracted id to every connector covering its country
+    // whose `canVerify` does not refuse it; a kind no-brreg's `verifyId` turned
+    // down would be recorded as asked and never answered.
+    answer = { ok: true, status: 200, data: {} };
+    const ids = extractLegalIds("Org.nr. 923 609 016. Morselskap: NO 984 851 006 MVA", "no");
+    expect(ids.map((i) => i.kind)).toEqual(["orgnr", "vat"]);
+    for (const id of ids) {
+      expect(noBrreg.countries).toContain(id.countryCode);
+      expect(noBrreg.canVerify?.(id) ?? true).toBe(true);
+      await noBrreg.verifyId!(id, ctx);
+    }
+    expect(calls.map((c) => c.url.replace(/^.*\/enheter\//, ""))).toEqual(["923609016", "984851006"]);
   });
 
   it("refuses nine digits whose mod-11 check digit is wrong", async () => {
