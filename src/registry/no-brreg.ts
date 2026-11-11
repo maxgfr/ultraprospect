@@ -13,6 +13,7 @@
 // division 06. The section resolves through the shared NACE table.
 import { awaitHostSlot, httpJson } from "../engine.js";
 import { naceSection } from "../classification/nace.js";
+import { isNorwegianOrgNumber } from "../legal-notice.js";
 import { politeUa } from "../net.js";
 import type { PostalAddress } from "../types.js";
 import type { Availability, CanaryCheck, LegalId, LookupQuery, RegistryConnector, RegistryRecord } from "./types.js";
@@ -116,9 +117,12 @@ export const noBrreg: RegistryConnector = {
   async verifyId(id: LegalId): Promise<RegistryRecord | undefined> {
     // The organisasjonsnummer is nine digits, and it is also the body of the
     // Norwegian VAT number ("NO 923 609 016 MVA").
-    const digits = id.value.replace(/\D/g, "");
-    const orgnr = digits.length >= 9 ? digits.slice(0, 9) : undefined;
-    if (!orgnr) return undefined;
+    //
+    // EXACTLY nine, and check-digit valid. Anything longer used to be cut to its
+    // first nine digits and asked about — and nine digits taken out of a longer
+    // number are very often a real organisation number, just another company's.
+    const orgnr = id.value.replace(/\D/g, "");
+    if (!isNorwegianOrgNumber(orgnr)) return undefined;
     if (id.kind !== "vat" && id.kind !== "orgnr" && id.kind !== "company-number") return undefined;
     return toRecord(await get(`/enheter/${orgnr}`, true));
   },

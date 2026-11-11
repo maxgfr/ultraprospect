@@ -137,6 +137,20 @@ describe("no-brreg", () => {
     expect(await noBrreg.verifyId!({ kind: "hrb", value: "923609016", countryCode: "no" }, ctx)).toBeUndefined();
     expect(calls).toHaveLength(0);
   });
+
+  it("refuses a number longer than nine digits instead of asking about its first nine", async () => {
+    // "9236090161" is not Equinor's number with a typo at the end; cut to nine
+    // digits it became Equinor's, and Equinor was attached to whoever printed it.
+    expect(await noBrreg.verifyId!({ kind: "orgnr", value: "9236090161", countryCode: "no" }, ctx)).toBeUndefined();
+    expect(await noBrreg.verifyId!({ kind: "vat", value: "NO 923 609 016 0 MVA", countryCode: "no" }, ctx)).toBeUndefined();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("refuses nine digits whose mod-11 check digit is wrong", async () => {
+    // Equinor is 923609016; the last digit changed is no organisation number.
+    expect(await noBrreg.verifyId!({ kind: "orgnr", value: "923609017", countryCode: "no" }, ctx)).toBeUndefined();
+    expect(calls).toHaveLength(0);
+  });
 });
 
 describe("pl-krs", () => {

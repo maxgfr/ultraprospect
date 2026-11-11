@@ -15696,6 +15696,167 @@ var gleif = {
   }
 };
 
+// src/legal-notice.ts
+var LEGAL_NOTICE_COUNTRIES = ["fr", "de", "es", "gb", "it", "nl", "be", "at", "pt", "pl", "ie", "lu", "cz", "dk", "fi", "se", "no"];
+var VAT_PATTERNS = {
+  at: /ATU\d{8}/i,
+  be: /BE0\d{9}/i,
+  bg: /BG\d{9,10}/i,
+  cy: /CY\d{8}[A-Z]/i,
+  cz: /CZ\d{8,10}/i,
+  de: /DE\d{9}/i,
+  dk: /DK\d{8}/i,
+  ee: /EE\d{9}/i,
+  el: /EL\d{9}/i,
+  es: /ES[A-Z0-9]\d{7}[A-Z0-9]/i,
+  fi: /FI\d{8}/i,
+  fr: /FR[0-9A-Z]{2}\d{9}/i,
+  hr: /HR\d{11}/i,
+  hu: /HU\d{8}/i,
+  ie: /IE\d[A-Z0-9+*]\d{5}[A-Z]{1,2}/i,
+  it: /IT\d{11}/i,
+  lt: /LT(?:\d{9}|\d{12})/i,
+  lu: /LU\d{8}/i,
+  lv: /LV\d{11}/i,
+  mt: /MT\d{8}/i,
+  nl: /NL\d{9}B\d{2}/i,
+  pl: /PL\d{10}/i,
+  pt: /PT\d{9}/i,
+  ro: /RO\d{2,10}/i,
+  se: /SE\d{12}/i,
+  si: /SI\d{8}/i,
+  sk: /SK\d{10}/i
+};
+function extractVatNumbers(text3) {
+  const out2 = [];
+  const seen = /* @__PURE__ */ new Set();
+  let compact = "";
+  const origin = [];
+  for (let i = 0; i < text3.length; i++) {
+    const ch = text3[i];
+    if (ch === " " || ch === "	" || ch === "\n" || ch === "\r" || ch === "." || ch === "-") continue;
+    compact += ch;
+    origin.push(i);
+  }
+  for (const [cc, re] of Object.entries(VAT_PATTERNS)) {
+    for (const m of compact.matchAll(new RegExp(re.source, "gi"))) {
+      const before = text3[(origin[m.index ?? 0] ?? 0) - 1];
+      if (before && /[A-Za-z]/.test(before)) continue;
+      if (!/^[A-Z]{2}/.test(m[0])) continue;
+      const value = m[0].toUpperCase();
+      if (seen.has(value)) continue;
+      seen.add(value);
+      out2.push({ countryCode: cc, value });
+    }
+  }
+  return out2;
+}
+function extractHandelsregister(text3) {
+  const m = /\bHR([AB])\s*[:\s]?\s*(\d{1,7})\b/i.exec(text3);
+  if (!m) return void 0;
+  const value = `HR${m[1].toUpperCase()} ${m[2]}`;
+  const around = text3.slice(Math.max(0, m.index - 120), m.index + 160);
+  const court = /\b(?:Amtsgerichts?|Registergerichts?)\s*:?\s*(?!HR[AB]\b)(?!Amtsgericht|Registergericht)([A-ZÄÖÜ][\wÄÖÜäöüß.]*(?:[- ][A-ZÄÖÜ][\wÄÖÜäöüß.]*)?)/.exec(
+    around
+  );
+  return { value, court: court?.[1]?.trim() };
+}
+function extractUkCompanyNumber(text3) {
+  const m = /\b(?:compan(?:y|ies)\s+(?:reg(?:istration|istered)?\.?\s*)?(?:no\.?|number)|registered\s+in\s+England[^.]{0,40}?no\.?)[\s:.–—-]{0,10}((?:[A-Z]{2})?\d{6,8})\b/i.exec(
+    text3
+  );
+  return m?.[1]?.toUpperCase();
+}
+function extractSirenSiret(text3) {
+  const siret = /\b(?:SIRET)\D{0,12}(\d[\d\s.]{12,17}\d)\b/i.exec(text3);
+  if (siret) return { kind: "siret", value: siret[1].replace(/\D/g, "") };
+  const siren = /\b(?:SIREN|RCS[^\d]{0,30})\D{0,6}(\d[\d\s.]{7,12}\d)\b/i.exec(text3);
+  if (siren) return { kind: "siren", value: siren[1].replace(/\D/g, "") };
+  return void 0;
+}
+function isNorwegianOrgNumber(digits) {
+  if (!/^\d{9}$/.test(digits)) return false;
+  const weights = [3, 2, 7, 6, 5, 4, 3, 2];
+  const sum = weights.reduce((acc, w, i) => acc + w * Number(digits[i]), 0);
+  const remainder = sum % 11;
+  if (remainder === 1) return false;
+  const check = remainder === 0 ? 0 : 11 - remainder;
+  return check === Number(digits[8]);
+}
+function extractSpanishNif(text3) {
+  const m = /\b(?:C\.?I\.?F\.?|N\.?I\.?F\.?)\s*[:.]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])\b/i.exec(text3);
+  return m?.[1]?.toUpperCase();
+}
+function extractLegalIds(text3, countryCode, pageId) {
+  const cc = countryCode?.toLowerCase();
+  const out2 = [];
+  const push = (id) => {
+    if (!out2.some((x) => x.kind === id.kind && x.value === id.value)) out2.push(id);
+  };
+  if (cc === "fr" || !cc) {
+    const fr = extractSirenSiret(text3);
+    if (fr) push({ kind: fr.kind, value: fr.value, countryCode: "fr", from: pageId });
+  }
+  if (cc === "de" || !cc) {
+    const de = extractHandelsregister(text3);
+    if (de) push({ kind: "hrb", value: de.value, countryCode: "de", from: pageId, context: de.court });
+  }
+  if (cc === "gb") {
+    const gb = extractUkCompanyNumber(text3);
+    if (gb) push({ kind: "company-number", value: gb, countryCode: "gb", from: pageId });
+  }
+  if (cc === "es" || !cc) {
+    const es = extractSpanishNif(text3);
+    if (es) push({ kind: "nif", value: es, countryCode: "es", from: pageId });
+  }
+  for (const vat of extractVatNumbers(text3)) {
+    push({ kind: "vat", value: vat.value, countryCode: vat.countryCode === "el" ? "gr" : vat.countryCode, from: pageId });
+  }
+  return out2;
+}
+function extractLegalId(text3, countryCode) {
+  return extractLegalIds(text3, countryCode)[0]?.value;
+}
+function legalNoticeTerms(countryCode) {
+  switch ((countryCode ?? "").toLowerCase()) {
+    case "de":
+    case "at":
+    case "ch":
+      return ["Impressum"];
+    case "es":
+      return ["aviso legal"];
+    case "fr":
+      return ["mentions l\xE9gales"];
+    case "it":
+      return ["note legali"];
+    case "nl":
+      return ["colofon"];
+    case "pt":
+      return ["aviso legal"];
+    case "pl":
+      return ["polityka prywatno\u015Bci"];
+    case "gb":
+    case "ie":
+    case "us":
+      return ["legal notice"];
+    default:
+      return [];
+  }
+}
+function legalIdCoverage(countryCode) {
+  const cc = countryCode?.toLowerCase();
+  if (cc && LEGAL_NOTICE_COUNTRIES.includes(cc)) {
+    return { expected: true, note: `${cc}: company websites are legally required to publish a registration number` };
+  }
+  if (cc === "us") {
+    return {
+      expected: false,
+      note: "us: there is no federal company register and no published company number \u2014 an EIN is never disclosed. Identity here rests on address and name, not on a registration."
+    };
+  }
+  return { expected: false, note: `${cc ?? "this country"}: no legal-notice obligation is modelled, so no registration number is expected on company sites` };
+}
+
 // src/registry/no-brreg.ts
 var BASE7 = "https://data.brreg.no/enhetsregisteret/api";
 var CONNECTOR_ID9 = "no-brreg";
@@ -15775,9 +15936,8 @@ var noBrreg = {
     return (data?._embedded?.enheter ?? []).map(toRecord5).filter((r) => Boolean(r));
   },
   async verifyId(id) {
-    const digits = id.value.replace(/\D/g, "");
-    const orgnr = digits.length >= 9 ? digits.slice(0, 9) : void 0;
-    if (!orgnr) return void 0;
+    const orgnr = id.value.replace(/\D/g, "");
+    if (!isNorwegianOrgNumber(orgnr)) return void 0;
     if (id.kind !== "vat" && id.kind !== "orgnr" && id.kind !== "company-number") return void 0;
     return toRecord5(await get5(`/enheter/${orgnr}`, true));
   },
@@ -18544,158 +18704,6 @@ function tenderConnectorsFor(countries, opts = {}) {
     for (const c of pool) if (c.countries.includes("*")) connectors.add(c);
   }
   return { connectors: TENDER_CONNECTORS.filter((c) => connectors.has(c)), gaps };
-}
-
-// src/legal-notice.ts
-var LEGAL_NOTICE_COUNTRIES = ["fr", "de", "es", "gb", "it", "nl", "be", "at", "pt", "pl", "ie", "lu", "cz", "dk", "fi", "se", "no"];
-var VAT_PATTERNS = {
-  at: /ATU\d{8}/i,
-  be: /BE0\d{9}/i,
-  bg: /BG\d{9,10}/i,
-  cy: /CY\d{8}[A-Z]/i,
-  cz: /CZ\d{8,10}/i,
-  de: /DE\d{9}/i,
-  dk: /DK\d{8}/i,
-  ee: /EE\d{9}/i,
-  el: /EL\d{9}/i,
-  es: /ES[A-Z0-9]\d{7}[A-Z0-9]/i,
-  fi: /FI\d{8}/i,
-  fr: /FR[0-9A-Z]{2}\d{9}/i,
-  hr: /HR\d{11}/i,
-  hu: /HU\d{8}/i,
-  ie: /IE\d[A-Z0-9+*]\d{5}[A-Z]{1,2}/i,
-  it: /IT\d{11}/i,
-  lt: /LT(?:\d{9}|\d{12})/i,
-  lu: /LU\d{8}/i,
-  lv: /LV\d{11}/i,
-  mt: /MT\d{8}/i,
-  nl: /NL\d{9}B\d{2}/i,
-  pl: /PL\d{10}/i,
-  pt: /PT\d{9}/i,
-  ro: /RO\d{2,10}/i,
-  se: /SE\d{12}/i,
-  si: /SI\d{8}/i,
-  sk: /SK\d{10}/i
-};
-function extractVatNumbers(text3) {
-  const out2 = [];
-  const seen = /* @__PURE__ */ new Set();
-  let compact = "";
-  const origin = [];
-  for (let i = 0; i < text3.length; i++) {
-    const ch = text3[i];
-    if (ch === " " || ch === "	" || ch === "\n" || ch === "\r" || ch === "." || ch === "-") continue;
-    compact += ch;
-    origin.push(i);
-  }
-  for (const [cc, re] of Object.entries(VAT_PATTERNS)) {
-    for (const m of compact.matchAll(new RegExp(re.source, "gi"))) {
-      const before = text3[(origin[m.index ?? 0] ?? 0) - 1];
-      if (before && /[A-Za-z]/.test(before)) continue;
-      if (!/^[A-Z]{2}/.test(m[0])) continue;
-      const value = m[0].toUpperCase();
-      if (seen.has(value)) continue;
-      seen.add(value);
-      out2.push({ countryCode: cc, value });
-    }
-  }
-  return out2;
-}
-function extractHandelsregister(text3) {
-  const m = /\bHR([AB])\s*[:\s]?\s*(\d{1,7})\b/i.exec(text3);
-  if (!m) return void 0;
-  const value = `HR${m[1].toUpperCase()} ${m[2]}`;
-  const around = text3.slice(Math.max(0, m.index - 120), m.index + 160);
-  const court = /\b(?:Amtsgerichts?|Registergerichts?)\s*:?\s*(?!HR[AB]\b)(?!Amtsgericht|Registergericht)([A-ZÄÖÜ][\wÄÖÜäöüß.]*(?:[- ][A-ZÄÖÜ][\wÄÖÜäöüß.]*)?)/.exec(
-    around
-  );
-  return { value, court: court?.[1]?.trim() };
-}
-function extractUkCompanyNumber(text3) {
-  const m = /\b(?:compan(?:y|ies)\s+(?:reg(?:istration|istered)?\.?\s*)?(?:no\.?|number)|registered\s+in\s+England[^.]{0,40}?no\.?)[\s:.–—-]{0,10}((?:[A-Z]{2})?\d{6,8})\b/i.exec(
-    text3
-  );
-  return m?.[1]?.toUpperCase();
-}
-function extractSirenSiret(text3) {
-  const siret = /\b(?:SIRET)\D{0,12}(\d[\d\s.]{12,17}\d)\b/i.exec(text3);
-  if (siret) return { kind: "siret", value: siret[1].replace(/\D/g, "") };
-  const siren = /\b(?:SIREN|RCS[^\d]{0,30})\D{0,6}(\d[\d\s.]{7,12}\d)\b/i.exec(text3);
-  if (siren) return { kind: "siren", value: siren[1].replace(/\D/g, "") };
-  return void 0;
-}
-function extractSpanishNif(text3) {
-  const m = /\b(?:C\.?I\.?F\.?|N\.?I\.?F\.?)\s*[:.]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])\b/i.exec(text3);
-  return m?.[1]?.toUpperCase();
-}
-function extractLegalIds(text3, countryCode, pageId) {
-  const cc = countryCode?.toLowerCase();
-  const out2 = [];
-  const push = (id) => {
-    if (!out2.some((x) => x.kind === id.kind && x.value === id.value)) out2.push(id);
-  };
-  if (cc === "fr" || !cc) {
-    const fr = extractSirenSiret(text3);
-    if (fr) push({ kind: fr.kind, value: fr.value, countryCode: "fr", from: pageId });
-  }
-  if (cc === "de" || !cc) {
-    const de = extractHandelsregister(text3);
-    if (de) push({ kind: "hrb", value: de.value, countryCode: "de", from: pageId, context: de.court });
-  }
-  if (cc === "gb") {
-    const gb = extractUkCompanyNumber(text3);
-    if (gb) push({ kind: "company-number", value: gb, countryCode: "gb", from: pageId });
-  }
-  if (cc === "es" || !cc) {
-    const es = extractSpanishNif(text3);
-    if (es) push({ kind: "nif", value: es, countryCode: "es", from: pageId });
-  }
-  for (const vat of extractVatNumbers(text3)) {
-    push({ kind: "vat", value: vat.value, countryCode: vat.countryCode === "el" ? "gr" : vat.countryCode, from: pageId });
-  }
-  return out2;
-}
-function extractLegalId(text3, countryCode) {
-  return extractLegalIds(text3, countryCode)[0]?.value;
-}
-function legalNoticeTerms(countryCode) {
-  switch ((countryCode ?? "").toLowerCase()) {
-    case "de":
-    case "at":
-    case "ch":
-      return ["Impressum"];
-    case "es":
-      return ["aviso legal"];
-    case "fr":
-      return ["mentions l\xE9gales"];
-    case "it":
-      return ["note legali"];
-    case "nl":
-      return ["colofon"];
-    case "pt":
-      return ["aviso legal"];
-    case "pl":
-      return ["polityka prywatno\u015Bci"];
-    case "gb":
-    case "ie":
-    case "us":
-      return ["legal notice"];
-    default:
-      return [];
-  }
-}
-function legalIdCoverage(countryCode) {
-  const cc = countryCode?.toLowerCase();
-  if (cc && LEGAL_NOTICE_COUNTRIES.includes(cc)) {
-    return { expected: true, note: `${cc}: company websites are legally required to publish a registration number` };
-  }
-  if (cc === "us") {
-    return {
-      expected: false,
-      note: "us: there is no federal company register and no published company number \u2014 an EIN is never disclosed. Identity here rests on address and name, not on a registration."
-    };
-  }
-  return { expected: false, note: `${cc ?? "this country"}: no legal-notice obligation is modelled, so no registration number is expected on company sites` };
 }
 
 // src/signals.ts

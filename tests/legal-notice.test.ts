@@ -5,7 +5,15 @@
 // often as "DE811907980", and a pattern that tolerates arbitrary separators also
 // matches across sentence boundaries and turns two unrelated numbers into one.
 import { describe, expect, it } from "vitest";
-import { extractHandelsregister, extractLegalIds, extractSpanishNif, extractUkCompanyNumber, extractVatNumbers, legalIdCoverage } from "../src/legal-notice.js";
+import {
+  extractHandelsregister,
+  extractLegalIds,
+  extractSpanishNif,
+  extractUkCompanyNumber,
+  extractVatNumbers,
+  isNorwegianOrgNumber,
+  legalIdCoverage,
+} from "../src/legal-notice.js";
 
 describe("extractVatNumbers", () => {
   it("reads a VAT number however the page spaced it", () => {
@@ -96,6 +104,22 @@ describe("extractSpanishNif", () => {
   it("reads a CIF from an aviso legal", () => {
     expect(extractSpanishNif("CIF: A28017895")).toBe("A28017895");
     expect(extractSpanishNif("N.I.F. 12345678Z")).toBe("12345678Z");
+  });
+});
+
+describe("isNorwegianOrgNumber", () => {
+  it("accepts real organisation numbers", () => {
+    // Equinor ASA and DNB Bank ASA, as Brønnøysund files them.
+    expect(isNorwegianOrgNumber("923609016")).toBe(true);
+    expect(isNorwegianOrgNumber("984851006")).toBe(true);
+  });
+
+  it("refuses a wrong check digit, a wrong length, and a remainder of 1", () => {
+    expect(isNorwegianOrgNumber("923609017")).toBe(false);
+    expect(isNorwegianOrgNumber("9236090161")).toBe(false);
+    expect(isNorwegianOrgNumber("92360901")).toBe(false);
+    // 4·3 = 12, remainder 1: no check digit makes this a valid number.
+    for (let d = 0; d <= 9; d++) expect(isNorwegianOrgNumber(`40000000${d}`)).toBe(false);
   });
 });
 

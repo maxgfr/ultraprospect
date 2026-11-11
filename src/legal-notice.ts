@@ -163,6 +163,26 @@ export function extractSirenSiret(text: string): { kind: "siren" | "siret"; valu
   return undefined;
 }
 
+/**
+ * Is this a well-formed Norwegian organisasjonsnummer — exactly nine digits
+ * whose last is the mod-11 check digit over the first eight?
+ *
+ * Weights 3 2 7 6 5 4 3 2; a remainder of 0 gives check digit 0, a remainder
+ * of 1 has no valid check digit (Brønnøysund never issues such a number), and
+ * anything else gives 11 − remainder. A transposed or mistyped digit fails it,
+ * which matters because a nine-digit number that is merely WRONG is very often
+ * somebody else's live registration.
+ */
+export function isNorwegianOrgNumber(digits: string): boolean {
+  if (!/^\d{9}$/.test(digits)) return false;
+  const weights = [3, 2, 7, 6, 5, 4, 3, 2];
+  const sum = weights.reduce((acc, w, i) => acc + w * Number(digits[i]), 0);
+  const remainder = sum % 11;
+  if (remainder === 1) return false;
+  const check = remainder === 0 ? 0 : 11 - remainder;
+  return check === Number(digits[8]);
+}
+
 /** A Spanish CIF/NIF, from the words that introduce it. Distinct from the VAT form, which prefixes ES. */
 export function extractSpanishNif(text: string): string | undefined {
   // Spanish pages write it "CIF", "C.I.F." and "N.I.F." about equally often.
