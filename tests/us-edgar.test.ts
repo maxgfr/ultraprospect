@@ -46,4 +46,10 @@ describe("us-edgar lookup", () => {
     const att = await usEdgar.lookup!({ names: ["AT&T"], countryCode: "us" }, {});
     expect(att.map((r) => r.legalName)).toEqual(["AT&T INC."]);
   });
+
+  it("returns a company with two tickers once, and fetches it once", async () => {
+    const hits = await usEdgar.lookup!({ names: ["Alphabet"], countryCode: "us" }, {});
+    expect(hits.map((r) => r.id)).toEqual(["0001652044"]);
+    expect(calls.filter((u) => u.includes("/submissions/")).length).toBe(1);
+  });
 });

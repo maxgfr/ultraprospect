@@ -194,7 +194,11 @@ export const usEdgar: RegistryConnector = {
     // and answering it here would attach a supplier's record to a shop.
     const needle = edgarNameKey(name);
     if (needle.length < 3) return [];
-    const hits = index.filter((e) => e.key.includes(needle)).slice(0, Math.min(10, query.limit ?? 5));
+    // `company_tickers.json` has one row per TICKER, so Alphabet (GOOGL, GOOG)
+    // is two rows with one CIK. Deduped here, or it was returned — and its
+    // submissions fetched — twice, and took two of the five slots.
+    const seen = new Set<string>();
+    const hits = index.filter((e) => e.key.includes(needle) && !seen.has(e.cik) && seen.add(e.cik)).slice(0, Math.min(10, query.limit ?? 5));
     if (hits.length === 0) return [];
     ctx?.onNote?.(usEdgarCoverageNote());
 

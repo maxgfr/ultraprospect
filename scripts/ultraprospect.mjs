@@ -16067,7 +16067,8 @@ var usEdgar = {
     if (index.length === 0) throw new RegisterUnreachable(CONNECTOR_ID11, "company_tickers.json came back empty");
     const needle = edgarNameKey(name);
     if (needle.length < 3) return [];
-    const hits = index.filter((e) => e.key.includes(needle)).slice(0, Math.min(10, query.limit ?? 5));
+    const seen = /* @__PURE__ */ new Set();
+    const hits = index.filter((e) => e.key.includes(needle) && !seen.has(e.cik) && seen.add(e.cik)).slice(0, Math.min(10, query.limit ?? 5));
     if (hits.length === 0) return [];
     ctx?.onNote?.(usEdgarCoverageNote());
     const out2 = [];
