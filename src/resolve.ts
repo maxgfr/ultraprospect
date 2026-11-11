@@ -30,10 +30,13 @@
 // bakery. The locale comes from the run's country, and the queries themselves
 // carry a per-country angle: the words a legal-notice page is called in that
 // language are often the only thing that surfaces a small company's own site.
-import { dedupeByUrl, rrf, search } from "./engine.js";
+import { dedupeByUrl, fetchRobots, isAllowed, rrf, search } from "./engine.js";
+import { isLegalNotice, isOwnCountryNotice, legalGuessesFor, pickByRole } from "./enrich.js";
 import { legalNoticeTerms } from "./legal-notice.js";
+import { publicUrlAuthorizer } from "./net.js";
 import { describeSkips, partitionSkipped, type SkipOutcome } from "./skip.js";
-import { fetchPage, type PageStore } from "./pages.js";
+import { fetchPage, type FetchedPage, type PageStore } from "./pages.js";
+import { sameOriginLinks } from "./signals.js";
 import type { PageRecord, Place } from "./types.js";
 import { foldAccents, normalizeName, tokenSet } from "./util.js";
 
@@ -527,6 +530,47 @@ export function corroborate(
   return { ok: true, evidence };
 }
 
+/**
+ * The site's legal notice, read when its home page did not corroborate.
+ *
+ * Measured on a German run: 14 of 62 sites stayed unverified because the home
+ * page carries neither the street nor a distinctive name token ("VTG", "AM" are
+ * too short to count), while the Impressum the law makes mandatory carries the
+ * name, the address and the HRB number. ONE request: the notice the home page
+ * links to, else the path the run's country spells it at — never a walk
+ * through the general guess list, which is enrich's job and costs a 404 per
+ * miss on a site that never asked to be probed. The notice is discovered, not
+ * cited, so robots.txt decides as it does for enrich's walk.
+ */
+async function readLegalNotice(runDir: string, place: Place, home: FetchedPage, store: PageStore, countryCode?: string): Promise<FetchedPage | undefined> {
+  const linked = pickByRole(sameOriginLinks(home.html ?? "", home.record.url), ["legal"], countryCode).get("legal");
+  let url = linked && isLegalNotice(linked) ? linked : undefined;
+  if (!url) {
+    const guess = legalGuessesFor(countryCode)[0];
+    try {
+      const guessed = guess ? new URL(guess, home.record.url).href : undefined;
+      // Only where the run's country puts a notice at a known path: the general
+      // list starts with a French one, and asking a US site for it is a 404.
+      if (guessed && isOwnCountryNotice(guessed, countryCode)) url = guessed;
+    } catch {
+      // A home URL that will not parse has no path to guess from.
+    }
+  }
+  if (!url || url === home.record.url) return undefined;
+  const robots = await fetchRobots(home.record.url, { authorizeUrl: publicUrlAuthorizer() }).catch(() => undefined);
+  if (robots && !isAllowed(robots, url)) return undefined;
+  const fetched = await fetchPage(runDir, place.id, url, "legal", store);
+  if (!fetched.ok) return undefined;
+  // A notice that redirected to another site (a parent group's, a hosting
+  // provider's) says who runs THAT site, not this one.
+  try {
+    if (new URL(fetched.page.record.url).origin !== new URL(home.record.url).origin) return undefined;
+  } catch {
+    return undefined;
+  }
+  return fetched.page;
+}
+
 export interface ResolveOptions {
   /** Hits the agent produced with its own web search. */
   webResults?: WebHit[];
@@ -914,6 +958,8 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
     }
 
     let settled = false;
+    // One legal-notice read per place, however many candidates fail.
+    let noticeTried = false;
     for (const url of candidates) {
       const kind = classifyHost(url, opts.countryCode);
       if (kind === "social") {
@@ -932,7 +978,9 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
       }
       if (kind === "directory") continue;
 
-      const fetched = await fetchPage(runDir, place.id, url, "home", store);
+      // With its HTML, so the links to the legal notice can be read if the home
+      // page alone does not corroborate.
+      const fetched = await fetchPage(runDir, place.id, url, "home", store, { keepHtml: true });
       if (!fetched.ok && fetched.reason === "not-public") {
         // A candidate from a search hit or an OSM tag that points at this
         // machine or its network. Declined here, and said so by name: counted
@@ -972,14 +1020,27 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
       }
       const page = fetched.page;
 
-      const check = corroborate(place, page.text, page.title, shared, opts.countryCode);
+      let check = corroborate(place, page.text, page.title, shared, opts.countryCode);
+      const cited = [page.record.id];
       const list = outcome.pages.get(place.id) ?? [];
       list.push(page.record);
+      if (!check.ok && !noticeTried) {
+        noticeTried = true;
+        const notice = await readLegalNotice(runDir, place, page, store, opts.countryCode);
+        if (notice) {
+          list.push(notice.record);
+          const fromNotice = corroborate(place, notice.text, notice.title, shared, opts.countryCode);
+          if (fromNotice.ok) {
+            cited.push(notice.record.id);
+            check = { ok: true, evidence: fromNotice.evidence.map((e) => e.replace(/ on the page$/, ` on the legal notice ${notice.record.id}`)) };
+          }
+        }
+      }
       outcome.pages.set(place.id, list);
-      place.pages = [...new Set([...place.pages, page.record.id])];
+      place.pages = [...new Set([...place.pages, ...list.map((p) => p.id)])];
 
       if (check.ok) {
-        place.website = { url: page.record.url, confidence: "corroborated", evidence: [page.record.id, ...check.evidence] };
+        place.website = { url: page.record.url, confidence: "corroborated", evidence: [...cited, ...check.evidence] };
         outcome.corroborated++;
         settled = true;
         break;

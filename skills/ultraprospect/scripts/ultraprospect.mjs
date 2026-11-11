@@ -20713,571 +20713,6 @@ function mergeRegistryRecords(runDir, fresh) {
   return [...byKey.values()];
 }
 
-// src/skip.ts
-var SKIP_REASONS = ["chain", "unnamed", "public", "vacant"];
-var PUBLIC_OPERATORS = /* @__PURE__ */ new Set(["public", "government"]);
-function isUnnamed(place) {
-  if (place.registry?.legalName?.trim() || place.registry?.tradingNames?.some((n) => n.trim())) return false;
-  if (place.registry?.id || place.registry?.establishmentId) return false;
-  const name = place.name?.trim();
-  if (!name) return true;
-  if (place.category && name === place.category) return true;
-  return Boolean(place.osm) && name === place.osm?.id;
-}
-function skipReasonsFor(place) {
-  const reasons = [];
-  const tags = place.osm?.tags ?? {};
-  if (tags.brand || tags["brand:wikidata"]) reasons.push("chain");
-  if (isUnnamed(place)) reasons.push("unnamed");
-  const operatorType = tags["operator:type"]?.toLowerCase();
-  const registry = place.registry;
-  const filedPublic = Boolean(registry?.legalForm && connectorById(registry.connectorId)?.legalFormIsPublic?.(registry.legalForm));
-  if (operatorType && PUBLIC_OPERATORS.has(operatorType) || filedPublic) reasons.push("public");
-  const vacant = tags.shop === "vacant" || tags.office === "vacant" || tags.disused === "yes" || // `disused:` and `abandoned:` prefix a feature that is GONE. `was:` does
-  // not: a restaurant that used to be a bakery keeps `was:shop=bakery` while
-  // trading perfectly well, so counting it as vacant skips a live business.
-  Object.keys(tags).some((k) => k.startsWith("disused:") || k.startsWith("abandoned:"));
-  if (vacant) reasons.push("vacant");
-  return reasons;
-}
-function partitionSkipped(places, reasons) {
-  const wanted = new Set(reasons);
-  const kept = [];
-  const skipped = /* @__PURE__ */ new Map();
-  const counts = {};
-  for (const place of places) {
-    const hits = skipReasonsFor(place).filter((r) => wanted.has(r));
-    if (!hits.length) {
-      kept.push(place);
-      continue;
-    }
-    skipped.set(place.id, hits);
-    for (const r of hits) counts[r] = (counts[r] ?? 0) + 1;
-  }
-  return { kept, skipped, counts };
-}
-function describeSkips(outcome, limited = false) {
-  const total = outcome.skipped.size;
-  if (!total) return void 0;
-  if (limited) {
-    const parts2 = SKIP_REASONS.filter((r) => outcome.counts[r]).map((r) => `${outcome.counts[r]} ${r}`);
-    return `passed over ${total} place(s) \u2014 ${parts2.join(", ")}. --limit still takes its full count, so these were replaced rather than saved.`;
-  }
-  const parts = SKIP_REASONS.filter((r) => outcome.counts[r]).map((r) => `${outcome.counts[r]} ${r}`);
-  const sum = SKIP_REASONS.reduce((n, r) => n + (outcome.counts[r] ?? 0), 0);
-  const overlap = sum > total ? ` (${sum - total} counted under more than one reason)` : "";
-  return `skipped ${total} place(s) before searching \u2014 ${parts.join(", ")}${overlap}`;
-}
-
-// src/resolve.ts
-var INTERNATIONAL_DIRECTORY_HOSTS = [
-  "yelp.",
-  "tripadvisor.",
-  "kompass.com",
-  "europages.",
-  "booking.com",
-  "airbnb.",
-  "indeed.com",
-  "glassdoor.",
-  "amazon.",
-  "ebay.",
-  "thefork.",
-  "opentable.",
-  "ubereats.com",
-  "wolt.com",
-  "deliveroo.",
-  "just-eat.",
-  "lieferando.",
-  "foursquare.com",
-  "trustpilot.com",
-  "crunchbase.com",
-  "bloomberg.com",
-  "dnb.com",
-  "opencorporates.com",
-  "wikipedia.org",
-  "wikidata.org"
-];
-var DIRECTORY_HOSTS_BY_COUNTRY = {
-  fr: [
-    "pagesjaunes.fr",
-    "societe.com",
-    "verif.com",
-    "infogreffe.fr",
-    "annuaire-entreprises.data.gouv.fr",
-    "bodacc.fr",
-    "manageo.fr",
-    "petitfute.com",
-    "justacote.com",
-    "cylex-france.fr",
-    "118712.fr",
-    "hoodspot.fr",
-    "dirigeants.bfmtv.com",
-    "pappers.fr",
-    "score3.fr",
-    // Company-record and annonces-légales sites, all harvested from LIVE French
-    // searches over a Saint-Mandé sweep, where each of them ranked at or above
-    // the company's own domain.
-    //
-    // These are the dangerous kind. A phone book carries a name and an address;
-    // these publish the SIREN, so the corroboration check accepts them on the
-    // strongest signal it has and files a register directory as the company's
-    // own site, CORROBORATED rather than merely unverified. Host exclusion is
-    // the only thing between that and a dossier written about a directory.
-    "actulegales.fr",
-    "data.inpi.fr",
-    "rubypayeur.com",
-    "societeinfo.com",
-    "repreneurs.com",
-    "infonet.fr",
-    "datalegal.fr",
-    "annuaire-inverse-france.com",
-    "business-directory.fr",
-    "compteo.fr",
-    "petitesaffiches.fr",
-    "maitredata.com",
-    "droits-salaries.com",
-    "afjv.com",
-    "experts-comptables.org",
-    "leboncoin.fr",
-    "doctolib.fr",
-    "mappy.com",
-    "lafourchette.",
-    // Public-sector and sector directories, all seen ranking above a company's
-    // own site in real searches. education.gouv.fr's school annuaire is the one
-    // that actually displaced a school's website in a Saint-Mandé run.
-    "education.gouv.fr",
-    "ville-data.com",
-    "college-lycee.com",
-    "adresses-ecoles.fr",
-    "enseignement-prive.info",
-    "restaurantguru.com",
-    "restopolitan.com",
-    "restaurants-de-france.fr",
-    // Trade and opening-hours directories, harvested from a live Saint-Mandé
-    // search for two independent food businesses. Every one of these carries
-    // the trading name AND the street address, so they corroborate on the two
-    // strongest signals there are: left unlisted, alentoor.fr and
-    // boulangeries-patisseries.fr were both filed as a company's own website,
-    // CORROBORATED, in a real run.
-    "alentoor.fr",
-    "boulangeries-patisseries.fr",
-    "trouver-ouvert.fr",
-    "aleou.fr",
-    "eater.space",
-    "mapstr.com",
-    "uniiti.com",
-    "kazfeed.com",
-    "linternaute.com",
-    "journaldunet.com",
-    "figaro.fr"
-  ],
-  de: [
-    "gelbeseiten.de",
-    "dasoertliche.de",
-    "11880.com",
-    // `wlw.` rather than wlw.de: the same directory answers on wlw.com/en.
-    "wlw.",
-    "firmenwissen.de",
-    "northdata.de",
-    "unternehmensregister.de",
-    "meinestadt.de",
-    "goyellow.de",
-    "cylex.de",
-    "werkenntdenbesten.de",
-    "jameda.de",
-    "kununu.com",
-    "stepstone.de",
-    // Each of these was filed as a company's own site on a live Hamburg run.
-    "die-deutsche-wirtschaft.de",
-    "implisense.com",
-    "branchen-info.net",
-    "marktplatz-mittelstand.de",
-    "firma-24.de"
-  ],
-  es: ["paginasamarillas.es", "einforma.com", "axesor.es", "empresite.eleconomista.es", "infoempresa.com", "cylex.es", "11870.com", "infojobs.net"],
-  gb: ["yell.com", "companycheck.co.uk", "endole.co.uk", "checkatrade.com", "thomsonlocal.com", "cylex-uk.co.uk", "192.com", "reed.co.uk", "totaljobs.com"],
-  us: [
-    "yellowpages.com",
-    "bbb.org",
-    "manta.com",
-    "bizapedia.com",
-    "chamberofcommerce.com",
-    "mapquest.com",
-    "angi.com",
-    "thumbtack.com",
-    "zillow.com",
-    "ziprecruiter.com"
-  ],
-  it: ["paginegialle.it", "ufficiocamerale.it", "reportaziende.it", "misterimprese.it"],
-  nl: ["telefoonboek.nl", "detelefoongids.nl", "bedrijvenpagina.nl"],
-  no: ["gulesider.no", "proff.no", "1881.no"],
-  fi: ["fonecta.fi", "finder.fi"],
-  cz: ["firmy.cz", "zivefirmy.cz"],
-  pl: ["panoramafirm.pl", "aleo.com", "pkt.pl"]
-};
-var SOCIAL_HOSTS = ["facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "youtube.com", "tiktok.com", "pinterest.", "wa.me"];
-var DEFAULT_QUERIES_PER_PLACE = 3;
-function directoryHostsFor(countryCode) {
-  const national = DIRECTORY_HOSTS_BY_COUNTRY[(countryCode ?? "").toLowerCase()] ?? [];
-  return [...INTERNATIONAL_DIRECTORY_HOSTS, ...national];
-}
-function classifyHost(url, countryCode) {
-  let host;
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    return "directory";
-  }
-  if (SOCIAL_HOSTS.some((h) => hostIs2(host, h))) return "social";
-  if (directoryHostsFor(countryCode).some((h) => hostIs2(host, h))) return "directory";
-  return "own";
-}
-function hostIs2(host, listed) {
-  if (listed.endsWith(".")) return host.startsWith(listed) || host.includes(`.${listed}`);
-  return host === listed || host.endsWith(`.${listed}`);
-}
-function queriesFor(place, fallbackTown, countryCode, perPlace = DEFAULT_QUERIES_PER_PLACE) {
-  const town = place.address.commune ?? place.address.codePostal ?? fallbackTown ?? "";
-  const names = /* @__PURE__ */ new Set();
-  if (place.osm?.name) names.add(place.osm.name);
-  for (const n of namesOf2(place)) names.add(n);
-  const queries = [];
-  for (const n of names) {
-    queries.push(town ? `${n} ${town}` : n);
-  }
-  const legalId = place.registry?.establishmentId ?? place.registry?.id;
-  if (legalId) queries.push(`"${legalId}"`);
-  const firstName = [...names][0];
-  const street = place.address.libelleVoie;
-  if (street && firstName) {
-    const numero = place.address.numero ? `${place.address.numero} ` : "";
-    queries.push(`${firstName} ${numero}${street}${town ? ` ${town}` : ""}`.trim());
-  }
-  if (!legalId && firstName) {
-    for (const term of legalNoticeTerms(countryCode)) queries.push(`${firstName} ${term}`);
-  }
-  return [...new Set(queries)].slice(0, Math.max(1, perPlace));
-}
-function searchLocaleFor(countryCode, lang) {
-  if (lang) return lang;
-  const cc = (countryCode ?? "").toLowerCase();
-  const byCountry = {
-    fr: "fr-FR",
-    de: "de-DE",
-    at: "de-AT",
-    ch: "de-CH",
-    es: "es-ES",
-    it: "it-IT",
-    nl: "nl-NL",
-    be: "nl-BE",
-    pt: "pt-PT",
-    pl: "pl-PL",
-    cz: "cs-CZ",
-    no: "nb-NO",
-    fi: "fi-FI",
-    se: "sv-SE",
-    dk: "da-DK",
-    gb: "en-GB",
-    ie: "en-IE",
-    us: "en-US"
-  };
-  return byCountry[cc];
-}
-function namesOf2(place) {
-  const rec = place.registry;
-  if (!rec) return [];
-  const out2 = [];
-  const first = rec.tradingNames?.[0];
-  if (first) out2.push(first);
-  if (rec.legalName) out2.push(rec.legalName.replace(/\s*\([^)]*\)/g, "").trim());
-  return out2.filter(Boolean);
-}
-function addressKey(place) {
-  const a = place.address;
-  if (!a.libelleVoie || !a.codePostal) return "";
-  return `${a.numero ?? ""}|${foldAccents(a.libelleVoie).toUpperCase().trim()}|${a.codePostal}`;
-}
-function sharedAddressesIn(places) {
-  const seen = /* @__PURE__ */ new Map();
-  for (const p of places) {
-    const key = addressKey(p);
-    if (key) seen.set(key, (seen.get(key) ?? 0) + 1);
-  }
-  return new Set([...seen].filter(([, n]) => n > 1).map(([key]) => key));
-}
-function corroborate(place, pageText, pageTitle, sharedAddresses = /* @__PURE__ */ new Set(), countryCode) {
-  const haystack = foldAccents(`${pageTitle ?? ""}
-${pageText}`).toLowerCase();
-  const digits = haystack.replace(/[^0-9]/g, "");
-  const evidence = [];
-  const legalUnitId = place.registry?.id;
-  const establishmentId = place.registry?.establishmentId;
-  const carries = (id) => {
-    if (!id) return false;
-    const bare = id.replace(/\s+/g, "");
-    if (/^\d+$/.test(bare)) return bare.length >= 6 && digits.includes(bare);
-    return bare.length >= 6 && haystack.includes(bare.toLowerCase());
-  };
-  if (carries(establishmentId)) evidence.push(`registration ${establishmentId} on the page`);
-  else if (carries(legalUnitId)) evidence.push(`registration ${legalUnitId} on the page`);
-  const street = place.address.libelleVoie;
-  const postcode = place.address.codePostal;
-  if (street && postcode && !sharedAddresses.has(addressKey(place))) {
-    const streetNorm = foldAccents(street).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    const streetWords = streetNorm.split(" ").filter((w) => w.length > 3);
-    const streetSeen = streetWords.length > 0 && streetWords.every((w) => haystack.includes(w));
-    if (streetSeen && haystack.includes(postcode)) evidence.push(`address "${street} ${postcode}" on the page`);
-  }
-  const words = new Set(haystack.split(/[^a-z0-9]+/).filter(Boolean));
-  const candidateNames = [place.osm?.name, ...namesOf2(place)].filter((n) => Boolean(n));
-  for (const name of candidateNames) {
-    const distinctive = [...tokenSet(normalizeName(name))].filter((t) => t.length >= 4);
-    if (distinctive.length === 0) continue;
-    const eachIsAWord = distinctive.every((t) => words.has(t));
-    const runTogether = distinctive.length > 1 && words.has(distinctive.join(""));
-    if (eachIsAWord || runTogether) {
-      evidence.push(`name "${name}" on the page`);
-      break;
-    }
-  }
-  if (evidence.length === 0) {
-    const id = (countryCode ?? "").toLowerCase() === "fr" ? "SIREN" : "registration number";
-    return { ok: false, evidence: [], reason: `the page carries neither the company's name, its address nor its ${id}` };
-  }
-  return { ok: true, evidence };
-}
-function buildResolveTodo(places, town, countryCode, selection = {}) {
-  const outcome = skipOutcomeFor(places, selection);
-  const byId = new Map(places.map((p) => [p.id, p]));
-  const skipped = [...outcome.skipped].map(([placeId, reasons]) => ({ placeId, name: byId.get(placeId)?.name ?? placeId, reasons }));
-  return {
-    version: 1,
-    generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    items: resolveTargets(places, selection).map((p) => ({
-      placeId: p.id,
-      name: p.name,
-      queries: queriesFor(p, town, countryCode, selection.queriesPerPlace)
-    })),
-    ...skipped.length ? { skipped } : {}
-  };
-}
-function needsResolving(places) {
-  return places.filter((p) => !p.website || p.website.confidence === "declared");
-}
-function resolveTargets(places, opts = {}) {
-  const targets = skipOutcomeFor(places, opts).kept;
-  return opts.limit ? targets.slice(0, opts.limit) : targets;
-}
-function skipOutcomeFor(places, opts = {}) {
-  let targets = needsResolving(places);
-  if (opts.only?.length) {
-    const wanted = new Set(opts.only);
-    targets = targets.filter((p) => wanted.has(p.id));
-  }
-  if (!opts.skip?.length) return { kept: targets, skipped: /* @__PURE__ */ new Map(), counts: {} };
-  return partitionSkipped(targets, opts.skip);
-}
-function nameOnHost(place, town) {
-  const local2 = /* @__PURE__ */ new Set([...tokenSet(normalizeName(town ?? "")), ...tokenSet(normalizeName(place.address.commune ?? ""))]);
-  const names = [place.osm?.name, ...namesOf2(place)].filter((n) => Boolean(n));
-  const tokens = [...new Set(names.flatMap((n) => [...tokenSet(normalizeName(n))]))].filter((t) => t.length >= 4 && !local2.has(t));
-  return (url) => {
-    if (tokens.length === 0) return false;
-    try {
-      const host = foldAccents(new URL(url).hostname).toLowerCase();
-      return tokens.some((t) => host.includes(t));
-    } catch {
-      return false;
-    }
-  };
-}
-var MAX_FETCHED_CANDIDATES = 3;
-var MAX_SOCIAL_CANDIDATES = 5;
-function candidateUrlsFor(place, hits, countryCode, town) {
-  const urls = [];
-  if (place.website?.url) urls.push(place.website.url);
-  const carriesName = nameOnHost(place, town);
-  const ranked2 = hits.map((h) => h.url);
-  for (const url of ranked2.filter(carriesName)) urls.push(url);
-  for (const url of ranked2) urls.push(url);
-  const socials = [];
-  const rest = [];
-  for (const url of new Set(urls)) {
-    if (classifyHost(url, countryCode) === "social") socials.push(url);
-    else rest.push(url);
-  }
-  return [...socials.slice(0, MAX_SOCIAL_CANDIDATES), ...rest.slice(0, MAX_FETCHED_CANDIDATES)];
-}
-async function keylessHits(queries, locale, onEngineNote) {
-  const lists = [];
-  for (const query of queries) {
-    try {
-      const res = await search(query, { limit: 5, lang: locale });
-      for (const n of res.notes ?? []) if (!/searxng|firecrawl|stack up/i.test(n)) onEngineNote?.(n);
-      lists.push((res.hits ?? []).map((h) => ({ url: h.url, title: h.title, snippet: h.snippet })));
-    } catch {
-    }
-  }
-  if (lists.length === 0) return [];
-  const byUrl = /* @__PURE__ */ new Map();
-  for (const list3 of lists) for (const hit of list3) if (!byUrl.has(hit.url)) byUrl.set(hit.url, hit);
-  const fused = rrf(lists, (h) => h.url);
-  const ranked2 = [...byUrl.values()].map((hit) => ({ ...hit, score: fused.get(hit.url) ?? 0 })).sort((a, b) => b.score - a.score);
-  return dedupeByUrl(ranked2).items.map(({ url, title, snippet }) => ({ url, title, snippet }));
-}
-function groupHits(places, hits) {
-  const byPlace = /* @__PURE__ */ new Map();
-  const tagged = hits.filter((h) => h.placeId);
-  if (tagged.length) {
-    for (const h of tagged) {
-      const list3 = byPlace.get(h.placeId) ?? [];
-      list3.push(h);
-      byPlace.set(h.placeId, list3);
-    }
-    return byPlace;
-  }
-  for (const place of places) {
-    const names = [place.osm?.name, ...namesOf2(place)].filter((n) => Boolean(n));
-    const tokens = names.flatMap((n) => [...tokenSet(normalizeName(n))].filter((t) => t.length >= 4));
-    if (tokens.length === 0) continue;
-    for (const h of hits) {
-      const words = new Set(
-        foldAccents(`${h.title ?? ""} ${h.snippet ?? ""}`).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
-      );
-      let host = "";
-      try {
-        host = foldAccents(new URL(h.url).hostname).toLowerCase();
-      } catch {
-      }
-      if (tokens.some((t) => words.has(t) || host !== "" && host.includes(t))) {
-        const list3 = byPlace.get(place.id) ?? [];
-        list3.push(h);
-        byPlace.set(place.id, list3);
-      }
-    }
-  }
-  return byPlace;
-}
-async function runResolve(runDir, places, store, opts = {}) {
-  const notes = [];
-  const note = (n) => {
-    notes.push(n);
-    opts.onNote?.(n);
-  };
-  const saidByEngine = /* @__PURE__ */ new Set();
-  const engineNote = (n) => {
-    if (saidByEngine.has(n)) return;
-    saidByEngine.add(n);
-    note(`resolve: the keyless fallback reports \u2014 ${n}`);
-  };
-  const outcome = {
-    pages: /* @__PURE__ */ new Map(),
-    corroborated: 0,
-    rejected: 0,
-    jsOnly: 0,
-    unreadable: 0,
-    refused: 0,
-    unchanged: 0,
-    socials: 0,
-    socialOnly: 0,
-    notes
-  };
-  const locale = searchLocaleFor(opts.countryCode, opts.lang);
-  if (opts.useEngineSearch && locale) note(`resolve: the keyless fallback will search in ${locale}`);
-  const shared = sharedAddressesIn(places);
-  if (shared.size) note(`resolve: ${shared.size} address(es) hold more than one company in this run \u2014 an address alone will not corroborate a site for those`);
-  if (opts.skip?.length) {
-    const line = describeSkips(skipOutcomeFor(places, opts), Boolean(opts.limit));
-    if (line) note(`resolve: ${line}`);
-  }
-  const targets = resolveTargets(places, opts);
-  const grouped = groupHits(targets, opts.webResults ?? []);
-  if (opts.webResults?.length) note(`resolve: ${opts.webResults.length} supplied web result(s) attributed to ${grouped.size} place(s)`);
-  else note("resolve: no --web-results supplied; only OSM-declared sites and the keyless fallback will be tried");
-  let done = 0;
-  for (const place of targets) {
-    done++;
-    opts.onProgress?.(done, targets.length, place.name);
-    let hits = grouped.get(place.id) ?? [];
-    if (hits.length === 0 && opts.useEngineSearch) {
-      hits = await keylessHits(queriesFor(place, opts.town, opts.countryCode, opts.queriesPerPlace), locale, engineNote);
-    }
-    const candidates2 = candidateUrlsFor(place, hits, opts.countryCode, opts.town);
-    if (candidates2.length === 0) {
-      outcome.unchanged++;
-      continue;
-    }
-    let settled = false;
-    for (const url of candidates2) {
-      const kind = classifyHost(url, opts.countryCode);
-      if (kind === "social") {
-        const social = { value: url, from: "web", lane: "web", note: "found while resolving the website" };
-        const existing = place.contacts.socials.findIndex((item) => item.value === url);
-        if (existing === -1) {
-          place.contacts.socials.push(social);
-          outcome.socials++;
-        } else if (place.contacts.socials[existing].lane !== "web") {
-          place.contacts.socials[existing] = social;
-          outcome.socials++;
-        }
-        continue;
-      }
-      if (kind === "directory") continue;
-      const fetched = await fetchPage2(runDir, place.id, url, "home", store);
-      if (!fetched.ok && fetched.reason === "not-public") {
-        outcome.refused++;
-        note(`resolve: ${place.name} \u2014 ${url} was not requested: ${fetched.why}. Only public http(s) hosts are fetched.`);
-        continue;
-      }
-      if (!fetched.ok) {
-        if (fetched.reason !== "no-readable-text") {
-          outcome.unreadable++;
-          continue;
-        }
-        if (!place.website || place.website.confidence !== "unverified") {
-          place.website = {
-            url,
-            confidence: "unverified",
-            evidence: [`fetched HTTP ${fetched.status}, but the page carries ${fetched.chars} characters of text \u2014 a JavaScript-only site we cannot read`]
-          };
-          outcome.jsOnly++;
-          settled = true;
-        }
-        continue;
-      }
-      const page2 = fetched.page;
-      const check = corroborate(place, page2.text, page2.title, shared, opts.countryCode);
-      const list3 = outcome.pages.get(place.id) ?? [];
-      list3.push(page2.record);
-      outcome.pages.set(place.id, list3);
-      place.pages = [.../* @__PURE__ */ new Set([...place.pages, page2.record.id])];
-      if (check.ok) {
-        place.website = { url: page2.record.url, confidence: "corroborated", evidence: [page2.record.id, ...check.evidence] };
-        outcome.corroborated++;
-        settled = true;
-        break;
-      }
-      if (!place.website || place.website.confidence !== "unverified") {
-        place.website = { url: page2.record.url, confidence: "unverified", evidence: [page2.record.id, check.reason ?? "no corroboration"] };
-      }
-      outcome.rejected++;
-      settled = true;
-    }
-    if (!settled) outcome.unchanged++;
-  }
-  for (const place of targets) {
-    place.webPresence = place.website?.confidence === "corroborated" ? "own-site" : place.contacts.socials.some((social) => social.lane === "web") ? "social-only" : "none";
-    if (place.webPresence === "social-only") outcome.socialOnly++;
-  }
-  note(
-    `resolve: ${outcome.corroborated} corroborated, ${outcome.rejected} fetched but unverified, ${outcome.jsOnly} reachable but JavaScript-only, ${outcome.unreadable} candidate(s) refused or unreachable, ${outcome.socials} social profile(s), ${outcome.unchanged} left without a site` + (outcome.refused ? `, ${outcome.refused} candidate(s) not requested because their address is not a public one` : "")
-  );
-  if (outcome.socialOnly) {
-    note(`resolve: ${outcome.socialOnly} place(s) whose only proven presence is a social profile \u2014 a state, not a gap`);
-  }
-  return outcome;
-}
-
 // src/ats.ts
 var BOARD_PATTERNS = [
   { provider: "greenhouse", re: /(?:boards|job-boards|boards-api)\.greenhouse\.io\/(?:embed\/job_board\?for=)?([a-z0-9_-]+)/gi },
@@ -22040,6 +21475,608 @@ function persistEnrich(runDir, places, tier, outcome) {
   else manifest.counts.enrichedTier2 = outcome.enriched;
   manifest.notes.push(...outcome.notes);
   writeRunManifest(runDir, manifest);
+}
+
+// src/skip.ts
+var SKIP_REASONS = ["chain", "unnamed", "public", "vacant"];
+var PUBLIC_OPERATORS = /* @__PURE__ */ new Set(["public", "government"]);
+function isUnnamed(place) {
+  if (place.registry?.legalName?.trim() || place.registry?.tradingNames?.some((n) => n.trim())) return false;
+  if (place.registry?.id || place.registry?.establishmentId) return false;
+  const name = place.name?.trim();
+  if (!name) return true;
+  if (place.category && name === place.category) return true;
+  return Boolean(place.osm) && name === place.osm?.id;
+}
+function skipReasonsFor(place) {
+  const reasons = [];
+  const tags = place.osm?.tags ?? {};
+  if (tags.brand || tags["brand:wikidata"]) reasons.push("chain");
+  if (isUnnamed(place)) reasons.push("unnamed");
+  const operatorType = tags["operator:type"]?.toLowerCase();
+  const registry = place.registry;
+  const filedPublic = Boolean(registry?.legalForm && connectorById(registry.connectorId)?.legalFormIsPublic?.(registry.legalForm));
+  if (operatorType && PUBLIC_OPERATORS.has(operatorType) || filedPublic) reasons.push("public");
+  const vacant = tags.shop === "vacant" || tags.office === "vacant" || tags.disused === "yes" || // `disused:` and `abandoned:` prefix a feature that is GONE. `was:` does
+  // not: a restaurant that used to be a bakery keeps `was:shop=bakery` while
+  // trading perfectly well, so counting it as vacant skips a live business.
+  Object.keys(tags).some((k) => k.startsWith("disused:") || k.startsWith("abandoned:"));
+  if (vacant) reasons.push("vacant");
+  return reasons;
+}
+function partitionSkipped(places, reasons) {
+  const wanted = new Set(reasons);
+  const kept = [];
+  const skipped = /* @__PURE__ */ new Map();
+  const counts = {};
+  for (const place of places) {
+    const hits = skipReasonsFor(place).filter((r) => wanted.has(r));
+    if (!hits.length) {
+      kept.push(place);
+      continue;
+    }
+    skipped.set(place.id, hits);
+    for (const r of hits) counts[r] = (counts[r] ?? 0) + 1;
+  }
+  return { kept, skipped, counts };
+}
+function describeSkips(outcome, limited = false) {
+  const total = outcome.skipped.size;
+  if (!total) return void 0;
+  if (limited) {
+    const parts2 = SKIP_REASONS.filter((r) => outcome.counts[r]).map((r) => `${outcome.counts[r]} ${r}`);
+    return `passed over ${total} place(s) \u2014 ${parts2.join(", ")}. --limit still takes its full count, so these were replaced rather than saved.`;
+  }
+  const parts = SKIP_REASONS.filter((r) => outcome.counts[r]).map((r) => `${outcome.counts[r]} ${r}`);
+  const sum = SKIP_REASONS.reduce((n, r) => n + (outcome.counts[r] ?? 0), 0);
+  const overlap = sum > total ? ` (${sum - total} counted under more than one reason)` : "";
+  return `skipped ${total} place(s) before searching \u2014 ${parts.join(", ")}${overlap}`;
+}
+
+// src/resolve.ts
+var INTERNATIONAL_DIRECTORY_HOSTS = [
+  "yelp.",
+  "tripadvisor.",
+  "kompass.com",
+  "europages.",
+  "booking.com",
+  "airbnb.",
+  "indeed.com",
+  "glassdoor.",
+  "amazon.",
+  "ebay.",
+  "thefork.",
+  "opentable.",
+  "ubereats.com",
+  "wolt.com",
+  "deliveroo.",
+  "just-eat.",
+  "lieferando.",
+  "foursquare.com",
+  "trustpilot.com",
+  "crunchbase.com",
+  "bloomberg.com",
+  "dnb.com",
+  "opencorporates.com",
+  "wikipedia.org",
+  "wikidata.org"
+];
+var DIRECTORY_HOSTS_BY_COUNTRY = {
+  fr: [
+    "pagesjaunes.fr",
+    "societe.com",
+    "verif.com",
+    "infogreffe.fr",
+    "annuaire-entreprises.data.gouv.fr",
+    "bodacc.fr",
+    "manageo.fr",
+    "petitfute.com",
+    "justacote.com",
+    "cylex-france.fr",
+    "118712.fr",
+    "hoodspot.fr",
+    "dirigeants.bfmtv.com",
+    "pappers.fr",
+    "score3.fr",
+    // Company-record and annonces-légales sites, all harvested from LIVE French
+    // searches over a Saint-Mandé sweep, where each of them ranked at or above
+    // the company's own domain.
+    //
+    // These are the dangerous kind. A phone book carries a name and an address;
+    // these publish the SIREN, so the corroboration check accepts them on the
+    // strongest signal it has and files a register directory as the company's
+    // own site, CORROBORATED rather than merely unverified. Host exclusion is
+    // the only thing between that and a dossier written about a directory.
+    "actulegales.fr",
+    "data.inpi.fr",
+    "rubypayeur.com",
+    "societeinfo.com",
+    "repreneurs.com",
+    "infonet.fr",
+    "datalegal.fr",
+    "annuaire-inverse-france.com",
+    "business-directory.fr",
+    "compteo.fr",
+    "petitesaffiches.fr",
+    "maitredata.com",
+    "droits-salaries.com",
+    "afjv.com",
+    "experts-comptables.org",
+    "leboncoin.fr",
+    "doctolib.fr",
+    "mappy.com",
+    "lafourchette.",
+    // Public-sector and sector directories, all seen ranking above a company's
+    // own site in real searches. education.gouv.fr's school annuaire is the one
+    // that actually displaced a school's website in a Saint-Mandé run.
+    "education.gouv.fr",
+    "ville-data.com",
+    "college-lycee.com",
+    "adresses-ecoles.fr",
+    "enseignement-prive.info",
+    "restaurantguru.com",
+    "restopolitan.com",
+    "restaurants-de-france.fr",
+    // Trade and opening-hours directories, harvested from a live Saint-Mandé
+    // search for two independent food businesses. Every one of these carries
+    // the trading name AND the street address, so they corroborate on the two
+    // strongest signals there are: left unlisted, alentoor.fr and
+    // boulangeries-patisseries.fr were both filed as a company's own website,
+    // CORROBORATED, in a real run.
+    "alentoor.fr",
+    "boulangeries-patisseries.fr",
+    "trouver-ouvert.fr",
+    "aleou.fr",
+    "eater.space",
+    "mapstr.com",
+    "uniiti.com",
+    "kazfeed.com",
+    "linternaute.com",
+    "journaldunet.com",
+    "figaro.fr"
+  ],
+  de: [
+    "gelbeseiten.de",
+    "dasoertliche.de",
+    "11880.com",
+    // `wlw.` rather than wlw.de: the same directory answers on wlw.com/en.
+    "wlw.",
+    "firmenwissen.de",
+    "northdata.de",
+    "unternehmensregister.de",
+    "meinestadt.de",
+    "goyellow.de",
+    "cylex.de",
+    "werkenntdenbesten.de",
+    "jameda.de",
+    "kununu.com",
+    "stepstone.de",
+    // Each of these was filed as a company's own site on a live Hamburg run.
+    "die-deutsche-wirtschaft.de",
+    "implisense.com",
+    "branchen-info.net",
+    "marktplatz-mittelstand.de",
+    "firma-24.de"
+  ],
+  es: ["paginasamarillas.es", "einforma.com", "axesor.es", "empresite.eleconomista.es", "infoempresa.com", "cylex.es", "11870.com", "infojobs.net"],
+  gb: ["yell.com", "companycheck.co.uk", "endole.co.uk", "checkatrade.com", "thomsonlocal.com", "cylex-uk.co.uk", "192.com", "reed.co.uk", "totaljobs.com"],
+  us: [
+    "yellowpages.com",
+    "bbb.org",
+    "manta.com",
+    "bizapedia.com",
+    "chamberofcommerce.com",
+    "mapquest.com",
+    "angi.com",
+    "thumbtack.com",
+    "zillow.com",
+    "ziprecruiter.com"
+  ],
+  it: ["paginegialle.it", "ufficiocamerale.it", "reportaziende.it", "misterimprese.it"],
+  nl: ["telefoonboek.nl", "detelefoongids.nl", "bedrijvenpagina.nl"],
+  no: ["gulesider.no", "proff.no", "1881.no"],
+  fi: ["fonecta.fi", "finder.fi"],
+  cz: ["firmy.cz", "zivefirmy.cz"],
+  pl: ["panoramafirm.pl", "aleo.com", "pkt.pl"]
+};
+var SOCIAL_HOSTS = ["facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "youtube.com", "tiktok.com", "pinterest.", "wa.me"];
+var DEFAULT_QUERIES_PER_PLACE = 3;
+function directoryHostsFor(countryCode) {
+  const national = DIRECTORY_HOSTS_BY_COUNTRY[(countryCode ?? "").toLowerCase()] ?? [];
+  return [...INTERNATIONAL_DIRECTORY_HOSTS, ...national];
+}
+function classifyHost(url, countryCode) {
+  let host;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return "directory";
+  }
+  if (SOCIAL_HOSTS.some((h) => hostIs2(host, h))) return "social";
+  if (directoryHostsFor(countryCode).some((h) => hostIs2(host, h))) return "directory";
+  return "own";
+}
+function hostIs2(host, listed) {
+  if (listed.endsWith(".")) return host.startsWith(listed) || host.includes(`.${listed}`);
+  return host === listed || host.endsWith(`.${listed}`);
+}
+function queriesFor(place, fallbackTown, countryCode, perPlace = DEFAULT_QUERIES_PER_PLACE) {
+  const town = place.address.commune ?? place.address.codePostal ?? fallbackTown ?? "";
+  const names = /* @__PURE__ */ new Set();
+  if (place.osm?.name) names.add(place.osm.name);
+  for (const n of namesOf2(place)) names.add(n);
+  const queries = [];
+  for (const n of names) {
+    queries.push(town ? `${n} ${town}` : n);
+  }
+  const legalId = place.registry?.establishmentId ?? place.registry?.id;
+  if (legalId) queries.push(`"${legalId}"`);
+  const firstName = [...names][0];
+  const street = place.address.libelleVoie;
+  if (street && firstName) {
+    const numero = place.address.numero ? `${place.address.numero} ` : "";
+    queries.push(`${firstName} ${numero}${street}${town ? ` ${town}` : ""}`.trim());
+  }
+  if (!legalId && firstName) {
+    for (const term of legalNoticeTerms(countryCode)) queries.push(`${firstName} ${term}`);
+  }
+  return [...new Set(queries)].slice(0, Math.max(1, perPlace));
+}
+function searchLocaleFor(countryCode, lang) {
+  if (lang) return lang;
+  const cc = (countryCode ?? "").toLowerCase();
+  const byCountry = {
+    fr: "fr-FR",
+    de: "de-DE",
+    at: "de-AT",
+    ch: "de-CH",
+    es: "es-ES",
+    it: "it-IT",
+    nl: "nl-NL",
+    be: "nl-BE",
+    pt: "pt-PT",
+    pl: "pl-PL",
+    cz: "cs-CZ",
+    no: "nb-NO",
+    fi: "fi-FI",
+    se: "sv-SE",
+    dk: "da-DK",
+    gb: "en-GB",
+    ie: "en-IE",
+    us: "en-US"
+  };
+  return byCountry[cc];
+}
+function namesOf2(place) {
+  const rec = place.registry;
+  if (!rec) return [];
+  const out2 = [];
+  const first = rec.tradingNames?.[0];
+  if (first) out2.push(first);
+  if (rec.legalName) out2.push(rec.legalName.replace(/\s*\([^)]*\)/g, "").trim());
+  return out2.filter(Boolean);
+}
+function addressKey(place) {
+  const a = place.address;
+  if (!a.libelleVoie || !a.codePostal) return "";
+  return `${a.numero ?? ""}|${foldAccents(a.libelleVoie).toUpperCase().trim()}|${a.codePostal}`;
+}
+function sharedAddressesIn(places) {
+  const seen = /* @__PURE__ */ new Map();
+  for (const p of places) {
+    const key = addressKey(p);
+    if (key) seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+  return new Set([...seen].filter(([, n]) => n > 1).map(([key]) => key));
+}
+function corroborate(place, pageText, pageTitle, sharedAddresses = /* @__PURE__ */ new Set(), countryCode) {
+  const haystack = foldAccents(`${pageTitle ?? ""}
+${pageText}`).toLowerCase();
+  const digits = haystack.replace(/[^0-9]/g, "");
+  const evidence = [];
+  const legalUnitId = place.registry?.id;
+  const establishmentId = place.registry?.establishmentId;
+  const carries = (id) => {
+    if (!id) return false;
+    const bare = id.replace(/\s+/g, "");
+    if (/^\d+$/.test(bare)) return bare.length >= 6 && digits.includes(bare);
+    return bare.length >= 6 && haystack.includes(bare.toLowerCase());
+  };
+  if (carries(establishmentId)) evidence.push(`registration ${establishmentId} on the page`);
+  else if (carries(legalUnitId)) evidence.push(`registration ${legalUnitId} on the page`);
+  const street = place.address.libelleVoie;
+  const postcode = place.address.codePostal;
+  if (street && postcode && !sharedAddresses.has(addressKey(place))) {
+    const streetNorm = foldAccents(street).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const streetWords = streetNorm.split(" ").filter((w) => w.length > 3);
+    const streetSeen = streetWords.length > 0 && streetWords.every((w) => haystack.includes(w));
+    if (streetSeen && haystack.includes(postcode)) evidence.push(`address "${street} ${postcode}" on the page`);
+  }
+  const words = new Set(haystack.split(/[^a-z0-9]+/).filter(Boolean));
+  const candidateNames = [place.osm?.name, ...namesOf2(place)].filter((n) => Boolean(n));
+  for (const name of candidateNames) {
+    const distinctive = [...tokenSet(normalizeName(name))].filter((t) => t.length >= 4);
+    if (distinctive.length === 0) continue;
+    const eachIsAWord = distinctive.every((t) => words.has(t));
+    const runTogether = distinctive.length > 1 && words.has(distinctive.join(""));
+    if (eachIsAWord || runTogether) {
+      evidence.push(`name "${name}" on the page`);
+      break;
+    }
+  }
+  if (evidence.length === 0) {
+    const id = (countryCode ?? "").toLowerCase() === "fr" ? "SIREN" : "registration number";
+    return { ok: false, evidence: [], reason: `the page carries neither the company's name, its address nor its ${id}` };
+  }
+  return { ok: true, evidence };
+}
+async function readLegalNotice(runDir, place, home, store, countryCode) {
+  const linked = pickByRole(sameOriginLinks(home.html ?? "", home.record.url), ["legal"], countryCode).get("legal");
+  let url = linked && isLegalNotice(linked) ? linked : void 0;
+  if (!url) {
+    const guess = legalGuessesFor(countryCode)[0];
+    try {
+      const guessed = guess ? new URL(guess, home.record.url).href : void 0;
+      if (guessed && isOwnCountryNotice(guessed, countryCode)) url = guessed;
+    } catch {
+    }
+  }
+  if (!url || url === home.record.url) return void 0;
+  const robots = await fetchRobots(home.record.url, { authorizeUrl: publicUrlAuthorizer() }).catch(() => void 0);
+  if (robots && !isAllowed(robots, url)) return void 0;
+  const fetched = await fetchPage2(runDir, place.id, url, "legal", store);
+  if (!fetched.ok) return void 0;
+  try {
+    if (new URL(fetched.page.record.url).origin !== new URL(home.record.url).origin) return void 0;
+  } catch {
+    return void 0;
+  }
+  return fetched.page;
+}
+function buildResolveTodo(places, town, countryCode, selection = {}) {
+  const outcome = skipOutcomeFor(places, selection);
+  const byId = new Map(places.map((p) => [p.id, p]));
+  const skipped = [...outcome.skipped].map(([placeId, reasons]) => ({ placeId, name: byId.get(placeId)?.name ?? placeId, reasons }));
+  return {
+    version: 1,
+    generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    items: resolveTargets(places, selection).map((p) => ({
+      placeId: p.id,
+      name: p.name,
+      queries: queriesFor(p, town, countryCode, selection.queriesPerPlace)
+    })),
+    ...skipped.length ? { skipped } : {}
+  };
+}
+function needsResolving(places) {
+  return places.filter((p) => !p.website || p.website.confidence === "declared");
+}
+function resolveTargets(places, opts = {}) {
+  const targets = skipOutcomeFor(places, opts).kept;
+  return opts.limit ? targets.slice(0, opts.limit) : targets;
+}
+function skipOutcomeFor(places, opts = {}) {
+  let targets = needsResolving(places);
+  if (opts.only?.length) {
+    const wanted = new Set(opts.only);
+    targets = targets.filter((p) => wanted.has(p.id));
+  }
+  if (!opts.skip?.length) return { kept: targets, skipped: /* @__PURE__ */ new Map(), counts: {} };
+  return partitionSkipped(targets, opts.skip);
+}
+function nameOnHost(place, town) {
+  const local2 = /* @__PURE__ */ new Set([...tokenSet(normalizeName(town ?? "")), ...tokenSet(normalizeName(place.address.commune ?? ""))]);
+  const names = [place.osm?.name, ...namesOf2(place)].filter((n) => Boolean(n));
+  const tokens = [...new Set(names.flatMap((n) => [...tokenSet(normalizeName(n))]))].filter((t) => t.length >= 4 && !local2.has(t));
+  return (url) => {
+    if (tokens.length === 0) return false;
+    try {
+      const host = foldAccents(new URL(url).hostname).toLowerCase();
+      return tokens.some((t) => host.includes(t));
+    } catch {
+      return false;
+    }
+  };
+}
+var MAX_FETCHED_CANDIDATES = 3;
+var MAX_SOCIAL_CANDIDATES = 5;
+function candidateUrlsFor(place, hits, countryCode, town) {
+  const urls = [];
+  if (place.website?.url) urls.push(place.website.url);
+  const carriesName = nameOnHost(place, town);
+  const ranked2 = hits.map((h) => h.url);
+  for (const url of ranked2.filter(carriesName)) urls.push(url);
+  for (const url of ranked2) urls.push(url);
+  const socials = [];
+  const rest = [];
+  for (const url of new Set(urls)) {
+    if (classifyHost(url, countryCode) === "social") socials.push(url);
+    else rest.push(url);
+  }
+  return [...socials.slice(0, MAX_SOCIAL_CANDIDATES), ...rest.slice(0, MAX_FETCHED_CANDIDATES)];
+}
+async function keylessHits(queries, locale, onEngineNote) {
+  const lists = [];
+  for (const query of queries) {
+    try {
+      const res = await search(query, { limit: 5, lang: locale });
+      for (const n of res.notes ?? []) if (!/searxng|firecrawl|stack up/i.test(n)) onEngineNote?.(n);
+      lists.push((res.hits ?? []).map((h) => ({ url: h.url, title: h.title, snippet: h.snippet })));
+    } catch {
+    }
+  }
+  if (lists.length === 0) return [];
+  const byUrl = /* @__PURE__ */ new Map();
+  for (const list3 of lists) for (const hit of list3) if (!byUrl.has(hit.url)) byUrl.set(hit.url, hit);
+  const fused = rrf(lists, (h) => h.url);
+  const ranked2 = [...byUrl.values()].map((hit) => ({ ...hit, score: fused.get(hit.url) ?? 0 })).sort((a, b) => b.score - a.score);
+  return dedupeByUrl(ranked2).items.map(({ url, title, snippet }) => ({ url, title, snippet }));
+}
+function groupHits(places, hits) {
+  const byPlace = /* @__PURE__ */ new Map();
+  const tagged = hits.filter((h) => h.placeId);
+  if (tagged.length) {
+    for (const h of tagged) {
+      const list3 = byPlace.get(h.placeId) ?? [];
+      list3.push(h);
+      byPlace.set(h.placeId, list3);
+    }
+    return byPlace;
+  }
+  for (const place of places) {
+    const names = [place.osm?.name, ...namesOf2(place)].filter((n) => Boolean(n));
+    const tokens = names.flatMap((n) => [...tokenSet(normalizeName(n))].filter((t) => t.length >= 4));
+    if (tokens.length === 0) continue;
+    for (const h of hits) {
+      const words = new Set(
+        foldAccents(`${h.title ?? ""} ${h.snippet ?? ""}`).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+      );
+      let host = "";
+      try {
+        host = foldAccents(new URL(h.url).hostname).toLowerCase();
+      } catch {
+      }
+      if (tokens.some((t) => words.has(t) || host !== "" && host.includes(t))) {
+        const list3 = byPlace.get(place.id) ?? [];
+        list3.push(h);
+        byPlace.set(place.id, list3);
+      }
+    }
+  }
+  return byPlace;
+}
+async function runResolve(runDir, places, store, opts = {}) {
+  const notes = [];
+  const note = (n) => {
+    notes.push(n);
+    opts.onNote?.(n);
+  };
+  const saidByEngine = /* @__PURE__ */ new Set();
+  const engineNote = (n) => {
+    if (saidByEngine.has(n)) return;
+    saidByEngine.add(n);
+    note(`resolve: the keyless fallback reports \u2014 ${n}`);
+  };
+  const outcome = {
+    pages: /* @__PURE__ */ new Map(),
+    corroborated: 0,
+    rejected: 0,
+    jsOnly: 0,
+    unreadable: 0,
+    refused: 0,
+    unchanged: 0,
+    socials: 0,
+    socialOnly: 0,
+    notes
+  };
+  const locale = searchLocaleFor(opts.countryCode, opts.lang);
+  if (opts.useEngineSearch && locale) note(`resolve: the keyless fallback will search in ${locale}`);
+  const shared = sharedAddressesIn(places);
+  if (shared.size) note(`resolve: ${shared.size} address(es) hold more than one company in this run \u2014 an address alone will not corroborate a site for those`);
+  if (opts.skip?.length) {
+    const line = describeSkips(skipOutcomeFor(places, opts), Boolean(opts.limit));
+    if (line) note(`resolve: ${line}`);
+  }
+  const targets = resolveTargets(places, opts);
+  const grouped = groupHits(targets, opts.webResults ?? []);
+  if (opts.webResults?.length) note(`resolve: ${opts.webResults.length} supplied web result(s) attributed to ${grouped.size} place(s)`);
+  else note("resolve: no --web-results supplied; only OSM-declared sites and the keyless fallback will be tried");
+  let done = 0;
+  for (const place of targets) {
+    done++;
+    opts.onProgress?.(done, targets.length, place.name);
+    let hits = grouped.get(place.id) ?? [];
+    if (hits.length === 0 && opts.useEngineSearch) {
+      hits = await keylessHits(queriesFor(place, opts.town, opts.countryCode, opts.queriesPerPlace), locale, engineNote);
+    }
+    const candidates2 = candidateUrlsFor(place, hits, opts.countryCode, opts.town);
+    if (candidates2.length === 0) {
+      outcome.unchanged++;
+      continue;
+    }
+    let settled = false;
+    let noticeTried = false;
+    for (const url of candidates2) {
+      const kind = classifyHost(url, opts.countryCode);
+      if (kind === "social") {
+        const social = { value: url, from: "web", lane: "web", note: "found while resolving the website" };
+        const existing = place.contacts.socials.findIndex((item) => item.value === url);
+        if (existing === -1) {
+          place.contacts.socials.push(social);
+          outcome.socials++;
+        } else if (place.contacts.socials[existing].lane !== "web") {
+          place.contacts.socials[existing] = social;
+          outcome.socials++;
+        }
+        continue;
+      }
+      if (kind === "directory") continue;
+      const fetched = await fetchPage2(runDir, place.id, url, "home", store, { keepHtml: true });
+      if (!fetched.ok && fetched.reason === "not-public") {
+        outcome.refused++;
+        note(`resolve: ${place.name} \u2014 ${url} was not requested: ${fetched.why}. Only public http(s) hosts are fetched.`);
+        continue;
+      }
+      if (!fetched.ok) {
+        if (fetched.reason !== "no-readable-text") {
+          outcome.unreadable++;
+          continue;
+        }
+        if (!place.website || place.website.confidence !== "unverified") {
+          place.website = {
+            url,
+            confidence: "unverified",
+            evidence: [`fetched HTTP ${fetched.status}, but the page carries ${fetched.chars} characters of text \u2014 a JavaScript-only site we cannot read`]
+          };
+          outcome.jsOnly++;
+          settled = true;
+        }
+        continue;
+      }
+      const page2 = fetched.page;
+      let check = corroborate(place, page2.text, page2.title, shared, opts.countryCode);
+      const cited = [page2.record.id];
+      const list3 = outcome.pages.get(place.id) ?? [];
+      list3.push(page2.record);
+      if (!check.ok && !noticeTried) {
+        noticeTried = true;
+        const notice = await readLegalNotice(runDir, place, page2, store, opts.countryCode);
+        if (notice) {
+          list3.push(notice.record);
+          const fromNotice = corroborate(place, notice.text, notice.title, shared, opts.countryCode);
+          if (fromNotice.ok) {
+            cited.push(notice.record.id);
+            check = { ok: true, evidence: fromNotice.evidence.map((e) => e.replace(/ on the page$/, ` on the legal notice ${notice.record.id}`)) };
+          }
+        }
+      }
+      outcome.pages.set(place.id, list3);
+      place.pages = [.../* @__PURE__ */ new Set([...place.pages, ...list3.map((p) => p.id)])];
+      if (check.ok) {
+        place.website = { url: page2.record.url, confidence: "corroborated", evidence: [...cited, ...check.evidence] };
+        outcome.corroborated++;
+        settled = true;
+        break;
+      }
+      if (!place.website || place.website.confidence !== "unverified") {
+        place.website = { url: page2.record.url, confidence: "unverified", evidence: [page2.record.id, check.reason ?? "no corroboration"] };
+      }
+      outcome.rejected++;
+      settled = true;
+    }
+    if (!settled) outcome.unchanged++;
+  }
+  for (const place of targets) {
+    place.webPresence = place.website?.confidence === "corroborated" ? "own-site" : place.contacts.socials.some((social) => social.lane === "web") ? "social-only" : "none";
+    if (place.webPresence === "social-only") outcome.socialOnly++;
+  }
+  note(
+    `resolve: ${outcome.corroborated} corroborated, ${outcome.rejected} fetched but unverified, ${outcome.jsOnly} reachable but JavaScript-only, ${outcome.unreadable} candidate(s) refused or unreachable, ${outcome.socials} social profile(s), ${outcome.unchanged} left without a site` + (outcome.refused ? `, ${outcome.refused} candidate(s) not requested because their address is not a public one` : "")
+  );
+  if (outcome.socialOnly) {
+    note(`resolve: ${outcome.socialOnly} place(s) whose only proven presence is a social profile \u2014 a state, not a gap`);
+  }
+  return outcome;
 }
 
 // src/score.ts

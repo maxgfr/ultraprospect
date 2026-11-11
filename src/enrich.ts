@@ -105,7 +105,7 @@ export function isLegalNotice(url: string): boolean {
 }
 
 /** Whether this notice is spelled the way the run's country spells it. */
-function isOwnCountryNotice(url: string, countryCode: string | undefined): boolean {
+export function isOwnCountryNotice(url: string, countryCode: string | undefined): boolean {
   const own = LEGAL_GUESSES_BY_COUNTRY[(countryCode ?? "").toLowerCase()];
   if (!own) return false;
   try {
