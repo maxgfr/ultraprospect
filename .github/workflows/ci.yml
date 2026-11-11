@@ -13,9 +13,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 20 is the dev-toolchain floor (vitest 4 needs >=20.19); 24 is current.
+        # 22 is the dev-toolchain floor (vitest 5 and semantic-release 25 need
+        # >=22.12; Node 20 reached end of life in April 2026); 24 is current.
         # The published bundle's Node 18 floor is covered by runtime-node-floor.
-        node-version: [20, 24]
+        node-version: [22, 24]
     name: build-test (node ${{ matrix.node-version }})
     steps:
       - uses: actions/checkout@v6
@@ -87,7 +88,7 @@ jobs:
           echo "install-bundle: skill installed whole and the engine runs."
 
   # The shipped scripts/ultraprospect.mjs is a dependency-free bundle declaring
-  # engines.node ">=18", but the dev toolchain (vitest 4) needs Node >=20.19 — so
+  # engines.node ">=18", but the dev toolchain (vitest 5) needs Node >=22.12 — so
   # build-test above cannot prove the floor. This job runs ONLY the committed
   # bundle on Node 18, with no install, to guarantee the published ">=18" promise
   # holds. A Node 20+ API sneaking into src/ would build green on Node 24 and
