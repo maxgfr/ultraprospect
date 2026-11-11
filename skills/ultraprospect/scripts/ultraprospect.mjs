@@ -21005,6 +21005,7 @@ var NEUTRAL_ROLES = [
   "CFO",
   "CMO"
 ];
+var AMBIGUOUS_CARD_ROLES = /* @__PURE__ */ new Set(["Partner"]);
 var LANGUAGE_OF = {
   de: "de",
   at: "de",
@@ -21168,6 +21169,7 @@ function extractPeople(text3, opts = {}) {
   const compounds = new Set(LANGUAGE_OF[(opts.countryCode ?? "").toLowerCase()] === "de" ? ROLES.de : []);
   const found = [];
   const seen = /* @__PURE__ */ new Set();
+  const held = [];
   const add2 = (value, role) => {
     const clean2 = cleanName(value);
     const key = clean2.toLowerCase();
@@ -21185,9 +21187,12 @@ function extractPeople(text3, opts = {}) {
       }
     }
     for (const m of text3.matchAll(new RegExp(`(^|\\n)\\s*([^\\n]{4,70})\\s*\\n\\s*[^\\n]{0,20}${before}${escaped}${after}`, "giu"))) {
-      if (isName(m[2], opts)) add2(m[2], role);
+      if (!isName(m[2], opts)) continue;
+      if (AMBIGUOUS_CARD_ROLES.has(role)) held.push({ value: m[2], role });
+      else add2(m[2], role);
     }
   }
+  if (found.some((p) => !AMBIGUOUS_CARD_ROLES.has(p.role))) for (const h of held) add2(h.value, h.role);
   return found;
 }
 function peopleFrom(text3, pageId, opts = {}) {

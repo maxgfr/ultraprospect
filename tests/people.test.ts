@@ -119,6 +119,18 @@ describe("extractPeople", () => {
     expect(de("Vorstand: Prof. Dr. Hans Peter Müller")[0]?.value).toBe("Prof. Dr. Hans Peter Müller");
   });
 
+  it("keeps a Partner card on a team page, and refuses one in a partners section", () => {
+    const team = de("Unser Team\nJan Schmidt\nGeschäftsführer\nAnna Müller\nPartner\n");
+    expect(team).toEqual([
+      { value: "Jan Schmidt", role: "Geschäftsführer" },
+      { value: "Anna Müller", role: "Partner" },
+    ]);
+    // A web agency's partners section: companies captioned "Partner".
+    expect(de("Unsere Partner\nAstor Gewerbeparks\nPartner\nNordwerk Logistik\nPartner\n")).toEqual([]);
+    // The colon form is a field, not a caption, and is read as before.
+    expect(de("Partner: Johannes Leßmann")[0]?.value).toBe("Johannes Leßmann");
+  });
+
   it("caps what one page can contribute", () => {
     const many = Array.from({ length: 40 }, (_, i) => `Geschäftsführer: Anna Nummer${String.fromCharCode(65 + (i % 26))}`).join("\n");
     expect(de(many).length).toBeLessThanOrEqual(12);

@@ -119,6 +119,25 @@ const NEUTRAL_ROLES = [
   "CMO",
 ];
 
+/**
+ * Labels that caption a company as readily as a person, in the team-card form.
+ *
+ * "Partner" is a law or consulting firm's title for a person AND every
+ * agency's caption for a business it works with. Measured on a web agency's
+ * partners section: "Astor Gewerbeparks" on one line, "Partner" on the next,
+ * read as a person. Nothing in the two words tells a client apart from a
+ * colleague — "Gewerbeparks" is a capitalised German noun, as a surname is.
+ * The page does: a team page names its people under labels that cannot mean a
+ * company (CEO, Geschäftsführer, Head of…), a partners section names none. So
+ * a "Partner" card is kept only on a page that has named somebody under an
+ * unambiguous label. A page of partner cards alone costs those contacts; the
+ * other way, a client ships as a person.
+ *
+ * The "Partner: Name" form is not held: a label with a colon is a field of a
+ * notice or a profile, not the caption under a logo.
+ */
+const AMBIGUOUS_CARD_ROLES = new Set(["Partner"]);
+
 /** Country to the language whose labels its sites are written in. */
 const LANGUAGE_OF: Record<string, string> = {
   de: "de",
@@ -382,6 +401,8 @@ export function extractPeople(text: string, opts: PeopleOptions = {}): FoundPers
   const compounds = new Set(LANGUAGE_OF[(opts.countryCode ?? "").toLowerCase()] === "de" ? ROLES.de : []);
   const found: FoundPerson[] = [];
   const seen = new Set<string>();
+  /** Cards under a label that can also caption a company, held until the page vouches for them. */
+  const held: { value: string; role: string }[] = [];
 
   const add = (value: string, role: string) => {
     const clean = cleanName(value);
@@ -416,9 +437,15 @@ export function extractPeople(text: string, opts: PeopleOptions = {}): FoundPers
     // Name \n LABEL — a team card. The name is the line above, and it has to be
     // a whole line: a name buried in a sentence is a mention, not a card.
     for (const m of text.matchAll(new RegExp(`(^|\\n)\\s*([^\\n]{4,70})\\s*\\n\\s*[^\\n]{0,20}${before}${escaped}${after}`, "giu"))) {
-      if (isName(m[2]!, opts)) add(m[2]!, role);
+      if (!isName(m[2]!, opts)) continue;
+      if (AMBIGUOUS_CARD_ROLES.has(role)) held.push({ value: m[2]!, role });
+      else add(m[2]!, role);
     }
   }
+
+  // An ambiguous card counts only on a page that has already shown it lists
+  // PEOPLE, by naming someone under a label that cannot mean a company.
+  if (found.some((p) => !AMBIGUOUS_CARD_ROLES.has(p.role))) for (const h of held) add(h.value, h.role);
   return found;
 }
 
