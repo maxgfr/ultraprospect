@@ -488,6 +488,8 @@ export interface VerdictOutcome {
    * taking their shopfront or their record.
    */
   remaining: MatchCandidate[];
+  /** Records a verdict attached from the worklist itself, for the run's registry.json. */
+  attached: RegistryRecord[];
 }
 
 /**
@@ -523,6 +525,7 @@ export function applyVerdicts(places: Place[], verdicts: readonly MatchVerdict[]
   let mergedCount = 0;
   let skipped = 0;
   const unknown: string[] = [];
+  const attached: RegistryRecord[] = [];
 
   for (const v of verdicts) {
     if (!v.merge) {
@@ -533,8 +536,29 @@ export function applyVerdicts(places: Place[], verdicts: readonly MatchVerdict[]
       continue;
     }
     const key = verdictKey(v, known);
-    const osmPlace = byOsm.get(v.osmId);
+    // A pair from `confirm` names its place by place id ("osm:n1"), one from the
+    // sweep by OSM id ("n1"). Both are this place.
+    const osmPlace = byOsm.get(v.osmId) ?? byOsm.get(v.osmId.replace(/^osm:/, ""));
     const recPlace = key ? byRecord.get(key) : undefined;
+
+    // A `confirm` pair: the record travels in the worklist and is not a place.
+    // It is attached to the place the pair names, under the same one-to-one rule
+    // as a sweep pair.
+    const carried = !recPlace ? lookupCarried(todo, v) : undefined;
+    if (carried && osmPlace && !osmPlace.registry && !takenRecords.has(carried.key)) {
+      osmPlace.registry = carried.record;
+      osmPlace.registryEvidence = { mode: "confirm", how: "agent-adjudicated" };
+      osmPlace.matchedBy = "agent";
+      osmPlace.sources = [...new Set([...osmPlace.sources, "registry" as const])];
+      osmPlace.matchConfidence = Number(carried.score.toFixed(3));
+      osmPlace.address = { ...carried.record.address, ...osmPlace.address };
+      attached.push(carried.record);
+      mergedCount++;
+      answered.add(pairKey(carried.osmId, carried.key));
+      takenRecords.add(carried.key);
+      takenOsm.add(carried.osmId);
+      continue;
+    }
     // A verdict joins ONE unmatched shopfront to ONE unmatched register record.
     // Each of the three refusals below was a way to lose a company without a
     // line of output:
@@ -587,5 +611,20 @@ export function applyVerdicts(places: Place[], verdicts: readonly MatchVerdict[]
   // named either side, since a verdict on it could only be refused now.
   const remaining = todo.filter((c) => !answered.has(pairKey(c.osmId, candidateKey(c))) && !takenOsm.has(c.osmId) && !takenRecords.has(candidateKey(c)));
 
-  return { merged: mergedCount, skipped, unknown, remaining };
+  return { merged: mergedCount, skipped, unknown, remaining, attached };
+}
+
+/** The worklist pair a verdict names, when it carries its own record. */
+function lookupCarried(todo: readonly MatchCandidate[], v: MatchVerdict): { record: RegistryRecord; key: string; osmId: string; score: number } | undefined {
+  const raw = v.registryId?.trim();
+  if (!raw) return undefined;
+  const sameOsm = (id: string) => id === v.osmId || id.replace(/^osm:/, "") === v.osmId.replace(/^osm:/, "");
+  const hit = todo.find(
+    (c) =>
+      c.record &&
+      sameOsm(c.osmId) &&
+      (c.registryId === raw || `${c.connectorId}:${c.registryId}` === raw) &&
+      (!v.connectorId || v.connectorId === c.connectorId),
+  );
+  return hit?.record ? { record: hit.record, key: `${hit.connectorId}:${hit.registryId}`, osmId: hit.osmId, score: hit.score } : undefined;
 }

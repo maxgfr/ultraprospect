@@ -319,6 +319,16 @@ export interface MatchCandidate {
   score: number;
   parts: { distance: number; name: number; enseigne: number; address: number };
   distanceM: number;
+  /**
+   * The register record itself, when it is nowhere else in the run.
+   *
+   * A sweep pair's record is a place of its own in places.json, so `match
+   * --apply` can fold it in. A pair `confirm` sends here came from a name
+   * lookup, and its record was kept nowhere: the verdict that said "same
+   * company" had nothing to attach, and was reported as a pair the run does
+   * not have.
+   */
+  record?: import("./registry/types.js").RegistryRecord;
 }
 
 export interface MatchTodo {

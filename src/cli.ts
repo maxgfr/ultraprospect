@@ -70,6 +70,7 @@ import { isTenderManifest } from "./tenders/run.js";
 import { readManifest } from "./engine.js";
 import { runStdioServer, startHttpServer } from "./engine.js";
 import type { FitVerdict, MatchTodo, PageRole } from "./types.js";
+import { recordKey, type RegistryRecord } from "./registry/types.js";
 import { DEFAULT_OUT, newRun, readPlaces, requireManifest, resolveRun, shortLabel, writeJson, writePlaces, writeRunManifest } from "./run.js";
 import { clampInt, parseBbox, parseDistanceM } from "./util.js";
 import { VERSION } from "./version.js";
@@ -868,8 +869,15 @@ async function cmdMatch(values: Record<string, string>, bools: ReadonlySet<strin
   // a fan-out re-emitted from it, was handed every settled pair again.
   const todo = readJsonSafe(join(runDir, "MATCH.todo.json")) as MatchTodo | undefined;
   const listed = Array.isArray(todo?.pairs) ? todo.pairs : undefined;
-  const { remaining, ...result } = applyVerdicts(places, verdicts, listed ?? []);
+  const { remaining, attached, ...result } = applyVerdicts(places, verdicts, listed ?? []);
   writePlaces(runDir, places);
+  // A record attached from a confirm pair joins the run's register records,
+  // where licences, counts and the gate expect to find it.
+  if (attached.length) {
+    const held = (readJsonSafe(join(runDir, "registry.json")) as RegistryRecord[] | undefined) ?? [];
+    const keys = new Set(held.map(recordKey));
+    writeJson(runDir, "registry.json", [...held, ...attached.filter((r) => !keys.has(recordKey(r)))]);
+  }
   if (listed) writeJson(runDir, "MATCH.todo.json", buildMatchTodo(remaining));
 
   const manifest = requireManifest(runDir);

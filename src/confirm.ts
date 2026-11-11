@@ -234,6 +234,9 @@ function toCandidate(place: Place, rec: RegistryRecord, score: number, matchedNa
     // measure are reported as zero and `distanceM` as unknown-far.
     parts: { distance: 0, name: Number(score.toFixed(4)), enseigne: 0, address: 0 },
     distanceM: Number.POSITIVE_INFINITY,
+    // Carried with the pair: a name lookup's record is not a place in this run,
+    // and the verdict that merges it needs something to attach.
+    record: rec,
   };
 }
 

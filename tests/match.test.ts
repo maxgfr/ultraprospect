@@ -435,3 +435,54 @@ describe("the candidate grid far from the equator", () => {
     expect(out.undecided).toEqual([]);
   });
 });
+
+describe("applyVerdicts on a pair confirm sent to adjudication", () => {
+  // `confirm` found the record by a name lookup: it is not a place in the run,
+  // and the pair names its place by place id. Merging it used to be impossible.
+  const shopfront = (): Place => ({
+    id: "osm:n1",
+    name: "Transcargo GmbH",
+    sources: ["osm"],
+    osm: poi(),
+    address: { commune: "Hamburg" },
+    contacts: { emails: [], phones: [], socials: [], people: [] },
+    jobs: [],
+    pages: [],
+  });
+  const record = rec({
+    connectorId: "gleif",
+    id: "LEI1",
+    legalName: "TCO Transcargo GmbH",
+    names: ["TCO Transcargo GmbH"],
+    address: { commune: "Hamburg", codePostal: "21107" },
+  });
+  const pair = {
+    osmId: "osm:n1",
+    connectorId: "gleif",
+    registryId: "LEI1",
+    score: 0.81,
+    parts: { distance: 0, name: 0.81, enseigne: 0, address: 0 },
+    distanceM: Number.POSITIVE_INFINITY,
+    record,
+  };
+
+  it("attaches the record the pair carries, and closes the pair", () => {
+    const list = [shopfront()];
+    const out = applyVerdicts(list, [{ osmId: "osm:n1", registryId: "LEI1", connectorId: "gleif", merge: true }], [pair]);
+    expect(out.merged).toBe(1);
+    expect(out.unknown).toEqual([]);
+    expect(out.attached).toEqual([record]);
+    expect(out.remaining).toEqual([]);
+    expect(list[0]!.registry?.legalName).toBe("TCO Transcargo GmbH");
+    expect(list[0]!.registryEvidence).toMatchObject({ mode: "confirm", how: "agent-adjudicated" });
+    expect(list[0]!.matchConfidence).toBe(0.81);
+    expect(list[0]!.address.codePostal).toBe("21107");
+  });
+
+  it("does not attach it over an identity the place already has", () => {
+    const list = [{ ...shopfront(), registry: rec({ connectorId: "gleif", id: "OTHER" }) }];
+    const out = applyVerdicts(list, [{ osmId: "osm:n1", registryId: "LEI1", connectorId: "gleif", merge: true }], [pair]);
+    expect(out.merged).toBe(0);
+    expect(list[0]!.registry?.id).toBe("OTHER");
+  });
+});

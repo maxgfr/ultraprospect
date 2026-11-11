@@ -19822,6 +19822,7 @@ function applyVerdicts(places, verdicts, todo = []) {
   let mergedCount = 0;
   let skipped = 0;
   const unknown = [];
+  const attached = [];
   for (const v of verdicts) {
     if (!v.merge) {
       skipped++;
@@ -19830,8 +19831,23 @@ function applyVerdicts(places, verdicts, todo = []) {
       continue;
     }
     const key = verdictKey(v, known);
-    const osmPlace = byOsm.get(v.osmId);
+    const osmPlace = byOsm.get(v.osmId) ?? byOsm.get(v.osmId.replace(/^osm:/, ""));
     const recPlace = key ? byRecord.get(key) : void 0;
+    const carried = !recPlace ? lookupCarried(todo, v) : void 0;
+    if (carried && osmPlace && !osmPlace.registry && !takenRecords.has(carried.key)) {
+      osmPlace.registry = carried.record;
+      osmPlace.registryEvidence = { mode: "confirm", how: "agent-adjudicated" };
+      osmPlace.matchedBy = "agent";
+      osmPlace.sources = [.../* @__PURE__ */ new Set([...osmPlace.sources, "registry"])];
+      osmPlace.matchConfidence = Number(carried.score.toFixed(3));
+      osmPlace.address = { ...carried.record.address, ...osmPlace.address };
+      attached.push(carried.record);
+      mergedCount++;
+      answered3.add(pairKey(carried.osmId, carried.key));
+      takenRecords.add(carried.key);
+      takenOsm.add(carried.osmId);
+      continue;
+    }
     if (!osmPlace || !recPlace || osmPlace === recPlace || recPlace.id === "" || recPlace.osm || osmPlace.registry) {
       unknown.push(`${v.osmId} <-> ${key ?? v.registryId ?? "?"}`);
       continue;
@@ -19853,7 +19869,16 @@ function applyVerdicts(places, verdicts, todo = []) {
   }
   for (let i = places.length - 1; i >= 0; i--) if (places[i].id === "") places.splice(i, 1);
   const remaining = todo.filter((c) => !answered3.has(pairKey(c.osmId, candidateKey(c))) && !takenOsm.has(c.osmId) && !takenRecords.has(candidateKey(c)));
-  return { merged: mergedCount, skipped, unknown, remaining };
+  return { merged: mergedCount, skipped, unknown, remaining, attached };
+}
+function lookupCarried(todo, v) {
+  const raw = v.registryId?.trim();
+  if (!raw) return void 0;
+  const sameOsm = (id) => id === v.osmId || id.replace(/^osm:/, "") === v.osmId.replace(/^osm:/, "");
+  const hit = todo.find(
+    (c) => c.record && sameOsm(c.osmId) && (c.registryId === raw || `${c.connectorId}:${c.registryId}` === raw) && (!v.connectorId || v.connectorId === c.connectorId)
+  );
+  return hit?.record ? { record: hit.record, key: `${hit.connectorId}:${hit.registryId}`, osmId: hit.osmId, score: hit.score } : void 0;
 }
 
 // src/fixture.ts
@@ -20508,7 +20533,10 @@ function toCandidate3(place, rec, score, matchedName) {
     // would be a claim rather than an absence. The parts a lookup cannot
     // measure are reported as zero and `distanceM` as unknown-far.
     parts: { distance: 0, name: Number(score.toFixed(4)), enseigne: 0, address: 0 },
-    distanceM: Number.POSITIVE_INFINITY
+    distanceM: Number.POSITIVE_INFINITY,
+    // Carried with the pair: a name lookup's record is not a place in this run,
+    // and the verdict that merges it needs something to attach.
+    record: rec
   };
 }
 async function verify(id, connectors, ctx) {
@@ -28402,8 +28430,13 @@ async function cmdMatch(values, bools) {
   const before = places.length;
   const todo = readJsonSafe(join33(runDir, "MATCH.todo.json"));
   const listed = Array.isArray(todo?.pairs) ? todo.pairs : void 0;
-  const { remaining, ...result } = applyVerdicts(places, verdicts, listed ?? []);
+  const { remaining, attached, ...result } = applyVerdicts(places, verdicts, listed ?? []);
   writePlaces(runDir, places);
+  if (attached.length) {
+    const held = readJsonSafe(join33(runDir, "registry.json")) ?? [];
+    const keys = new Set(held.map(recordKey));
+    writeJson2(runDir, "registry.json", [...held, ...attached.filter((r) => !keys.has(recordKey(r)))]);
+  }
   if (listed) writeJson2(runDir, "MATCH.todo.json", buildMatchTodo(remaining));
   const manifest = requireManifest(runDir);
   manifest.counts.places = places.length;
