@@ -240,10 +240,14 @@ export const deOffeneRegister: RegistryConnector = {
     // it on the real export. The note below says "at least" for that reason.
     const COURT_REPORT_CAP = 50;
     const bare = await snapshotById(CONNECTOR_ID, value, COURT_REPORT_CAP);
-    if (court) {
-      const wanted = normalizeName(court);
+    const wanted = court ? normalizeName(court) : "";
+    if (wanted) {
       const byCourt = bare.filter((r) => {
         const filed = normalizeName(String(r.national?.registerCourt ?? ""));
+        // A record with no court normalises to "", and every string contains "",
+        // so without this guard a courtless record matched whatever court the
+        // Impressum named.
+        if (!filed) return false;
         return filed === wanted || filed.includes(wanted) || wanted.includes(filed);
       });
       if (byCourt.length === 1) return byCourt[0];
@@ -251,6 +255,17 @@ export const deOffeneRegister: RegistryConnector = {
         ctx.onNote?.(`de-offeneregister: ${value} at a court matching "${court}" is filed more than once; not attached.`);
         return undefined;
       }
+      // The page named a court and no record here was filed there. Falling
+      // through to "exactly one bare hit" would attach the company filed under
+      // that number at ANOTHER Amtsgericht — the very repetition this connector
+      // exists to refuse — so a contradicted court is a refusal, not a hint.
+      if (bare.length) {
+        const courts = [...new Set(bare.map((r) => r.national?.registerCourt).filter(Boolean))];
+        ctx.onNote?.(
+          `de-offeneregister: ${value} is not filed at a court matching "${court}" (the export has it at ${courts.slice(0, 8).join(", ") || "no named court"}${courts.length > 8 ? ", …" : ""}); not attached.`,
+        );
+      }
+      return undefined;
     }
 
     if (bare.length === 1) return bare[0];

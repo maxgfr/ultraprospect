@@ -344,6 +344,20 @@ describe("de-offeneregister — the shape measured off the real export", () => {
     expect(single?.national?.registerCourt).toBe("Hamburg");
   });
 
+  it("refuses a register number when the court the Impressum names is not the one that filed it", async () => {
+    // "HRB 150148" is filed only at Hamburg here. A page saying "Amtsgericht Köln
+    // HRB 150148" names a different company — the number repeats across courts —
+    // and falling back to the single bare hit attached the Hamburg one anyway.
+    const notes: string[] = [];
+    const cologne = await deOffeneRegister.verifyId!(
+      { kind: "hrb", value: "HRB 150148", countryCode: "de", context: "Köln" },
+      { onNote: (n) => notes.push(n) },
+    );
+    expect(cologne).toBeUndefined();
+    expect(notes.join(" ")).toContain('not filed at a court matching "Köln"');
+    expect(notes.join(" ")).toContain("Hamburg");
+  });
+
   it("picks the right court when the same number exists at two", async () => {
     const munich = await deOffeneRegister.verifyId!({ kind: "hrb", value: "HRB 158855", countryCode: "de", context: "München" }, {});
     expect(munich?.legalName).toBe("Münchner Handels GmbH");

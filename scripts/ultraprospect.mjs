@@ -14850,10 +14850,11 @@ var deOffeneRegister = {
     const court = id.context?.trim();
     const COURT_REPORT_CAP = 50;
     const bare = await snapshotById(CONNECTOR_ID5, value, COURT_REPORT_CAP);
-    if (court) {
-      const wanted = normalizeName(court);
+    const wanted = court ? normalizeName(court) : "";
+    if (wanted) {
       const byCourt = bare.filter((r) => {
         const filed = normalizeName(String(r.national?.registerCourt ?? ""));
+        if (!filed) return false;
         return filed === wanted || filed.includes(wanted) || wanted.includes(filed);
       });
       if (byCourt.length === 1) return byCourt[0];
@@ -14861,6 +14862,13 @@ var deOffeneRegister = {
         ctx.onNote?.(`de-offeneregister: ${value} at a court matching "${court}" is filed more than once; not attached.`);
         return void 0;
       }
+      if (bare.length) {
+        const courts = [...new Set(bare.map((r) => r.national?.registerCourt).filter(Boolean))];
+        ctx.onNote?.(
+          `de-offeneregister: ${value} is not filed at a court matching "${court}" (the export has it at ${courts.slice(0, 8).join(", ") || "no named court"}${courts.length > 8 ? ", \u2026" : ""}); not attached.`
+        );
+      }
+      return void 0;
     }
     if (bare.length === 1) return bare[0];
     if (bare.length > 1) {
