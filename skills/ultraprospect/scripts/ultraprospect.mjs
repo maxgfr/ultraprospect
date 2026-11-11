@@ -13938,7 +13938,7 @@ var frSirene = {
 
 // src/snapshot.ts
 import { createReadStream as createReadStream2, createWriteStream } from "fs";
-import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync6, readdirSync as readdirSync4, renameSync as renameSync2, rmSync as rmSync3, statSync as statSync6, writeFileSync as writeFileSync6 } from "fs";
+import { closeSync as closeSync2, existsSync as existsSync4, mkdirSync as mkdirSync2, openSync as openSync2, readFileSync as readFileSync6, readdirSync as readdirSync4, renameSync as renameSync2, rmSync as rmSync3, statSync as statSync6, writeFileSync as writeFileSync6, writeSync as writeSync2 } from "fs";
 import { createInterface as createInterface2 } from "readline";
 import { Readable } from "stream";
 import { StringDecoder } from "string_decoder";
@@ -14495,12 +14495,68 @@ async function downloadTo(url, path) {
   }
   return { ok: true, status: res.status, lastModified: res.headers.get("last-modified") ?? void 0 };
 }
+var INGEST_LOCK_MAX_AGE_MS = 6 * 60 * 60 * 1e3;
+function pidAlive2(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
+function takeIngestLock(connectorId, target) {
+  const path = join5(target, "ingest.lock");
+  const mine = JSON.stringify({ pid: process.pid, startedAt: (/* @__PURE__ */ new Date()).toISOString() });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = openSync2(path, "wx");
+      try {
+        writeSync2(fd, mine);
+      } finally {
+        closeSync2(fd);
+      }
+      return () => {
+        try {
+          if (readFileSync6(path, "utf8") === mine) rmSync3(path, { force: true });
+        } catch {
+        }
+      };
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+    }
+    let holder = {};
+    let age = 0;
+    try {
+      age = Date.now() - statSync6(path).mtimeMs;
+      holder = JSON.parse(readFileSync6(path, "utf8"));
+    } catch {
+    }
+    const dead4 = typeof holder.pid === "number" && !pidAlive2(holder.pid);
+    if (dead4 || age > INGEST_LOCK_MAX_AGE_MS) {
+      rmSync3(path, { force: true });
+      continue;
+    }
+    throw new Error(
+      `ingest: another ingest of ${connectorId} is already running${holder.pid ? ` (pid ${holder.pid}${holder.startedAt ? `, started ${holder.startedAt}` : ""})` : ""}. Two at once would interleave their shards; wait for it to finish, or delete ${path} if no ingest is running.`
+    );
+  }
+  throw new Error(`ingest: could not take the ingest lock at ${path}; another ingest of ${connectorId} keeps taking it.`);
+}
 async function ingestSnapshot(connectorId, source2, opts = {}) {
+  const target = dir(connectorId);
+  mkdirSync2(target, { recursive: true });
+  const release = takeIngestLock(connectorId, target);
+  try {
+    return await ingestLocked(connectorId, source2, opts);
+  } finally {
+    release();
+  }
+}
+async function ingestLocked(connectorId, source2, opts) {
   const note = opts.onNote ?? (() => {
   });
   const target = dir(connectorId);
   const download = join5(target, `download.${source2.format.replace(/\./g, "-")}`);
-  mkdirSync2(target, { recursive: true });
   let used;
   let source_file;
   if (opts.fromFile) {

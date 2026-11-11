@@ -45,7 +45,7 @@
 // and a record that repeats its own register number four times costs a gigabyte
 // to say the same thing.
 import { createReadStream, createWriteStream } from "node:fs";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
@@ -443,6 +443,78 @@ async function downloadTo(url: string, path: string): Promise<{ ok: boolean; sta
 }
 
 /**
+ * How old an ingest lock may be before it is presumed abandoned.
+ *
+ * The German export, the largest, indexes in minutes, not hours. A lock older
+ * than this belongs to a run that died without its `finally` — a killed
+ * terminal, a power cut — or to a pid that has since been reused.
+ */
+const INGEST_LOCK_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    // EPERM: the process exists, it just belongs to somebody else.
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Take the connector's ingest lock, or refuse.
+ *
+ * Two ingests of one connector append into the same 512 shard files, so their
+ * records interleave, every one is indexed twice, and whichever finishes last
+ * writes a meta.json vouching for the mixture. The lock is created with "wx" —
+ * exclusive, so of two racing processes exactly one gets it. Returns the
+ * release function.
+ */
+function takeIngestLock(connectorId: string, target: string): () => void {
+  const path = join(target, "ingest.lock");
+  const mine = JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = openSync(path, "wx");
+      try {
+        writeSync(fd, mine);
+      } finally {
+        closeSync(fd);
+      }
+      return () => {
+        // Only ever remove our own lock: one taken over as stale belongs to
+        // whoever took it over.
+        try {
+          if (readFileSync(path, "utf8") === mine) rmSync(path, { force: true });
+        } catch {
+          // Already gone.
+        }
+      };
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+    let holder: { pid?: number; startedAt?: string } = {};
+    let age = 0;
+    try {
+      age = Date.now() - statSync(path).mtimeMs;
+      holder = JSON.parse(readFileSync(path, "utf8"));
+    } catch {
+      // Unreadable or empty: possibly another process between creating the lock
+      // and writing it. Not stale on that alone — only by age.
+    }
+    const dead = typeof holder.pid === "number" && !pidAlive(holder.pid);
+    if (dead || age > INGEST_LOCK_MAX_AGE_MS) {
+      rmSync(path, { force: true });
+      continue;
+    }
+    throw new Error(
+      `ingest: another ingest of ${connectorId} is already running${holder.pid ? ` (pid ${holder.pid}${holder.startedAt ? `, started ${holder.startedAt}` : ""})` : ""}. Two at once would interleave their shards; wait for it to finish, or delete ${path} if no ingest is running.`,
+    );
+  }
+  throw new Error(`ingest: could not take the ingest lock at ${path}; another ingest of ${connectorId} keeps taking it.`);
+}
+
+/**
  * Fetch a bulk export and index it into the cache.
  *
  * Replaces any previous snapshot for the connector wholesale rather than merging.
@@ -451,11 +523,20 @@ async function downloadTo(url: string, path: string): Promise<{ ok: boolean; sta
  * neither snapshot ever said.
  */
 export async function ingestSnapshot(connectorId: string, source: SnapshotSource, opts: IngestOptions = {}): Promise<SnapshotMeta> {
+  const target = dir(connectorId);
+  mkdirSync(target, { recursive: true });
+  const release = takeIngestLock(connectorId, target);
+  try {
+    return await ingestLocked(connectorId, source, opts);
+  } finally {
+    release();
+  }
+}
+
+async function ingestLocked(connectorId: string, source: SnapshotSource, opts: IngestOptions): Promise<SnapshotMeta> {
   const note = opts.onNote ?? (() => {});
   const target = dir(connectorId);
   const download = join(target, `download.${source.format.replace(/\./g, "-")}`);
-
-  mkdirSync(target, { recursive: true });
 
   // ---- Fetch ----------------------------------------------------------------
   let used: { url: string; lastModified?: string };
