@@ -550,12 +550,28 @@ describe("web lane", () => {
 
 describe("watch", () => {
   it("does not report a notice as new when only its copy changed, and flags a moved deadline", () => {
-    const before = [tender({ id: "eu-ted:1", aliases: ["u-1"] })];
-    const after = [tender({ id: "fr-boamp:9", aliases: ["u-1"], deadline: "2026-11-10" }), tender({ id: "new", aliases: [] })];
+    const uuid = "0c4f7a52-9d1e-4b8a-a3f0-6e2b1c9d8e7f";
+    const before = [tender({ id: "eu-ted:1", aliases: [uuid] })];
+    const after = [tender({ id: "fr-boamp:9", aliases: [uuid.toUpperCase()], deadline: "2026-11-10" }), tender({ id: "new", aliases: [] })];
     const d = diffTenderRuns(before, after, { now: NOW });
     expect(d.appeared.map((t) => t.id)).toEqual(["new"]);
     expect(d.changed[0]!.what[0]).toMatch(/^deadline/);
     expect(d.closingSoon.map((t) => t.id)).toEqual(["fr-boamp:9"]);
+  });
+
+  it("does not match a Find a Tender notice to a TED notice on a publication number of the same shape", () => {
+    const before = [tender({ id: "eu-ted:103248-2026", aliases: ["103248-2026"] })];
+    const after = [tender({ id: "gb-fts:103248-2026", connectorId: "gb-fts", aliases: ["103248-2026"], deadline: "2026-11-10" })];
+    const d = diffTenderRuns(before, after, { now: NOW });
+    expect(d.appeared.map((t) => t.id)).toEqual(["gb-fts:103248-2026"]);
+    expect(d.changed).toEqual([]);
+    expect(d.notReturned.map((t) => t.id)).toEqual(["eu-ted:103248-2026"]);
+  });
+
+  it("follows a copy merged into another by a pair verdict", () => {
+    const before = [tender({ id: "eu-ted:1", aliases: ["1"] })];
+    const after = [tender({ id: "fr-boamp:9", aliases: ["9", "1", "eu-ted:1"], national: { alsoPublishedAs: ["eu-ted:1"] } })];
+    expect(diffTenderRuns(before, after, { now: NOW }).appeared).toEqual([]);
   });
 });
 

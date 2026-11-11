@@ -1,11 +1,21 @@
 // Veille: what changed between two tenders runs over the same query.
 //
 // Compares runs on disk and never re-fetches, like the territory `watch`.
-// Keyed on the notice id and on every alias, so a notice that moved from the
-// TED copy to the national copy between runs is not reported as new.
+// Keyed on the notice id, the ids of the copies merged into it, and its eForms
+// procedure UUIDs, so a notice that moved from the TED copy to the national
+// copy between runs is not reported as new. NOT on a raw publication number:
+// TED's "722908-2026" and Find a Tender's "103248-2026" share a shape and name
+// different notices (see dedupe.ts), and keying on them let a new Find a
+// Tender notice match last run's TED notice and be reported "changed".
+import { procedureUuids } from "./dedupe.js";
 import type { TenderManifest } from "./run.js";
 import type { Tender } from "./types.js";
 import { dayOf } from "./util.js";
+
+function watchKeys(t: Tender): string[] {
+  const merged = Array.isArray(t.national?.alsoPublishedAs) ? (t.national.alsoPublishedAs as unknown[]).map(String) : [];
+  return [t.id, ...merged, ...procedureUuids(t)];
+}
 
 export interface TenderDelta {
   appeared: Tender[];
@@ -22,11 +32,13 @@ export function diffTenderRuns(before: readonly Tender[], after: readonly Tender
   const soon = new Date(now.getTime() + (opts.soonDays ?? 14) * 86_400_000).toISOString().slice(0, 10);
   const today = now.toISOString().slice(0, 10);
   const index = new Map<string, Tender>();
-  for (const t of before) for (const k of [t.id, ...t.aliases]) index.set(k, t);
+  for (const t of before) for (const k of watchKeys(t)) index.set(k, t);
   const matched = new Set<string>();
   const delta: TenderDelta = { appeared: [], changed: [], closingSoon: [], notReturned: [] };
   for (const t of after) {
-    const prev = [t.id, ...t.aliases].map((k) => index.get(k)).find(Boolean);
+    const prev = watchKeys(t)
+      .map((k) => index.get(k))
+      .find(Boolean);
     if (!prev) delta.appeared.push(t);
     else {
       matched.add(prev.id);

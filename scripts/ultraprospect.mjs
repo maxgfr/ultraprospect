@@ -25705,8 +25705,11 @@ import { join as join29 } from "path";
 
 // src/tenders/dedupe.ts
 var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function procedureUuids(t) {
+  return t.aliases.filter((a) => UUID.test(a)).map((a) => a.toLowerCase());
+}
 function joinKeys(t) {
-  return t.aliases.filter((a) => UUID.test(a)).map((a) => `${t.kind}|${a.toLowerCase()}`);
+  return procedureUuids(t).map((a) => `${t.kind}|${a}`);
 }
 function dedupeTenders(input) {
   const byKey = /* @__PURE__ */ new Map();
@@ -25843,16 +25846,20 @@ function recordFixture2(dir2, raw, query) {
 }
 
 // src/tenders/watch.ts
+function watchKeys(t) {
+  const merged = Array.isArray(t.national?.alsoPublishedAs) ? t.national.alsoPublishedAs.map(String) : [];
+  return [t.id, ...merged, ...procedureUuids(t)];
+}
 function diffTenderRuns(before, after, opts = {}) {
   const now = opts.now ?? /* @__PURE__ */ new Date();
   const soon = new Date(now.getTime() + (opts.soonDays ?? 14) * 864e5).toISOString().slice(0, 10);
   const today2 = now.toISOString().slice(0, 10);
   const index = /* @__PURE__ */ new Map();
-  for (const t of before) for (const k of [t.id, ...t.aliases]) index.set(k, t);
+  for (const t of before) for (const k of watchKeys(t)) index.set(k, t);
   const matched = /* @__PURE__ */ new Set();
   const delta = { appeared: [], changed: [], closingSoon: [], notReturned: [] };
   for (const t of after) {
-    const prev = [t.id, ...t.aliases].map((k) => index.get(k)).find(Boolean);
+    const prev = watchKeys(t).map((k) => index.get(k)).find(Boolean);
     if (!prev) delta.appeared.push(t);
     else {
       matched.add(prev.id);

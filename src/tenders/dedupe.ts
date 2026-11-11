@@ -37,8 +37,13 @@ export interface DedupeOutcome {
   pairs: DuplicatePair[];
 }
 
+/** The aliases that name a procedure unambiguously: eForms UUIDs, lower-cased. */
+export function procedureUuids(t: Tender): string[] {
+  return t.aliases.filter((a) => UUID.test(a)).map((a) => a.toLowerCase());
+}
+
 function joinKeys(t: Tender): string[] {
-  return t.aliases.filter((a) => UUID.test(a)).map((a) => `${t.kind}|${a.toLowerCase()}`);
+  return procedureUuids(t).map((a) => `${t.kind}|${a}`);
 }
 
 export function dedupeTenders(input: readonly Tender[]): DedupeOutcome {
