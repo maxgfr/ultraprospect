@@ -22020,10 +22020,16 @@ function keep(place, opts) {
   }
   return true;
 }
-function toCsv(places, opts = {}) {
+function selectRows(places, opts = {}) {
   parseMinFit(opts.minFit);
+  const asked = [opts.minScore !== void 0 ? `score at least ${opts.minScore}` : "", opts.minFit ? `fit at least ${opts.minFit}` : ""].filter(Boolean);
+  const rows = places.filter((p) => keep(p, opts));
+  if (asked.length === 0) return { rows };
+  return { rows, selection: { filter: asked.join(", "), total: places.length, kept: rows.length, removed: places.length - rows.length } };
+}
+function toCsv(places, opts = {}) {
   const rows = [csvRow(HEADER)];
-  for (const place of ranked(places).filter((p) => keep(p, opts))) {
+  for (const place of ranked(selectRows(places, opts).rows)) {
     const s = place.registry;
     const sg = place.signals;
     const people = opts.noPeople ? "" : (s?.officers ?? []).map((d) => [d.denomination ?? [d.prenoms, d.nom].filter(Boolean).join(" "), d.qualite].filter(Boolean).join(" \u2014 ")).join(" | ");
@@ -23398,6 +23404,11 @@ ${detail(p, COLUMNS2, s.brief, ev, ctx.dossiers?.get(p.id))}`;
       `<div class="warn"><strong>Some register records are dated.</strong> ${s.registry.dated.count} of ${s.total} companies carry a register record from a bulk open-data snapshot rather than from asking the register: ${esc(s.registry.dated.years.join(", "))}. Those identities were true then. They are not evidence about today.</div>`
     );
   }
+  if (ctx.selection) {
+    banners.push(
+      `<div class="note"><strong>A selection, not the whole run.</strong> This page was rendered for ${esc(ctx.selection.filter)}: it shows ${ctx.selection.kept} of ${ctx.selection.total} companies, and ${ctx.selection.removed} were removed. Every count describes the rows that were kept.</div>`
+    );
+  }
   if (s.filters.length) {
     banners.push(
       `<div class="note"><strong>What this run looked for:</strong> ${esc(s.filters.join(" \xB7 "))}. A company outside that is absent from this list because it was not asked for, not because it is not there.</div>`
@@ -23637,6 +23648,14 @@ function truncationBanner(manifest) {
     ""
   ];
 }
+function selectionBanner(selection) {
+  if (!selection) return [];
+  return [
+    `> **A selection, not the whole run.** \`render\` was asked for ${selection.filter}: it kept ${selection.kept} of ${selection.total} companies and removed ${selection.removed}.`,
+    "> Every count below describes the rows that were kept.",
+    ""
+  ];
+}
 function contactMark(place) {
   return [place.contacts.emails.length ? "\u2709" : "", place.contacts.phones.length ? "\u260E" : ""].filter(Boolean).join(" ");
 }
@@ -23649,7 +23668,7 @@ function share(n, total) {
   if (!total) return String(n);
   return `${n} (${Math.round(n / total * 100)}%)`;
 }
-function coverageSection(manifest, s, places) {
+function coverageSection(manifest, s, places, selection) {
   const l = ["## Coverage", ""];
   l.push("| Lane | Mode | Returned | Complete | Note |");
   l.push("|---|---|---:|---|---|");
@@ -23671,7 +23690,7 @@ function coverageSection(manifest, s, places) {
     l.push("");
   }
   l.push(
-    `${places.length} companies after fusion (${manifest.counts.merged} matched across both lanes, ${manifest.counts.mergedByIdentifier ?? 0} by a declared identifier, ${manifest.counts.undecided} pairs left for adjudication).`
+    `${selection?.total ?? places.length} companies after fusion (${manifest.counts.merged} matched across both lanes, ${manifest.counts.mergedByIdentifier ?? 0} by a declared identifier, ${manifest.counts.undecided} pairs left for adjudication)${selection ? `; ${places.length} of them are in this report` : ""}.`
   );
   l.push("");
   if (s.registry.dated.count) {
@@ -23849,7 +23868,7 @@ function notesSection(s) {
   l.push("");
   return l;
 }
-function buildReport(places, manifest) {
+function buildReport(places, manifest, opts = {}) {
   const s = summarise(places, manifest);
   const l = [];
   l.push(`# ${shortLabel(manifest.target.label || manifest.slug)}`);
@@ -23859,7 +23878,8 @@ function buildReport(places, manifest) {
   l.push("");
   l.push(coverage(manifest).sentence);
   l.push("");
-  l.push(...coverageSection(manifest, s, places));
+  l.push(...selectionBanner(opts.selection));
+  l.push(...coverageSection(manifest, s, places, opts.selection));
   l.push(...inventorySection(s));
   l.push(...hiringSection(places));
   l.push(...judgedSection(places, s));
@@ -23927,18 +23947,20 @@ function buildAll(places, manifest, opts = {}) {
   if (feedback) places = feedbackSelection(places, feedback);
   const noPeople = Boolean(opts.noPeople) || bindsNoPeople(manifest);
   if (noPeople) places = places.map(withoutPeople);
+  const { rows, selection } = selectRows(places, opts);
+  places = rows;
   const visible = ranked(places).slice(0, HTML_ROW_CAP);
   const ctx = opts.runDir ? { ...collectEvidence(opts.runDir, visible), dossiers: readDossiers(opts.runDir, visible) } : {};
   const files = [
     { path: "PROSPECTS.csv", content: toCsv(places, opts) },
     { path: "prospects.json", content: JSON.stringify(ranked(places), null, 2) + "\n" },
-    { path: "REPORT.md", content: buildReport(places, manifest) },
-    { path: "index.html", content: buildHtml(places, manifest, ctx) }
+    { path: "REPORT.md", content: buildReport(places, manifest, { selection }) },
+    { path: "index.html", content: buildHtml(places, manifest, { ...ctx, selection }) }
   ];
   if (feedback?.entries.length) files.push({ path: "FEEDBACK.json", content: JSON.stringify(feedback, null, 2) + "\n" });
   const privacy = noPeople ? void 0 : buildPrivacyNote(places, manifest);
   if (privacy) files.push({ path: "PRIVACY.md", content: privacy });
-  return { files };
+  return { files, selection };
 }
 
 // src/mcp/adapter.ts
@@ -26178,8 +26200,11 @@ var TOOLS = [
       type: "object",
       properties: {
         run: { type: "string" },
-        minScore: { type: "number" },
-        minFit: { type: "string", description: "strong, possible or weak \u2014 only rows you judged at least that." },
+        minScore: { type: "number", description: "Only rows at or above this measured score. Cuts every deliverable, not only the CSV." },
+        minFit: {
+          type: "string",
+          description: "strong, possible or weak \u2014 only rows you judged at least that. Cuts every deliverable; `selection` in the answer says how many rows were removed."
+        },
         noPeople: { type: "boolean", description: "Strip named individuals from the deliverables." }
       },
       required: ["run"]
@@ -26468,7 +26493,9 @@ ${JSON.stringify({ ok: report2.ok, errors: report2.errors, warnings: report2.war
                 run: runDir,
                 files: outcome.files.map((f) => join31(runDir, f.path)),
                 truncated: manifest.truncated,
-                privacy: outcome.files.some((f) => f.path === "PRIVACY.md")
+                privacy: outcome.files.some((f) => f.path === "PRIVACY.md"),
+                // What minScore / minFit removed from every file above.
+                selection: outcome.selection
               },
               null,
               2
@@ -27552,6 +27579,9 @@ REGISTER CONFIRMATION (confirm)
 DELIVERABLES (render)
   --min-score <n>        Only rows at or above this measured score.
   --min-fit <level>      Only rows you judged strong, possible or weak.
+                         Both cut EVERY deliverable \u2014 the CSV, prospects.json, the report
+                         and the page \u2014 and the report and the page say how many rows of
+                         the run were removed. places.json is never changed.
 
 CHANGE (watch)
   --since <dir>          The earlier run to compare against.
@@ -28228,11 +28258,15 @@ async function cmdRender(values, bools) {
     minFit: parseMinFit(values["min-fit"])
   });
   for (const file of outcome.files) writeArtifact(join33(runDir, file.path), file.content);
-  if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join33(runDir, f.path)) }));
+  if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join33(runDir, f.path)), selection: outcome.selection }));
   else for (const file of outcome.files) out(join33(runDir, file.path));
   say("");
   if (manifest.truncated) {
     say("  \u26A0 this run is TRUNCATED \u2014 the report and the page both lead with that, and so must you.");
+  }
+  if (outcome.selection) {
+    const sel = outcome.selection;
+    say(`  ${sel.filter}: every deliverable holds ${sel.kept} of the run's ${sel.total} rows; ${sel.removed} were removed, and the report says so.`);
   }
   const privacy = outcome.files.some((f) => f.path === "PRIVACY.md");
   if (privacy) say("  PRIVACY.md was written: this run holds named individuals. Read it before sharing the CSV.");

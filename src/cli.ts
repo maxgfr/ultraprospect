@@ -347,6 +347,9 @@ REGISTER CONFIRMATION (confirm)
 DELIVERABLES (render)
   --min-score <n>        Only rows at or above this measured score.
   --min-fit <level>      Only rows you judged strong, possible or weak.
+                         Both cut EVERY deliverable — the CSV, prospects.json, the report
+                         and the page — and the report and the page say how many rows of
+                         the run were removed. places.json is never changed.
 
 CHANGE (watch)
   --since <dir>          The earlier run to compare against.
@@ -1213,12 +1216,16 @@ async function cmdRender(values: Record<string, string>, bools: ReadonlySet<stri
 
   for (const file of outcome.files) writeArtifact(join(runDir, file.path), file.content);
 
-  if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join(runDir, f.path)) }));
+  if (bools.has("json")) out(jsonLine({ run: runDir, files: outcome.files.map((f) => join(runDir, f.path)), selection: outcome.selection }));
   else for (const file of outcome.files) out(join(runDir, file.path));
 
   say("");
   if (manifest.truncated) {
     say("  ⚠ this run is TRUNCATED — the report and the page both lead with that, and so must you.");
+  }
+  if (outcome.selection) {
+    const sel = outcome.selection;
+    say(`  ${sel.filter}: every deliverable holds ${sel.kept} of the run's ${sel.total} rows; ${sel.removed} were removed, and the report says so.`);
   }
   const privacy = outcome.files.some((f) => f.path === "PRIVACY.md");
   if (privacy) say("  PRIVACY.md was written: this run holds named individuals. Read it before sharing the CSV.");

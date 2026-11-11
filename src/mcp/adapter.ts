@@ -222,8 +222,12 @@ const TOOLS: ToolDecl[] = [
       type: "object",
       properties: {
         run: { type: "string" },
-        minScore: { type: "number" },
-        minFit: { type: "string", description: "strong, possible or weak — only rows you judged at least that." },
+        minScore: { type: "number", description: "Only rows at or above this measured score. Cuts every deliverable, not only the CSV." },
+        minFit: {
+          type: "string",
+          description:
+            "strong, possible or weak — only rows you judged at least that. Cuts every deliverable; `selection` in the answer says how many rows were removed.",
+        },
         noPeople: { type: "boolean", description: "Strip named individuals from the deliverables." },
       },
       required: ["run"],
@@ -544,6 +548,8 @@ export function createAdapter(): McpAdapter {
                 files: outcome.files.map((f) => join(runDir, f.path)),
                 truncated: manifest.truncated,
                 privacy: outcome.files.some((f) => f.path === "PRIVACY.md"),
+                // What minScore / minFit removed from every file above.
+                selection: outcome.selection,
               },
               null,
               2,

@@ -111,13 +111,40 @@ function keep(place: Place, opts: CsvOptions): boolean {
   return true;
 }
 
-export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
+/** What `--min-score` / `--min-fit` did to a run, for the deliverables to state. */
+export interface RowSelection {
+  /** The filter in words: "score at least 40, fit at least possible". */
+  filter: string;
+  /** Rows the run holds, before the filter. */
+  total: number;
+  kept: number;
+  removed: number;
+}
+
+/**
+ * The rows `--min-score` and `--min-fit` keep, and an account of the cut.
+ *
+ * One function, because the filter used to live inside the CSV writer alone:
+ * `render --min-fit strong` wrote a CSV of the shortlist beside a page, a
+ * report and a prospects.json that still held every row, so the four
+ * deliverables of one command described two different lists. Every one of them
+ * is now cut here, and `selection` is what lets a document say it is a
+ * selection — undefined when no filter was asked for.
+ */
+export function selectRows<T extends Place>(places: readonly T[], opts: CsvOptions = {}): { rows: T[]; selection?: RowSelection } {
   // Checked here as well as at the flag, so no caller can hand over a level the
   // filter would silently treat as "keep everything".
   parseMinFit(opts.minFit);
+  const asked = [opts.minScore !== undefined ? `score at least ${opts.minScore}` : "", opts.minFit ? `fit at least ${opts.minFit}` : ""].filter(Boolean);
+  const rows = places.filter((p) => keep(p, opts));
+  if (asked.length === 0) return { rows };
+  return { rows, selection: { filter: asked.join(", "), total: places.length, kept: rows.length, removed: places.length - rows.length } };
+}
+
+export function toCsv(places: readonly Place[], opts: CsvOptions = {}): string {
   const rows: string[] = [csvRow(HEADER)];
 
-  for (const place of ranked(places).filter((p) => keep(p, opts))) {
+  for (const place of ranked(selectRows(places, opts).rows)) {
     const s = place.registry;
     const sg = place.signals;
     const people = opts.noPeople

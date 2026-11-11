@@ -21,6 +21,7 @@
 //
 // The panel is markup, not something the script builds, so a browser with
 // JavaScript switched off shows every panel open rather than showing nothing.
+import type { RowSelection } from "./csv.js";
 import { pageKey, quoteKey, type Evidence, type PageIndex, type QuoteIndex } from "./excerpts.js";
 import { sizeBandLabel } from "./registry/index.js";
 import { ranked, SCORE_PART_LABELS } from "./score.js";
@@ -36,6 +37,8 @@ export interface HtmlContext {
   pages?: PageIndex;
   /** Written dossiers by place id, when an agent has produced any. */
   dossiers?: Map<string, string>;
+  /** What `render --min-score` / `--min-fit` removed, so the page can say it is a selection. */
+  selection?: RowSelection;
 }
 
 const esc = (s: unknown): string =>
@@ -605,6 +608,13 @@ ${detail(p, COLUMNS, s.brief, ev, ctx.dossiers?.get(p.id))}`;
   if (s.registry.dated.count) {
     banners.push(
       `<div class="warn"><strong>Some register records are dated.</strong> ${s.registry.dated.count} of ${s.total} companies carry a register record from a bulk open-data snapshot rather than from asking the register: ${esc(s.registry.dated.years.join(", "))}. Those identities were true then. They are not evidence about today.</div>`,
+    );
+  }
+  // The page is built from the rows `render` kept. Said here, or the counts
+  // above the table read as the territory's rather than the shortlist's.
+  if (ctx.selection) {
+    banners.push(
+      `<div class="note"><strong>A selection, not the whole run.</strong> This page was rendered for ${esc(ctx.selection.filter)}: it shows ${ctx.selection.kept} of ${ctx.selection.total} companies, and ${ctx.selection.removed} were removed. Every count describes the rows that were kept.</div>`,
     );
   }
   if (s.filters.length) {

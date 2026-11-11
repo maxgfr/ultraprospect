@@ -8,7 +8,7 @@
 // page and the report cannot disagree about a territory.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { toCsv, type CsvOptions } from "./csv.js";
+import { selectRows, toCsv, type CsvOptions, type RowSelection } from "./csv.js";
 import { dossierPathFor } from "./dossier.js";
 import { collectEvidence } from "./excerpts.js";
 import { buildHtml, HTML_ROW_CAP } from "./html.js";
@@ -72,6 +72,8 @@ ${manifest.licences.map((x) => `- ${x}`).join("\n")}
 
 export interface RenderOutcome {
   files: { path: string; content: string }[];
+  /** What `--min-score` / `--min-fit` removed. Absent when neither was given. */
+  selection?: RowSelection;
 }
 
 export interface RenderOptions extends CsvOptions {
@@ -114,6 +116,12 @@ export function buildAll(places: readonly Place[], manifest: RunManifest, opts: 
   // the choice, and forgetting to repeat a flag must not be how a name ships.
   const noPeople = Boolean(opts.noPeople) || bindsNoPeople(manifest);
   if (noPeople) places = places.map(withoutPeople);
+  // `--min-score` and `--min-fit` cut the HANDOVER too. They used to cut the
+  // CSV alone, so one command wrote a shortlist beside a page, a report and a
+  // prospects.json holding every row. All four are built from the same rows,
+  // and the two documents say how many the filter removed.
+  const { rows, selection } = selectRows(places, opts);
+  places = rows;
   // Only the rows the page will show are worth reading evidence for: a quote
   // attached to a company nobody can scroll to is bytes with no reader.
   const visible = ranked(places).slice(0, HTML_ROW_CAP);
@@ -122,11 +130,11 @@ export function buildAll(places: readonly Place[], manifest: RunManifest, opts: 
   const files = [
     { path: "PROSPECTS.csv", content: toCsv(places, opts) },
     { path: "prospects.json", content: JSON.stringify(ranked(places), null, 2) + "\n" },
-    { path: "REPORT.md", content: buildReport(places, manifest) },
-    { path: "index.html", content: buildHtml(places, manifest, ctx) },
+    { path: "REPORT.md", content: buildReport(places, manifest, { selection }) },
+    { path: "index.html", content: buildHtml(places, manifest, { ...ctx, selection }) },
   ];
   if (feedback?.entries.length) files.push({ path: "FEEDBACK.json", content: JSON.stringify(feedback, null, 2) + "\n" });
   const privacy = noPeople ? undefined : buildPrivacyNote(places, manifest);
   if (privacy) files.push({ path: "PRIVACY.md", content: privacy });
-  return { files };
+  return { files, selection };
 }

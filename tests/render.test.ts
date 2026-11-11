@@ -179,6 +179,19 @@ describe("CSV", () => {
     expect(toCsv(rows, { minFit: "possible" }).split("\n").filter(Boolean)).toHaveLength(2);
   });
 
+  it("--min-fit cuts every deliverable, and the report and page say it is a selection", () => {
+    const rows = [
+      place({ id: "osm:n1", name: "Kept Strong", score: { total: 50, parts: {}, fit: "strong", why: "x" } }),
+      place({ id: "osm:n2", name: "Dropped No", score: { total: 60, parts: {}, fit: "no", why: "x" } }),
+    ];
+    const out = buildAll(rows, manifest(), { minFit: "possible" });
+    for (const f of out.files) expect(f.content, f.path).not.toContain("Dropped No");
+    expect(out.selection).toMatchObject({ total: 2, kept: 1, removed: 1 });
+    expect(out.files.find((f) => f.path === "REPORT.md")!.content).toContain("A selection, not the whole run");
+    expect(out.files.find((f) => f.path === "index.html")!.content).toContain("A selection, not the whole run");
+    expect(buildAll(rows, manifest()).selection).toBeUndefined();
+  });
+
   it("drops officers under --no-people", () => {
     const p = place({ registry: rec({ officers: [{ nom: "MARTIN", prenoms: "JEAN", qualite: "Président" }] }) });
     expect(toCsv([p])).toContain("MARTIN");

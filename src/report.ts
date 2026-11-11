@@ -14,6 +14,7 @@
 // which made a rich run look like a thin one. Everything the run knows has a
 // place here, and where it knows nothing the cell stays empty rather than
 // filling with a zero.
+import type { RowSelection } from "./csv.js";
 import { ranked } from "./score.js";
 import { coverage, summarise, type RunSummary } from "./summary.js";
 import type { Place, RunManifest } from "./types.js";
@@ -50,6 +51,22 @@ function truncationBanner(manifest: RunManifest): string[] {
   ];
 }
 
+/**
+ * Says the document is a SELECTION of the run, and how much was left out.
+ *
+ * `render --min-fit strong` builds this report from the rows it kept, so every
+ * count below describes the shortlist. Without this line a reader takes "12
+ * with a website" for a fact about the territory rather than about twelve rows.
+ */
+function selectionBanner(selection: RowSelection | undefined): string[] {
+  if (!selection) return [];
+  return [
+    `> **A selection, not the whole run.** \`render\` was asked for ${selection.filter}: it kept ${selection.kept} of ${selection.total} companies and removed ${selection.removed}.`,
+    "> Every count below describes the rows that were kept.",
+    "",
+  ];
+}
+
 /** `✉ ☎`, or nothing. What channels a row can actually be reached on. */
 function contactMark(place: Place): string {
   return [place.contacts.emails.length ? "✉" : "", place.contacts.phones.length ? "☎" : ""].filter(Boolean).join(" ");
@@ -68,7 +85,7 @@ function share(n: number, total: number): string {
   return `${n} (${Math.round((n / total) * 100)}%)`;
 }
 
-function coverageSection(manifest: RunManifest, s: RunSummary, places: readonly Place[]): string[] {
+function coverageSection(manifest: RunManifest, s: RunSummary, places: readonly Place[], selection?: RowSelection): string[] {
   const l: string[] = ["## Coverage", ""];
   // `mode` is the field types.ts calls the most important one in LaneCoverage,
   // and until recently it was rendered nowhere: the sweep/confirm distinction
@@ -101,8 +118,11 @@ function coverageSection(manifest: RunManifest, s: RunSummary, places: readonly 
     l.push("");
   }
 
+  // The fusion produced what the RUN holds. Under a render filter `places` is
+  // the shortlist, and "12 companies after fusion" would be a false statement
+  // about the sweep.
   l.push(
-    `${places.length} companies after fusion (${manifest.counts.merged} matched across both lanes, ${manifest.counts.mergedByIdentifier ?? 0} by a declared identifier, ${manifest.counts.undecided} pairs left for adjudication).`,
+    `${selection?.total ?? places.length} companies after fusion (${manifest.counts.merged} matched across both lanes, ${manifest.counts.mergedByIdentifier ?? 0} by a declared identifier, ${manifest.counts.undecided} pairs left for adjudication)${selection ? `; ${places.length} of them are in this report` : ""}.`,
   );
   l.push("");
 
@@ -333,7 +353,7 @@ function notesSection(s: RunSummary): string[] {
   return l;
 }
 
-export function buildReport(places: readonly Place[], manifest: RunManifest): string {
+export function buildReport(places: readonly Place[], manifest: RunManifest, opts: { selection?: RowSelection } = {}): string {
   const s = summarise(places, manifest);
   const l: string[] = [];
 
@@ -344,8 +364,9 @@ export function buildReport(places: readonly Place[], manifest: RunManifest): st
   l.push("");
   l.push(coverage(manifest).sentence);
   l.push("");
+  l.push(...selectionBanner(opts.selection));
 
-  l.push(...coverageSection(manifest, s, places));
+  l.push(...coverageSection(manifest, s, places, opts.selection));
   l.push(...inventorySection(s));
   l.push(...hiringSection(places));
   l.push(...judgedSection(places, s));
