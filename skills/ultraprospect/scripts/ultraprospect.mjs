@@ -15610,11 +15610,14 @@ var noBrreg = {
 var BASE8 = "https://api-krs.ms.gov.pl/api/krs";
 var CONNECTOR_ID10 = "pl-krs";
 var REQUEST_DELAY_MS8 = 500;
-async function get6(krs, rejestr, strict = false) {
+var STRUCK_OFF_KRS = "0000019597";
+async function currentExtract(krs, rejestr) {
   const url = `${BASE8}/OdpisAktualny/${krs}?rejestr=${rejestr}&format=json`;
   await awaitHostSlot(url, REQUEST_DELAY_MS8);
-  const res = await httpJson("GET", url, void 0, { timeoutMs: 25e3, retries: 1, userAgent: politeUa() });
-  if (strict) return registerAnswer(CONNECTOR_ID10, res);
+  return httpJson("GET", url, void 0, { timeoutMs: 25e3, retries: 1, userAgent: politeUa() });
+}
+async function get6(krs, rejestr) {
+  const res = await currentExtract(krs, rejestr);
   return res.ok ? res.data : void 0;
 }
 function addressOf6(raw) {
@@ -15654,7 +15657,12 @@ function toRecord6(payload) {
     section: activityCode ? naceSection(activityCode) : void 0,
     activityScheme: "nace",
     legalForm: dzial1?.danePodmiotu?.formaPrawna ?? void 0,
-    status: odpis?.naglowekA?.stanPozycji != null ? "active" : "unknown",
+    // `stanPozycji` is a STATE CODE, not a presence flag: 1 on a current entry,
+    // 2 on one struck off the register (both measured, the second on the full
+    // extract of Kredyt Bank S.A., whose last entry is its deletion). Reading
+    // "any value" as active would file a struck-off company as trading the day
+    // this endpoint starts serving one. Any other code says "unknown".
+    status: odpis?.naglowekA?.stanPozycji === 1 ? "active" : odpis?.naglowekA?.stanPozycji === 2 ? "ceased" : "unknown",
     sourceUrl: `https://wyszukiwarka-krs.ms.gov.pl/podmiot/${krs}`,
     national: {
       krs: String(krs),
@@ -15679,20 +15687,45 @@ var plKrs = {
   availability() {
     return { available: true };
   },
-  async verifyId(id) {
+  async verifyId(id, ctx) {
     if (id.kind !== "krs" && id.kind !== "company-number") return void 0;
     const digits = id.value.replace(/\D/g, "");
     if (!digits || digits.length > 10) return void 0;
     const krs = digits.padStart(10, "0");
-    return toRecord6(await get6(krs, "P", true)) ?? toRecord6(await get6(krs, "S", true));
+    for (const rejestr of ["P", "S"]) {
+      const res = await currentExtract(krs, rejestr);
+      const payload = registerAnswer(CONNECTOR_ID10, res);
+      if (res.status === 204) {
+        ctx.onNote?.(
+          `pl-krs: KRS ${krs} has no current extract (HTTP 204) \u2014 the register has struck this entity off. Its history is in the full extract: ${BASE8}/OdpisPelny/${krs}?rejestr=${rejestr}&format=json`
+        );
+        return void 0;
+      }
+      const rec = toRecord6(payload);
+      if (rec) return rec;
+    }
+    return void 0;
   },
   async canary() {
     const payload = await get6("0000041581", "P");
     const rec = toRecord6(payload);
+    const struckOff = await currentExtract(STRUCK_OFF_KRS, "P");
     return [
       { name: "KRS still answers OdpisAktualny with odpis.naglowekA.numerKRS", ok: Boolean(payload?.odpis?.naglowekA?.numerKRS) },
       { name: "KRS still nests the name under dane.dzial1.danePodmiotu.nazwa", ok: Boolean(rec?.legalName) },
-      { name: "KRS still returns siedzibaIAdres with a postal address", ok: Boolean(rec?.address.codePostal) }
+      { name: "KRS still returns siedzibaIAdres with a postal address", ok: Boolean(rec?.address.codePostal) },
+      {
+        name: "KRS still marks a current entry with stanPozycji 1",
+        ok: payload?.odpis?.naglowekA?.stanPozycji === 1,
+        detail: `stanPozycji = ${String(payload?.odpis?.naglowekA?.stanPozycji ?? "absent")} \u2014 the only code this connector reads as active`
+      },
+      {
+        name: "KRS still answers 204, with no body, for an entity it has struck off",
+        ok: struckOff.status === 204,
+        // The upstream being down is not drift.
+        inconclusive: struckOff.status === 0 || struckOff.status >= 500,
+        detail: `HTTP ${struckOff.status} for ${STRUCK_OFF_KRS} \u2014 if a body now comes back, its stanPozycji is what says ceased`
+      }
     ];
   },
   async probe() {

@@ -318,6 +318,35 @@ describe("pl-krs", () => {
     expect(rec.address.codePostal).toBe("32-608");
     expect(rec.national?.website).toBe("HTTPS://GSOSIEK.PL");
   });
+
+  it("reads stanPozycji as a state code, not as a sign that the entry exists", () => {
+    // The header is the live answer for 0000041581 on 2026-11-10, court and
+    // case reference trimmed. `stanPozycji` was read as "present, so active".
+    // It is a code: 1 on this current entry, and 2 on the full extract of
+    // Kredyt Bank S.A. (0000019597), whose last entry is "WYKREŚLENIE Z KRAJOWEGO
+    // REJESTRU SĄDOWEGO" — for which this endpoint itself answers 204, no body.
+    const odpis = (stanPozycji: unknown) => ({
+      odpis: {
+        rodzaj: "Aktualny",
+        naglowekA: {
+          rejestr: "RejP",
+          numerKRS: "0000041581",
+          dataCzasOdpisu: "10.11.2026 23:08:59",
+          stanZDnia: "16.07.2026",
+          dataRejestracjiWKRS: "07.09.2001",
+          numerOstatniegoWpisu: 59,
+          dataOstatniegoWpisu: "16.07.2026",
+          stanPozycji,
+        },
+        dane: { dzial1: { danePodmiotu: { nazwa: "GMINNA SPÓŁDZIELNIA" }, siedzibaIAdres: { adres: { miejscowosc: "OSIEK" } } } },
+      },
+    });
+    expect(krsRecord(odpis(1))!.status).toBe("active");
+    expect(krsRecord(odpis(2))!.status).toBe("ceased");
+    // A code nobody has measured is not evidence of trading.
+    expect(krsRecord(odpis(3))!.status).toBe("unknown");
+    expect(krsRecord(odpis(undefined))!.status).toBe("unknown");
+  });
 });
 
 describe("gb-companies-house", () => {
