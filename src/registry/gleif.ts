@@ -20,7 +20,7 @@
 import { awaitHostSlot, httpJson } from "../engine.js";
 import { politeUa } from "../net.js";
 import type { PostalAddress } from "../types.js";
-import type { Availability, CanaryCheck, ConnectorContext, LegalId, LookupQuery, RegistryConnector, RegistryRecord } from "./types.js";
+import type { Availability, CanaryCheck, LegalId, LookupQuery, RegistryConnector, RegistryRecord } from "./types.js";
 import { registerAnswer } from "./upstream.js";
 
 const BASE = "https://api.gleif.org/api/v1";

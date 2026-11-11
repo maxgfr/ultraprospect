@@ -747,7 +747,7 @@ async function scanLocality(connectorId: string, key: string, keep: (r: Registry
   // was nearly all of what a lookup spent.
   const ownLine = `{"l":${JSON.stringify(key)},`;
   for await (const line of linesOf(createReadStream(path, { encoding: "utf8" }))) {
-    if (!line || !line.startsWith(ownLine)) continue;
+    if (!line?.startsWith(ownLine)) continue;
     let parsed: { l?: string; k?: string[]; r?: RegistryRecord };
     try {
       parsed = JSON.parse(line);

@@ -108,13 +108,7 @@ function validateSource(entry: FeedbackEntry, places: readonly Place[]): void {
   if (feedbackSource(place).digest !== entry.source.digest) throw new Error(`${entry.id}: stale feedback source snapshot; regenerate feedback subjects`);
   const subject = entry.subject;
   if (entry.kind === "wrong-site") {
-    if (
-      !subject ||
-      subject.field !== "website" ||
-      subject.lane !== undefined ||
-      place.website?.url !== subject.value ||
-      !place.website.evidence.includes(subject.from)
-    ) {
+    if (subject?.field !== "website" || subject.lane !== undefined || place.website?.url !== subject.value || !place.website.evidence.includes(subject.from)) {
       throw new Error(`${entry.id}: website subject is not backed by this company's provenance`);
     }
   } else if (entry.kind === "wrong-contact") {

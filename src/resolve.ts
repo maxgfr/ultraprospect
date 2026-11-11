@@ -1004,7 +1004,7 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
           continue;
         }
         // Same first-wins rule as a corroboration failure below.
-        if (!place.website || place.website.confidence !== "unverified") {
+        if (place.website?.confidence !== "unverified") {
           // The site is real and a human can open it; only we could not read
           // it. Recording "no website" here would be a false absence — measured
           // on restaurant-elgringo.fr, which answers 200 with 37 bytes.
@@ -1050,7 +1050,7 @@ export async function runResolve(runDir: string, places: Place[], store: PageSto
       // rejection overwrite an earlier one recorded a ministry's school
       // directory in place of the school's own domain, purely because it was
       // tried third.
-      if (!place.website || place.website.confidence !== "unverified") {
+      if (place.website?.confidence !== "unverified") {
         place.website = { url: page.record.url, confidence: "unverified", evidence: [page.record.id, check.reason ?? "no corroboration"] };
       }
       outcome.rejected++;

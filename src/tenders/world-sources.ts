@@ -451,6 +451,7 @@ export const brPncp: TenderConnector = {
       let page = 1;
       let pages = 1;
       while (page <= pages && out.length < q.limit && page <= 50) {
+        // biome-ignore lint/complexity/useMathMinMax: these are ISO date strings, which Math.max would turn into NaN.
         const res = await getJson(`${PNCP}/contratacoes/proposta?dataFinal=${ymd(until > today() ? until : today())}&pagina=${page}&tamanhoPagina=50`);
         if (!res.ok) {
           truncated = true;

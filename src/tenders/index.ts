@@ -9,7 +9,6 @@ import { euTed } from "./eu-ted.js";
 import { frBoamp } from "./fr-boamp.js";
 import { auAustender, deOeffentlichevergabe, gbContractsFinder, gbFts } from "./ocds-sources.js";
 import type { TenderConnector, TenderCoverage } from "./types.js";
-import { EU27 } from "./util.js";
 import { brPncp, caCanadabuys, coSecop, uaProzorro, usSam, usUsaspending, wwWorldBank } from "./world-sources.js";
 
 export const TENDER_CONNECTORS: readonly TenderConnector[] = [

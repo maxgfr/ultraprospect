@@ -14729,7 +14729,7 @@ async function scanLocality(connectorId, key, keep2, limit) {
   const out2 = [];
   const ownLine = `{"l":${JSON.stringify(key)},`;
   for await (const line of linesOf(createReadStream2(path, { encoding: "utf8" }))) {
-    if (!line || !line.startsWith(ownLine)) continue;
+    if (!line?.startsWith(ownLine)) continue;
     let parsed;
     try {
       parsed = JSON.parse(line);
@@ -16721,7 +16721,7 @@ function validateSource(entry, places) {
   if (feedbackSource(place).digest !== entry.source.digest) throw new Error(`${entry.id}: stale feedback source snapshot; regenerate feedback subjects`);
   const subject = entry.subject;
   if (entry.kind === "wrong-site") {
-    if (!subject || subject.field !== "website" || subject.lane !== void 0 || place.website?.url !== subject.value || !place.website.evidence.includes(subject.from)) {
+    if (subject?.field !== "website" || subject.lane !== void 0 || place.website?.url !== subject.value || !place.website.evidence.includes(subject.from)) {
       throw new Error(`${entry.id}: website subject is not backed by this company's provenance`);
     }
   } else if (entry.kind === "wrong-contact") {
@@ -22056,7 +22056,7 @@ async function runResolve(runDir, places, store, opts = {}) {
           outcome.unreadable++;
           continue;
         }
-        if (!place.website || place.website.confidence !== "unverified") {
+        if (place.website?.confidence !== "unverified") {
           place.website = {
             url,
             confidence: "unverified",
@@ -22092,7 +22092,7 @@ async function runResolve(runDir, places, store, opts = {}) {
         settled = true;
         break;
       }
-      if (!place.website || place.website.confidence !== "unverified") {
+      if (place.website?.confidence !== "unverified") {
         place.website = { url: page2.record.url, confidence: "unverified", evidence: [page2.record.id, check.reason ?? "no corroboration"] };
       }
       outcome.rejected++;

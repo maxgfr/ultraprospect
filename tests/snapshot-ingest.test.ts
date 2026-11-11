@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { offeneRegisterSnapshot } from "../src/registry/de-offeneregister.js";
 import { forgetSnapshot, ingestSnapshot, snapshotMeta, type SnapshotSource } from "../src/snapshot.js";
 
