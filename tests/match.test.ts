@@ -407,3 +407,31 @@ describe("applyVerdicts", () => {
     expect(result.remaining).toEqual(todo);
   });
 });
+
+describe("the candidate grid far from the equator", () => {
+  // A grid cell is 0.002° on both axes, and a degree of longitude shrinks with
+  // the latitude: in Tallinn 0.002° is 113 m east-west, under the 150 m gate.
+  // With one neighbour cell either side, a same-name pair 130 m apart east-west
+  // that straddled two cell boundaries was never scored at all.
+  const CELL = 0.002;
+  const lat = 59.437;
+  const lonA = Math.ceil(24.745 / CELL) * CELL - 1e-5; // the last metre of a cell
+  const metresEast = (m: number) => m / (((6371008.8 * Math.PI) / 180) * Math.cos((lat * Math.PI) / 180));
+  const lonB = lonA + metresEast(130);
+
+  it("still scores a pair 130 m apart east-west in Tallinn", () => {
+    // The two sit two cells apart, which is what used to hide them.
+    expect(Math.floor(lonB / CELL) - Math.floor(lonA / CELL)).toBe(2);
+    const shop = poi({ name: "Rahva Raamat", lat, lon: lonA });
+    const record = rec({ legalName: "RAHVA RAAMAT", lat, lon: lonB });
+    expect(scorePair(shop, record).distanceM).toBeCloseTo(130, 0);
+    const out = matchLanes([shop], [record]);
+    expect([...out.merged.values()].map((m) => m.osmId)).toEqual(["n1"]);
+  });
+
+  it("does not stretch the gate itself: 160 m east-west is still apart", () => {
+    const out = matchLanes([poi({ name: "Rahva Raamat", lat, lon: lonA })], [rec({ legalName: "RAHVA RAAMAT", lat, lon: lonA + metresEast(160) })]);
+    expect(out.merged.size).toBe(0);
+    expect(out.undecided).toEqual([]);
+  });
+});

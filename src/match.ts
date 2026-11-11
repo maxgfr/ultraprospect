@@ -55,12 +55,34 @@ function buildIndex(records: readonly RegistryRecord[]): Map<string, RegistryRec
   return index;
 }
 
+/** Metres in one degree of latitude, on the sphere `haversineM` measures with. */
+const M_PER_DEGREE = (6371008.8 * Math.PI) / 180;
+
+/**
+ * How many cells either side, east-west, still hold a point `MAX_DISTANCE_M` away.
+ *
+ * A cell is 0.002° on both axes, but a degree of longitude shrinks with the
+ * cosine of the latitude: 0.002° is 222 m east-west at the equator, 150 m at
+ * 47.6° and 113 m in Tallinn (59.4°). One neighbour each side was therefore
+ * narrower than the distance gate north of Lyon, and an exact-name pair 130 m
+ * apart east-west in Tallinn was never even scored. The span is measured at
+ * the latitude one cell further from the equator, so the record's own latitude
+ * can never be the one that falls outside it.
+ */
+function lonSpan(lat: number): number {
+  const farLat = Math.min(89, Math.abs(lat) + CELL);
+  const cellM = CELL * M_PER_DEGREE * Math.cos((farLat * Math.PI) / 180);
+  return Math.max(1, Math.ceil(MAX_DISTANCE_M / cellM));
+}
+
 function nearby(index: Map<string, RegistryRecord[]>, lat: number, lon: number): RegistryRecord[] {
   const out: RegistryRecord[] = [];
   const baseLat = Math.floor(lat / CELL);
   const baseLon = Math.floor(lon / CELL);
+  const span = lonSpan(lat);
+  // Latitude needs no widening: 0.002° of it is 222 m everywhere, past the gate.
   for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
+    for (let dx = -span; dx <= span; dx++) {
       const bucket = index.get(`${baseLat + dy}:${baseLon + dx}`);
       if (bucket) out.push(...bucket);
     }

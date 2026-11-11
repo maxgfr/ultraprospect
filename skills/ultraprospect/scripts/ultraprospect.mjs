@@ -19509,12 +19509,19 @@ function buildIndex(records) {
   }
   return index;
 }
+var M_PER_DEGREE = 63710088e-1 * Math.PI / 180;
+function lonSpan(lat) {
+  const farLat = Math.min(89, Math.abs(lat) + CELL);
+  const cellM = CELL * M_PER_DEGREE * Math.cos(farLat * Math.PI / 180);
+  return Math.max(1, Math.ceil(MAX_DISTANCE_M / cellM));
+}
 function nearby(index, lat, lon) {
   const out2 = [];
   const baseLat = Math.floor(lat / CELL);
   const baseLon = Math.floor(lon / CELL);
+  const span = lonSpan(lat);
   for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
+    for (let dx = -span; dx <= span; dx++) {
       const bucket2 = index.get(`${baseLat + dy}:${baseLon + dx}`);
       if (bucket2) out2.push(...bucket2);
     }
