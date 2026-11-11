@@ -25817,15 +25817,10 @@ async function runTenderSearch(q, connectors, opts = {}) {
   const raw = {};
   const lanes = [];
   const notes = [];
-  for (const c of connectors) {
-    const askable = c.kinds.some((k) => q.kinds.includes(k));
-    if (!askable) continue;
+  const askable = connectors.filter((c) => c.kinds.some((k) => q.kinds.includes(k)));
+  const answers = await mapLimit(askable, opts.concurrency ?? 4, async (c) => {
     const avail = c.availability();
-    if (!avail.available) {
-      lanes.push({ ...laneOf(c, q, void 0), truncated: true, reason: `not run: ${avail.reason}` });
-      notes.push(`${c.id}: ${avail.reason}`);
-      continue;
-    }
+    if (!avail.available) return { c, avail };
     let out2;
     let error;
     try {
@@ -25839,11 +25834,19 @@ async function runTenderSearch(q, connectors, opts = {}) {
     } catch (e) {
       error = `${c.id} failed: ${e.message}`;
     }
+    const lane = laneOf(c, q, out2, error);
+    opts.onProgress?.(`  ${c.id}: ${out2?.tenders.length ?? 0} notice(s)${lane.truncated ? ` \u2014 PARTIAL: ${lane.reason}` : ""}`);
+    return { c, avail, out: out2, lane };
+  });
+  for (const { c, avail, out: out2, lane } of answers) {
+    if (!avail.available) {
+      lanes.push({ ...laneOf(c, q, void 0), truncated: true, reason: `not run: ${avail.reason}` });
+      notes.push(`${c.id}: ${avail.reason}`);
+      continue;
+    }
     if (out2) raw[c.id] = out2;
     for (const n of out2?.notes ?? []) notes.push(n);
-    const lane = laneOf(c, q, out2, error);
     lanes.push(lane);
-    opts.onProgress?.(`  ${c.id}: ${out2?.tenders.length ?? 0} notice(s)${lane.truncated ? ` \u2014 PARTIAL: ${lane.reason}` : ""}`);
   }
   const all = Object.values(raw).flatMap((r) => r.tenders);
   const d = dedupeTenders(all);

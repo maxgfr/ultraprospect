@@ -1,7 +1,7 @@
 // Ask every source that serves the query, keep what each said, account for the rest.
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { writeArtifact } from "../engine.js";
+import { mapLimit, writeArtifact } from "../engine.js";
 import { dedupeTenders, type DuplicatePair } from "./dedupe.js";
 import type { SearchOutcome, Tender, TenderConnector, TenderLane, TenderQuery } from "./types.js";
 
@@ -19,6 +19,8 @@ export interface SearchRunOptions {
   /** Replay `raw/<connector>.json` from this directory instead of calling the sources. */
   fixture?: string;
   onProgress?: (line: string) => void;
+  /** Sources asked at once. */
+  concurrency?: number;
 }
 
 function laneOf(c: TenderConnector, q: TenderQuery, out: SearchOutcome | undefined, error?: string): TenderLane {
@@ -39,15 +41,16 @@ export async function runTenderSearch(q: TenderQuery, connectors: readonly Tende
   const raw: Record<string, SearchOutcome> = {};
   const lanes: TenderLane[] = [];
   const notes: string[] = [];
-  for (const c of connectors) {
-    const askable = c.kinds.some((k) => q.kinds.includes(k));
-    if (!askable) continue;
+  const askable = connectors.filter((c) => c.kinds.some((k) => q.kinds.includes(k)));
+  // The sources sit on unrelated hosts and each is already paced per host by
+  // the engine, so asking them one after another only added their latencies
+  // up: a run over the EU waited for TED, then BOAMP, then each national
+  // export in turn. They are asked a few at a time, and everything is folded
+  // back in connector order afterwards, so the lanes, the notes and which copy
+  // of a duplicate is kept do not depend on which source answered first.
+  const answers = await mapLimit(askable, opts.concurrency ?? 4, async (c) => {
     const avail = c.availability();
-    if (!avail.available) {
-      lanes.push({ ...laneOf(c, q, undefined), truncated: true, reason: `not run: ${avail.reason}` });
-      notes.push(`${c.id}: ${avail.reason}`);
-      continue;
-    }
+    if (!avail.available) return { c, avail };
     let out: SearchOutcome | undefined;
     let error: string | undefined;
     try {
@@ -63,11 +66,19 @@ export async function runTenderSearch(q: TenderQuery, connectors: readonly Tende
     } catch (e) {
       error = `${c.id} failed: ${(e as Error).message}`;
     }
+    const lane = laneOf(c, q, out, error);
+    opts.onProgress?.(`  ${c.id}: ${out?.tenders.length ?? 0} notice(s)${lane.truncated ? ` — PARTIAL: ${lane.reason}` : ""}`);
+    return { c, avail, out, lane };
+  });
+  for (const { c, avail, out, lane } of answers) {
+    if (!avail.available) {
+      lanes.push({ ...laneOf(c, q, undefined), truncated: true, reason: `not run: ${avail.reason}` });
+      notes.push(`${c.id}: ${avail.reason}`);
+      continue;
+    }
     if (out) raw[c.id] = out;
     for (const n of out?.notes ?? []) notes.push(n);
-    const lane = laneOf(c, q, out, error);
-    lanes.push(lane);
-    opts.onProgress?.(`  ${c.id}: ${out?.tenders.length ?? 0} notice(s)${lane.truncated ? ` — PARTIAL: ${lane.reason}` : ""}`);
+    lanes.push(lane!);
   }
   const all = Object.values(raw).flatMap((r) => r.tenders);
   const d = dedupeTenders(all);
