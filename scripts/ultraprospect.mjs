@@ -14482,8 +14482,17 @@ async function* rowsOf(source2, path) {
 }
 async function downloadTo(url, path) {
   const res = await fetch(url, { headers: { "user-agent": politeUa() } });
-  if (!res.ok || !res.body) return { ok: false, status: res.status };
-  await pipeline(Readable.fromWeb(res.body), createWriteStream(path));
+  if (!res.ok || !res.body) {
+    await res.body?.cancel().catch(() => {
+    });
+    return { ok: false, status: res.status };
+  }
+  try {
+    await pipeline(Readable.fromWeb(res.body), createWriteStream(path));
+  } catch (e) {
+    rmSync3(path, { force: true });
+    throw e;
+  }
   return { ok: true, status: res.status, lastModified: res.headers.get("last-modified") ?? void 0 };
 }
 async function ingestSnapshot(connectorId, source2, opts = {}) {
@@ -14505,7 +14514,14 @@ async function ingestSnapshot(connectorId, source2, opts = {}) {
     const failures = [];
     let got;
     for (const url of source2.urls(/* @__PURE__ */ new Date())) {
-      const res = await downloadTo(url, download);
+      let res;
+      try {
+        res = await downloadTo(url, download);
+      } catch (e) {
+        rmSync3(download, { force: true });
+        failures.push(`${url} \u2192 ${e instanceof Error ? e.message : String(e)}`);
+        continue;
+      }
       if (!res.ok) {
         failures.push(`${url} \u2192 HTTP ${res.status}`);
         continue;

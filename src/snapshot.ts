@@ -424,8 +424,21 @@ export interface IngestOptions {
  */
 async function downloadTo(url: string, path: string): Promise<{ ok: boolean; status: number; lastModified?: string }> {
   const res = await fetch(url, { headers: { "user-agent": politeUa() } });
-  if (!res.ok || !res.body) return { ok: false, status: res.status };
-  await pipeline(Readable.fromWeb(res.body as never), createWriteStream(path));
+  if (!res.ok || !res.body) {
+    // An error page nobody reads still holds its connection open until it is
+    // collected. Cancelled, so trying the next candidate does not leave one
+    // dangling per refused URL.
+    await res.body?.cancel().catch(() => {});
+    return { ok: false, status: res.status };
+  }
+  try {
+    await pipeline(Readable.fromWeb(res.body as never), createWriteStream(path));
+  } catch (e) {
+    // A transfer cut off midway has already written up to hundreds of MB. The
+    // file is useless — nothing can index half a bzip2 stream — so it goes.
+    rmSync(path, { force: true });
+    throw e;
+  }
   return { ok: true, status: res.status, lastModified: res.headers.get("last-modified") ?? undefined };
 }
 
@@ -463,7 +476,17 @@ export async function ingestSnapshot(connectorId: string, source: SnapshotSource
     // The candidate list is tried in order, and a 404 on the first is EXPECTED for
     // a monthly product in the first week of a month rather than a failure.
     for (const url of source.urls(new Date())) {
-      const res = await downloadTo(url, download);
+      // A download that fails MIDWAY rejects rather than answering !ok. Uncaught,
+      // it escaped this loop: the next candidate — the previous month's file,
+      // which is the right answer in the first week of one — was never tried.
+      let res: Awaited<ReturnType<typeof downloadTo>>;
+      try {
+        res = await downloadTo(url, download);
+      } catch (e) {
+        rmSync(download, { force: true });
+        failures.push(`${url} → ${e instanceof Error ? e.message : String(e)}`);
+        continue;
+      }
       if (!res.ok) {
         failures.push(`${url} → HTTP ${res.status}`);
         continue;
