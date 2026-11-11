@@ -60,6 +60,27 @@ describe("extractVatNumbers", () => {
     expect(extractVatNumbers("ordersDE123456789 shipped")).toEqual([]);
   });
 
+  it("does not run a variable-length number on into the phone number after it", () => {
+    // Separators are removed before matching, so "CZ12345678 724 123 456"
+    // compacts to "CZ12345678724123456", and `CZ\d{8,10}` took two digits of
+    // the phone number with it: CZ1234567872, which is nobody's.
+    for (const written of ["DIČ: CZ12345678 Tel. 724 123 456", "DIČ: CZ12345678 724 123 456", "DIČ: CZ12345678\n724 123 456"]) {
+      expect(extractVatNumbers(written), written).toEqual([{ countryCode: "cz", value: "CZ12345678" }]);
+    }
+    expect(extractVatNumbers("ДДС BG123456789 0888 123 456")).toEqual([{ countryCode: "bg", value: "BG123456789" }]);
+    // RO is 2 to 10 digits, so "021 123" fits whole; the " - " between them is
+    // what says it is a second thing.
+    expect(extractVatNumbers("CUI RO1234 - 021 123")).toEqual([{ countryCode: "ro", value: "RO1234" }]);
+    // And nine digits taken from the front of a longer run are not a German number.
+    expect(extractVatNumbers("DE811907980123")).toEqual([]);
+  });
+
+  it("reads Lithuania's twelve-digit form whole, not its first nine digits", () => {
+    // `LT(?:\d{9}|\d{12})` stops at the first branch that fits.
+    expect(extractVatNumbers("PVM LT100001919017")).toEqual([{ countryCode: "lt", value: "LT100001919017" }]);
+    expect(extractVatNumbers("PVM LT123456715")).toEqual([{ countryCode: "lt", value: "LT123456715" }]);
+  });
+
   it("finds a foreign subsidiary's number alongside the local one", () => {
     // A German group's Impressum legitimately carries an Austrian number. Which
     // one matters is decided later, by the country of the record.

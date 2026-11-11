@@ -15738,12 +15738,28 @@ function extractVatNumbers(text3) {
     compact += ch;
     origin.push(i);
   }
+  const breaksAfter = (j) => {
+    if (j + 1 >= compact.length) return true;
+    const gap = text3.slice(origin[j] + 1, origin[j + 1]);
+    return /[\r\n]/.test(gap) || gap.length > 1 && /[.-]/.test(gap);
+  };
+  const endsAGroup = (j) => !/\d/.test(text3[origin[j] + 1] ?? "");
   for (const [cc, re] of Object.entries(VAT_PATTERNS)) {
+    const whole = new RegExp(`^(?:${re.source})$`, "i");
     for (const m of compact.matchAll(new RegExp(re.source, "gi"))) {
-      const before = text3[(origin[m.index ?? 0] ?? 0) - 1];
+      const start = m.index ?? 0;
+      const before = text3[(origin[start] ?? 0) - 1];
       if (before && /[A-Za-z]/.test(before)) continue;
       if (!/^[A-Z]{2}/.test(m[0])) continue;
-      const value = m[0].toUpperCase();
+      let limit = start;
+      while (limit < start + 16 && !breaksAfter(limit)) limit++;
+      let found;
+      for (let end = limit; end > start + 2 && !found; end--) {
+        const candidate = compact.slice(start, end + 1);
+        if (endsAGroup(end) && whole.test(candidate)) found = candidate;
+      }
+      if (!found) continue;
+      const value = found.toUpperCase();
       if (seen.has(value)) continue;
       seen.add(value);
       out2.push({ countryCode: cc, value });

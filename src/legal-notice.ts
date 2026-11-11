@@ -94,9 +94,28 @@ export function extractVatNumbers(text: string): Array<{ countryCode: string; va
     origin.push(i);
   }
 
+  // Where one written number can end, in compact offsets.
+  //
+  // Compaction also joins a VAT number to whatever digits FOLLOW it, and a
+  // variable-length pattern (CZ 8-10 digits, BG 9-10, RO 2-10, LT 9 or 12) ran
+  // on into them: "DIČ: CZ12345678 724 123 456" was read as CZ1234567872, half
+  // of it the phone number. Two facts about the original text bound a number:
+  // a line break, or punctuation with space around it (" - ", " . "), is
+  // between two things rather than inside one — "DE 811.907.980" separates its
+  // groups with ONE character; and a number ends where a group of digits ends,
+  // never in the middle of one.
+  const breaksAfter = (j: number): boolean => {
+    if (j + 1 >= compact.length) return true;
+    const gap = text.slice(origin[j]! + 1, origin[j + 1]!);
+    return /[\r\n]/.test(gap) || (gap.length > 1 && /[.-]/.test(gap));
+  };
+  const endsAGroup = (j: number): boolean => !/\d/.test(text[origin[j]! + 1] ?? "");
+
   for (const [cc, re] of Object.entries(VAT_PATTERNS)) {
+    const whole = new RegExp(`^(?:${re.source})$`, "i");
     for (const m of compact.matchAll(new RegExp(re.source, "gi"))) {
-      const before = text[(origin[m.index ?? 0] ?? 0) - 1];
+      const start = m.index ?? 0;
+      const before = text[(origin[start] ?? 0) - 1];
       if (before && /[A-Za-z]/.test(before)) continue;
       // A VAT prefix is written in capitals. Matching is case-insensitive and
       // runs on text with its spaces removed, so ordinary words did duty as
@@ -104,7 +123,19 @@ export function extractVatNumbers(text: string): Array<{ countryCode: string; va
       // was read as the Spanish number ES912345678, "en el 912345678" as a
       // Greek one. The same trap as "Tel", through a lowercase word.
       if (!/^[A-Z]{2}/.test(m[0])) continue;
-      const value = m[0].toUpperCase();
+      // The longest reading of the pattern that stays inside one written
+      // number and ends where it does. Searched rather than taken from the
+      // regex, whose answer is the longest run of compacted digits — or, for
+      // an alternation like LT's, the first branch that fits.
+      let limit = start;
+      while (limit < start + 16 && !breaksAfter(limit)) limit++;
+      let found: string | undefined;
+      for (let end = limit; end > start + 2 && !found; end--) {
+        const candidate = compact.slice(start, end + 1);
+        if (endsAGroup(end) && whole.test(candidate)) found = candidate;
+      }
+      if (!found) continue;
+      const value = found.toUpperCase();
       if (seen.has(value)) continue;
       seen.add(value);
       out.push({ countryCode: cc, value });
