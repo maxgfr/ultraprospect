@@ -22351,6 +22351,12 @@ function vocabularyOf(scheme) {
 function dossierPathFor(place) {
   return join21("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
 }
+function syncDossierCount(runDir, places, manifest) {
+  const onDisk = places.filter((p) => existsSync14(join21(runDir, dossierPathFor(p)))).length;
+  if (manifest.counts.dossiers === onDisk) return;
+  manifest.counts.dossiers = onDisk;
+  writeRunManifest(runDir, manifest);
+}
 function fmtMoney(n, currency) {
   if (typeof n !== "number") return void 0;
   if (!currency) return new Intl.NumberFormat("en", { maximumFractionDigits: 0 }).format(n);
@@ -26563,7 +26569,10 @@ function createAdapter() {
 
 ${JSON.stringify({ ok: r.ok, errors: r.errors, warnings: r.warnings }, null, 2)}` };
           }
-          const report2 = runCheck({ runDir, places: readPlaces(runDir), manifest: requireManifest(runDir) });
+          const places = readPlaces(runDir);
+          const manifest = requireManifest(runDir);
+          const report2 = runCheck({ runDir, places, manifest });
+          syncDossierCount(runDir, places, manifest);
           return { text: `${formatReport(report2)}
 
 ${JSON.stringify({ ok: report2.ok, errors: report2.errors, warnings: report2.warnings }, null, 2)}` };
@@ -26701,7 +26710,9 @@ ${JSON.stringify({ ok: report2.ok, errors: report2.errors, warnings: report2.war
             return { text: JSON.stringify({ run: runDir, files: renderTenderRun(runDir) }, null, 2), artifact: runDir };
           }
           const manifest = requireManifest(runDir);
-          const outcome = buildAll(readPlaces(runDir), manifest, {
+          const places = readPlaces(runDir);
+          syncDossierCount(runDir, places, manifest);
+          const outcome = buildAll(places, manifest, {
             runDir,
             noPeople: args.noPeople === true,
             minScore: typeof args.minScore === "number" ? clampInt(args.minScore, 0, 1e4, 0) : void 0,
@@ -28459,7 +28470,10 @@ async function cmdCheck(values, bools) {
   if (!values.run) throw new UsageError("check needs --run <dir>");
   const runDir = resolveRun(values.run);
   if (isTenderRun2(runDir)) return tenderCheckCmd(runDir, bools, IO);
-  const report2 = runCheck({ runDir, places: readPlaces(runDir), manifest: requireManifest(runDir) });
+  const places = readPlaces(runDir);
+  const manifest = requireManifest(runDir);
+  const report2 = runCheck({ runDir, places, manifest });
+  syncDossierCount(runDir, places, manifest);
   if (bools.has("json")) out(jsonLine(report2));
   else out(formatReport(report2));
   if (!report2.ok) {
@@ -28480,6 +28494,7 @@ async function cmdRender(values, bools) {
   }
   const places = readPlaces(runDir);
   const manifest = requireManifest(runDir);
+  syncDossierCount(runDir, places, manifest);
   const outcome = buildAll(places, manifest, {
     runDir,
     noPeople: bools.has("no-people"),

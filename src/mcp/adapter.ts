@@ -45,7 +45,7 @@ import { buildAll } from "../render.js";
 import { CONNECTORS, servesCountry } from "../registry/index.js";
 import { ingestSnapshot, listSnapshots, type SnapshotSource } from "../snapshot.js";
 import { buildDelta, diffRuns } from "../watch.js";
-import { buildDossierPacket } from "../dossier.js";
+import { buildDossierPacket, syncDossierCount } from "../dossier.js";
 import { resolveWhere } from "../geocode.js";
 import { readPlaces, requireManifest, resolveRun, newRun, writePlaces, DEFAULT_OUT } from "../run.js";
 import { runScan, writeScan } from "../scan.js";
@@ -390,7 +390,10 @@ export function createAdapter(): McpAdapter {
             const r = checkTenderRun(runDir);
             return { text: `${formatReport(r)}\n\n${JSON.stringify({ ok: r.ok, errors: r.errors, warnings: r.warnings }, null, 2)}` };
           }
-          const report = runCheck({ runDir, places: readPlaces(runDir), manifest: requireManifest(runDir) });
+          const places = readPlaces(runDir);
+          const manifest = requireManifest(runDir);
+          const report = runCheck({ runDir, places, manifest });
+          syncDossierCount(runDir, places, manifest);
           return { text: `${formatReport(report)}\n\n${JSON.stringify({ ok: report.ok, errors: report.errors, warnings: report.warnings }, null, 2)}` };
         }
 
@@ -543,7 +546,9 @@ export function createAdapter(): McpAdapter {
             return { text: JSON.stringify({ run: runDir, files: renderTenderRun(runDir) }, null, 2), artifact: runDir };
           }
           const manifest = requireManifest(runDir);
-          const outcome = buildAll(readPlaces(runDir), manifest, {
+          const places = readPlaces(runDir);
+          syncDossierCount(runDir, places, manifest);
+          const outcome = buildAll(places, manifest, {
             runDir,
             noPeople: args.noPeople === true,
             minScore: typeof args.minScore === "number" ? clampInt(args.minScore, 0, 10_000, 0) : undefined,

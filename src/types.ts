@@ -397,6 +397,7 @@ export interface RunManifest {
     enrichedTier2: number;
     /** Places a register confirmed after the fact, outside a sweep. */
     confirmed: number;
+    /** Write-ups saved at `dossiers/<id>.md` for a place of this run. Re-counted by `check` and `render`. */
     dossiers: number;
   };
   truncated: boolean;

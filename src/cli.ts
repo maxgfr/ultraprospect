@@ -59,7 +59,7 @@ import { enrichable, persistEnrich, runEnrich } from "./enrich.js";
 import { holdNoPeople, noPeopleNote } from "./no-people.js";
 import { applyFit, ranked, scoreAll } from "./score.js";
 import { parseMinFit } from "./csv.js";
-import { buildDossierPacket, dossierPathFor } from "./dossier.js";
+import { buildDossierPacket, dossierPathFor, syncDossierCount } from "./dossier.js";
 import { formatReport, runCheck } from "./check.js";
 import { buildAll } from "./render.js";
 import { buildDelta, diffRuns } from "./watch.js";
@@ -1192,7 +1192,10 @@ async function cmdCheck(values: Record<string, string>, bools: ReadonlySet<strin
   if (!values.run) throw new UsageError("check needs --run <dir>");
   const runDir = resolveRun(values.run);
   if (isTenderRun(runDir)) return tenderCheckCmd(runDir, bools, IO);
-  const report = runCheck({ runDir, places: readPlaces(runDir), manifest: requireManifest(runDir) });
+  const places = readPlaces(runDir);
+  const manifest = requireManifest(runDir);
+  const report = runCheck({ runDir, places, manifest });
+  syncDossierCount(runDir, places, manifest);
 
   if (bools.has("json")) out(jsonLine(report));
   else out(formatReport(report));
@@ -1219,6 +1222,7 @@ async function cmdRender(values: Record<string, string>, bools: ReadonlySet<stri
   }
   const places = readPlaces(runDir);
   const manifest = requireManifest(runDir);
+  syncDossierCount(runDir, places, manifest);
 
   const outcome = buildAll(places, manifest, {
     runDir,

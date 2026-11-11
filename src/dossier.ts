@@ -14,12 +14,29 @@ import { join } from "node:path";
 import { vocabularyOf } from "./classification/index.js";
 import { pageDirFor } from "./pages.js";
 import { sizeBandLabel } from "./registry/index.js";
+import { writeRunManifest } from "./run.js";
 import type { Place, RunManifest } from "./types.js";
 import { streetLine } from "./util.js";
 
 /** Where a place's write-up goes, relative to the run. `check` reads it from here too. */
 export function dossierPathFor(place: Place): string {
   return join("dossiers", `${place.id.replace(/[^a-zA-Z0-9._-]/g, "_")}.md`);
+}
+
+/**
+ * Bring `manifest.counts.dossiers` up to the write-ups actually on disk.
+ *
+ * A dossier is written by the agent, by hand, to the path `dossier` prints —
+ * no command of ours ever saves one, so nothing ever counted them and the
+ * field stayed 0 on a run with a dossier for every company. `check` and
+ * `render` are the two commands that run after the writing, so both count the
+ * files of this run's places and rewrite the manifest when the number moved.
+ */
+export function syncDossierCount(runDir: string, places: readonly Place[], manifest: RunManifest): void {
+  const onDisk = places.filter((p) => existsSync(join(runDir, dossierPathFor(p)))).length;
+  if (manifest.counts.dossiers === onDisk) return;
+  manifest.counts.dossiers = onDisk;
+  writeRunManifest(runDir, manifest);
 }
 
 /**
