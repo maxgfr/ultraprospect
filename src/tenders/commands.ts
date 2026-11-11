@@ -265,12 +265,12 @@ export function checkTenderRun(runDir: string) {
   return runTenderCheck({ runDir, tenders: readTenders(runDir), manifest: requireTenderManifest(runDir) });
 }
 
-export function renderTenderRun(runDir: string): string[] {
+export function renderTenderRun(runDir: string, opts: { csvRaw?: boolean } = {}): string[] {
   const manifest = requireTenderManifest(runDir);
   const tenders = readTenders(runDir);
   manifest.tenderCounts.bids = existsSync(join(runDir, "bids")) ? readdirSync(join(runDir, "bids")).length : 0;
   const files = [
-    ["TENDERS.csv", tendersCsv(tenders)],
+    ["TENDERS.csv", tendersCsv(tenders, { raw: opts.csvRaw })],
     ["tenders-ranked.json", JSON.stringify(rankTenders(tenders), null, 2) + "\n"],
     ["REPORT.md", tendersReport(tenders, manifest)],
     ["index.html", tendersHtml(tenders, manifest)],

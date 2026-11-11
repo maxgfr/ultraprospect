@@ -31,29 +31,34 @@ const COLUMNS = [
   "why",
 ];
 
-export function tendersCsv(tenders: readonly Tender[]): string {
-  const rows = [csvRow(COLUMNS)];
+/** `raw` writes formula-looking cells unchanged, for a machine consumer (`render --csv-raw`). */
+export function tendersCsv(tenders: readonly Tender[], opts: { raw?: boolean } = {}): string {
+  const raw = { raw: opts.raw === true };
+  const rows = [csvRow(COLUMNS, raw)];
   for (const t of rankTenders(tenders)) {
     rows.push(
-      csvRow([
-        t.id,
-        t.verdict?.decision ?? "",
-        t.verdict?.fit ?? "",
-        t.status,
-        t.deadline ?? "",
-        t.country,
-        t.buyer.name,
-        t.title,
-        t.value?.amount ?? "",
-        t.value?.currency ?? "",
-        t.cpv.join(" "),
-        t.connectorId,
-        t.coverage,
-        t.documentsAccess,
-        (t.pages ?? []).length,
-        t.sourceUrl ?? "",
-        t.verdict?.why ?? "",
-      ]),
+      csvRow(
+        [
+          t.id,
+          t.verdict?.decision ?? "",
+          t.verdict?.fit ?? "",
+          t.status,
+          t.deadline ?? "",
+          t.country,
+          t.buyer.name,
+          t.title,
+          t.value?.amount ?? "",
+          t.value?.currency ?? "",
+          t.cpv.join(" "),
+          t.connectorId,
+          t.coverage,
+          t.documentsAccess,
+          (t.pages ?? []).length,
+          t.sourceUrl ?? "",
+          t.verdict?.why ?? "",
+        ],
+        raw,
+      ),
     );
   }
   return rows.join("\n") + "\n";

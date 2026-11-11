@@ -25610,29 +25610,33 @@ var COLUMNS = [
   "url",
   "why"
 ];
-function tendersCsv(tenders) {
-  const rows = [csvRow(COLUMNS)];
+function tendersCsv(tenders, opts = {}) {
+  const raw = { raw: opts.raw === true };
+  const rows = [csvRow(COLUMNS, raw)];
   for (const t of rankTenders(tenders)) {
     rows.push(
-      csvRow([
-        t.id,
-        t.verdict?.decision ?? "",
-        t.verdict?.fit ?? "",
-        t.status,
-        t.deadline ?? "",
-        t.country,
-        t.buyer.name,
-        t.title,
-        t.value?.amount ?? "",
-        t.value?.currency ?? "",
-        t.cpv.join(" "),
-        t.connectorId,
-        t.coverage,
-        t.documentsAccess,
-        (t.pages ?? []).length,
-        t.sourceUrl ?? "",
-        t.verdict?.why ?? ""
-      ])
+      csvRow(
+        [
+          t.id,
+          t.verdict?.decision ?? "",
+          t.verdict?.fit ?? "",
+          t.status,
+          t.deadline ?? "",
+          t.country,
+          t.buyer.name,
+          t.title,
+          t.value?.amount ?? "",
+          t.value?.currency ?? "",
+          t.cpv.join(" "),
+          t.connectorId,
+          t.coverage,
+          t.documentsAccess,
+          (t.pages ?? []).length,
+          t.sourceUrl ?? "",
+          t.verdict?.why ?? ""
+        ],
+        raw
+      )
     );
   }
   return rows.join("\n") + "\n";
@@ -26161,12 +26165,12 @@ function bidPacket(runDir, id, profilePath) {
 function checkTenderRun(runDir) {
   return runTenderCheck({ runDir, tenders: readTenders(runDir), manifest: requireTenderManifest(runDir) });
 }
-function renderTenderRun(runDir) {
+function renderTenderRun(runDir, opts = {}) {
   const manifest = requireTenderManifest(runDir);
   const tenders = readTenders(runDir);
   manifest.tenderCounts.bids = existsSync23(join30(runDir, "bids")) ? readdirSync12(join30(runDir, "bids")).length : 0;
   const files = [
-    ["TENDERS.csv", tendersCsv(tenders)],
+    ["TENDERS.csv", tendersCsv(tenders, { raw: opts.csvRaw })],
     ["tenders-ranked.json", JSON.stringify(rankTenders(tenders), null, 2) + "\n"],
     ["REPORT.md", tendersReport(tenders, manifest)],
     ["index.html", tendersHtml(tenders, manifest)]
@@ -26848,8 +26852,7 @@ ${JSON.stringify({ ok: report2.ok, errors: report2.errors, warnings: report2.war
         case "ultraprospect_render": {
           const runDir = resolveRun(str3(args.run, "run"));
           if (isTenderRun(runDir)) {
-            if (args.csvRaw === true) throw new ToolError("csvRaw is not supported on a tenders run yet: TENDERS.csv is always formula-guarded");
-            return { text: JSON.stringify({ run: runDir, files: renderTenderRun(runDir) }, null, 2), artifact: runDir };
+            return { text: JSON.stringify({ run: runDir, files: renderTenderRun(runDir, { csvRaw: args.csvRaw === true }) }, null, 2), artifact: runDir };
           }
           const manifest = requireManifest(runDir);
           const places = readPlaces(runDir);
@@ -27672,7 +27675,7 @@ function tenderCheckCmd(runDir, bools, io) {
   return EXIT_OK;
 }
 function tenderRenderCmd(runDir, bools, io) {
-  const files = renderTenderRun(runDir);
+  const files = renderTenderRun(runDir, { csvRaw: bools.has("csv-raw") });
   if (bools.has("json")) io.out(jsonLine({ run: runDir, files }));
   else for (const f of files) io.out(f);
   io.say(`next: open ${join32(runDir, "index.html")}`);
@@ -27958,7 +27961,7 @@ DELIVERABLES (render)
                          Both cut EVERY deliverable \u2014 the CSV, prospects.json, the report
                          and the page \u2014 and the report and the page say how many rows of
                          the run were removed. places.json is never changed.
-  --csv-raw              Write PROSPECTS.csv cells as they are, for a machine consumer. By default
+  --csv-raw              Write PROSPECTS.csv and TENDERS.csv cells as they are, for a machine consumer. By default
                          a cell a spreadsheet would run as a formula (=, @, +, -) gets a leading '.
 
 CHANGE (watch)
@@ -28631,7 +28634,6 @@ async function cmdRender(values, bools) {
   if (!values.run) throw new UsageError("render needs --run <dir>");
   const runDir = resolveRun(values.run);
   if (isTenderRun2(runDir)) {
-    if (bools.has("csv-raw")) throw new UsageError("--csv-raw is not supported on a tenders run yet: TENDERS.csv is always formula-guarded");
     return tenderRenderCmd(runDir, bools, IO);
   }
   const places = readPlaces(runDir);

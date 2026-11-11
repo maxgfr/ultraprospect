@@ -351,7 +351,7 @@ DELIVERABLES (render)
                          Both cut EVERY deliverable — the CSV, prospects.json, the report
                          and the page — and the report and the page say how many rows of
                          the run were removed. places.json is never changed.
-  --csv-raw              Write PROSPECTS.csv cells as they are, for a machine consumer. By default
+  --csv-raw              Write PROSPECTS.csv and TENDERS.csv cells as they are, for a machine consumer. By default
                          a cell a spreadsheet would run as a formula (=, @, +, -) gets a leading '.
 
 CHANGE (watch)
@@ -1214,10 +1214,6 @@ async function cmdRender(values: Record<string, string>, bools: ReadonlySet<stri
   if (!values.run) throw new UsageError("render needs --run <dir>");
   const runDir = resolveRun(values.run);
   if (isTenderRun(runDir)) {
-    // TENDERS.csv is written by the tenders module, which does not take the
-    // option yet. Refusing beats honouring the flag on one file and silently
-    // guarding the other.
-    if (bools.has("csv-raw")) throw new UsageError("--csv-raw is not supported on a tenders run yet: TENDERS.csv is always formula-guarded");
     return tenderRenderCmd(runDir, bools, IO);
   }
   const places = readPlaces(runDir);

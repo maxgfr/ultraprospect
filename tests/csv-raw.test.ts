@@ -15,6 +15,7 @@ import { toCsv } from "../src/csv.js";
 import { createServer } from "../src/engine.js";
 import { createAdapter } from "../src/mcp/adapter.js";
 import type { Place } from "../src/types.js";
+import { tendersCsv } from "../src/tenders/report.js";
 import { csvField, csvRow } from "../src/util.js";
 
 const FORMULA = '=HYPERLINK("http://evil.example","Click")';
@@ -59,7 +60,6 @@ const territory = () =>
     licences: [],
     timings: {},
   });
-const tenders = () => run({ version: 1, kind: "tenders", tool: "ultraprospect", slug: "t" });
 
 async function mcp(name: string, args: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
   const sent: any[] = [];
@@ -101,18 +101,33 @@ describe("render --csv-raw", () => {
     expect(readFileSync(join(dir, "PROSPECTS.csv"), "utf8")).toContain(raw);
   });
 
-  it("refuses it on a tenders run instead of guarding TENDERS.csv anyway", async () => {
-    await expect(main(["render", "--run", tenders(), "--csv-raw"])).rejects.toMatchObject({ exitCode: 2, message: expect.stringContaining("--csv-raw") });
+  it("reaches TENDERS.csv too", () => {
+    const notice = {
+      id: "eu-ted:1-2026",
+      connectorId: "eu-ted",
+      noticeId: "1-2026",
+      country: "fr",
+      kind: "call",
+      status: "open",
+      title: FORMULA,
+      buyer: { name: "Ville de Test", country: "fr" },
+      cpv: [],
+      lots: [],
+      documentsAccess: "unknown",
+      places: [],
+      criteria: [],
+      awards: [],
+      coverage: "above-threshold",
+      aliases: [],
+    } as never;
+    expect(tendersCsv([notice])).toContain(guarded);
+    expect(tendersCsv([notice], { raw: true })).toContain(raw);
   });
 
-  it("is csvRaw on the MCP render tool, with the same refusal", async () => {
+  it("is csvRaw on the MCP render tool", async () => {
     const dir = territory();
     const res = await mcp("ultraprospect_render", { run: dir, csvRaw: true });
     expect(res.isError).toBe(false);
     expect(readFileSync(join(dir, "PROSPECTS.csv"), "utf8")).toContain(raw);
-
-    const refused = await mcp("ultraprospect_render", { run: tenders(), csvRaw: true });
-    expect(refused.isError).toBe(true);
-    expect(refused.text).toContain("csvRaw");
   });
 });

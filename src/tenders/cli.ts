@@ -265,7 +265,7 @@ export function tenderCheckCmd(runDir: string, bools: ReadonlySet<string>, io: I
 }
 
 export function tenderRenderCmd(runDir: string, bools: ReadonlySet<string>, io: Io): number {
-  const files = renderTenderRun(runDir);
+  const files = renderTenderRun(runDir, { csvRaw: bools.has("csv-raw") });
   if (bools.has("json")) io.out(jsonLine({ run: runDir, files }));
   else for (const f of files) io.out(f);
   io.say(`next: open ${join(runDir, "index.html")}`);

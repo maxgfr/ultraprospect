@@ -541,9 +541,7 @@ export function createAdapter(): McpAdapter {
         case "ultraprospect_render": {
           const runDir = resolveRun(str(args.run, "run"));
           if (isTenderRun(runDir)) {
-            // Same refusal as the CLI: TENDERS.csv cannot be written raw yet.
-            if (args.csvRaw === true) throw new ToolError("csvRaw is not supported on a tenders run yet: TENDERS.csv is always formula-guarded");
-            return { text: JSON.stringify({ run: runDir, files: renderTenderRun(runDir) }, null, 2), artifact: runDir };
+            return { text: JSON.stringify({ run: runDir, files: renderTenderRun(runDir, { csvRaw: args.csvRaw === true }) }, null, 2), artifact: runDir };
           }
           const manifest = requireManifest(runDir);
           const places = readPlaces(runDir);
