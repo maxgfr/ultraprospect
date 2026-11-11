@@ -34,13 +34,27 @@ describe("privateAddressReason", () => {
     "::ffff:127.0.0.1",
     "::ffff:7f00:1",
     "[::1]",
+    "192.0.0.8",
+    "198.18.0.1",
+    "224.0.0.1",
+    "255.255.255.255",
+    "64:ff9b::a9fe:a9fe",
+    "64:ff9b:1::1",
+    "2002:a9fe:a9fe::1",
+    "::ffff:0:7f00:1",
+    "fec0::1",
+    "ff02::1",
+    "2001:0:4136:e378::1",
   ])("calls %s private", (address) => {
     expect(privateAddressReason(address)).toBeDefined();
   });
 
-  it.each(["8.8.8.8", "172.32.0.1", "100.128.0.1", "2a00:1450:4001:80b::200e", "93.184.216.34"])("calls %s public", (address) => {
-    expect(privateAddressReason(address)).toBeUndefined();
-  });
+  it.each(["8.8.8.8", "172.32.0.1", "100.128.0.1", "2a00:1450:4001:80b::200e", "93.184.216.34", "64:ff9b::808:808", "2002:808:808::1"])(
+    "calls %s public",
+    (address) => {
+      expect(privateAddressReason(address)).toBeUndefined();
+    },
+  );
 
   it("says nothing about a string that is not an address", () => {
     expect(privateAddressReason("beispiel.example")).toBeUndefined();
@@ -75,15 +89,24 @@ describe("publicUrlRefusal", () => {
     expect(await publicUrlRefusal("https://beispiel.example/", NOWHERE)).toBeUndefined();
   });
 
-  it("does not wait forever on a resolver that never answers", async () => {
+  it("does not wait forever on a resolver that never answers, and refuses what it could not check", async () => {
     vi.useFakeTimers();
     try {
       const pending = publicUrlRefusal("https://slow.example/", () => new Promise<string[]>(() => {}));
       await vi.advanceTimersByTimeAsync(6_000);
-      expect(await pending).toBeUndefined();
+      expect(await pending).toContain("could not be checked");
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("lets a name that does not exist through, and refuses one whose lookup failed", async () => {
+    const fails = (code: string) => async () => {
+      throw Object.assign(new Error(code), { code });
+    };
+    expect(await publicUrlRefusal("https://gone.example/", fails("ENOTFOUND"))).toBeUndefined();
+    expect(await publicUrlRefusal("https://gone.example/", fails("ENODATA"))).toBeUndefined();
+    expect(await publicUrlRefusal("https://flaky.example/", fails("EAI_AGAIN"))).toContain("EAI_AGAIN");
   });
 });
 

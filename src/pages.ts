@@ -110,33 +110,39 @@ export async function fetchPage(
   // commercial hosts serve a challenge page to anything that looks automated,
   // and a prospect's marketing site is not community infrastructure.
   //
-  // PUBLIC HOSTS ONLY, on both paths, and not to the same depth.
+  // PUBLIC HOSTS ONLY, on both paths: the URL itself and every redirect it
+  // leads to are put to the guard through the engine's `authorizeUrl` hook. The
+  // hook records what it refused, because the engine reports a vetoed request as
+  // status 0 — indistinguishable, afterwards, from a host that never answered.
   //
-  // The uncached fetcher takes the engine's `authorizeUrl` hook, so the guard is
-  // asked about the URL and about every redirect it leads to. The hook records
-  // what it refused, because the engine reports a vetoed request as status 0 —
-  // indistinguishable, afterwards, from a host that never answered.
-  //
-  // `cachedFetchAndExtract` accepts no such hook. There the URL itself is
-  // checked before the call and REDIRECTS ARE NOT COVERED: a public host that
-  // answers 302 to a private address is still followed on this path. Closing
-  // that needs the hook on the engine's cached fetch.
-  const hops = opts.keepHtml ? hopGuard(url) : undefined;
-  if (!hops?.authorizeUrl) {
-    const why = await publicUrlRefusal(url);
-    if (why) return { ok: false, reason: "not-public", why };
-  }
+  // `cachedFetchAndExtract` does not declare the hook, but it hands its options
+  // to `fetchAndExtract` unchanged whenever it fetches (src/vendor, `cachedFetch
+  // AndExtract`), so it is passed there too. It used to be checked on the URL
+  // alone, and a public host answering 302 to http://127.0.0.1/ was followed and
+  // its answer stored as a page.
+  // The URL asked for is checked here, before anything is sent, whatever the
+  // engine does with the hook; with the opt-out on only the scheme rule holds.
+  const hops = hopGuard(url);
+  const refusedUrl = await publicUrlRefusal(url);
+  if (refusedUrl) return { ok: false, reason: "not-public", why: refusedUrl };
+  const guard = hops.authorizeUrl ? { authorizeUrl: hops.authorizeUrl } : {};
 
   let result: Awaited<ReturnType<typeof fetchAndExtract>>;
   try {
     result = opts.keepHtml
-      ? await fetchAndExtract(url, { keepHtml: true, ...(hops?.authorizeUrl ? { authorizeUrl: hops.authorizeUrl } : {}) })
-      : await cachedFetchAndExtract(url);
+      ? await fetchAndExtract(url, { keepHtml: true, ...guard })
+      : await cachedFetchAndExtract(url, guard as Parameters<typeof cachedFetchAndExtract>[1]);
   } catch {
     return { ok: false, reason: "unreachable" };
   }
-  const refusedHop = hops?.refusal();
+  const refusedHop = hops.refusal();
   if (refusedHop) return { ok: false, reason: "not-public", why: refusedHop };
+  // Belt and braces: whatever the fetch path, the page that was finally served
+  // must itself be on a public host before it is stored.
+  if (result.finalUrl && result.finalUrl !== url && hops.authorizeUrl) {
+    const why = await publicUrlRefusal(result.finalUrl);
+    if (why) return { ok: false, reason: "not-public", why: `it redirects to ${result.finalUrl}, and ${why}` };
+  }
 
   const text = (result.text ?? "").trim();
   const status = result.status ?? 0;

@@ -111,6 +111,16 @@ function privateV4(octets: readonly number[]): string | undefined {
   if (a === 192 && b === 168) return "a private address (192.168.0.0/16)";
   if (a === 169 && b === 254) return "a link-local address (169.254.0.0/16, where cloud metadata is served)";
   if (a === 100 && b >= 64 && b <= 127) return "a carrier-grade NAT address (100.64.0.0/10)";
+  // Not private, but never a company's website either, and each one reaches
+  // something other than the public web: the IETF protocol block, the
+  // benchmarking range, the three documentation ranges, multicast, and the
+  // reserved block that ends in the limited broadcast address.
+  if (a === 192 && b === 0 && octets[2] === 0) return "an IETF protocol address (192.0.0.0/24)";
+  if (a === 198 && (b === 18 || b === 19)) return "a benchmarking address (198.18.0.0/15)";
+  if ((a === 192 && b === 0 && octets[2] === 2) || (a === 198 && b === 51 && octets[2] === 100) || (a === 203 && b === 0 && octets[2] === 113))
+    return "a documentation address";
+  if (a >= 224 && a <= 239) return "a multicast address (224.0.0.0/4)";
+  if (a >= 240) return "a reserved address (240.0.0.0/4)";
   return undefined;
 }
 
@@ -146,6 +156,28 @@ function privateV6(groups: readonly number[]): string | undefined {
   if (leadingZeros(7) && g[7] === 1) return "a loopback address";
   if ((g[0]! & 0xfe00) === 0xfc00) return "a unique local address (fc00::/7)";
   if ((g[0]! & 0xffc0) === 0xfe80) return "a link-local address (fe80::/10)";
+  if ((g[0]! & 0xffc0) === 0xfec0) return "a site-local address (fec0::/10)";
+  if ((g[0]! & 0xff00) === 0xff00) return "a multicast address (ff00::/8)";
+  // Tunnels and translators that carry an IPv4 address inside: a NAT64 prefix
+  // (64:ff9b::/96, and the local-use 64:ff9b:1::/48), 6to4 (2002::/16, the
+  // address in groups 1 and 2), SIIT (::ffff:0:a.b.c.d) and Teredo (2001::/32,
+  // which obfuscates it). Each is a way to spell 169.254.169.254 that a check
+  // on the IPv4 forms alone lets through.
+  const v4In = (hi: number, lo: number) => privateV4([hi >> 8, hi & 0xff, lo >> 8, lo & 0xff]);
+  if (g[0] === 0x64 && g[1] === 0xff9b) {
+    if (g[2] === 1) return "a local-use NAT64 address (64:ff9b:1::/48)";
+    const inner = v4In(g[6]!, g[7]!);
+    if (inner) return `${inner}, written as NAT64`;
+  }
+  if (g[0] === 0x2002) {
+    const inner = v4In(g[1]!, g[2]!);
+    if (inner) return `${inner}, written as 6to4`;
+  }
+  if (leadingZeros(4) && g[4] === 0xffff && g[5] === 0) {
+    const inner = v4In(g[6]!, g[7]!);
+    if (inner) return `${inner}, written as SIIT`;
+  }
+  if (g[0] === 0x2001 && g[1] === 0) return "a Teredo tunnel address (2001::/32)";
   // IPv4 carried inside IPv6: `::ffff:a.b.c.d`, and the older `::a.b.c.d`.
   // `new URL` prints the first as `[::ffff:7f00:1]`, so it is read from the
   // groups, not from the spelling.
@@ -172,16 +204,28 @@ export function privateAddressReason(address: string): string | undefined {
   return v6 ? privateV6(v6) : undefined;
 }
 
-async function resolved(hostname: string, resolve: HostResolver): Promise<string[]> {
+/**
+ * The addresses a name answers with — or why the guard could not find out.
+ *
+ * A name that DOES NOT EXIST (ENOTFOUND, ENODATA) is let through: there is
+ * nothing behind it to protect, and the fetch fails on its own with the
+ * engine's account of why. Anything else — a resolver that timed out, a
+ * temporary failure (EAI_AGAIN), an error with no code — is a check that did
+ * not happen, and is refused: reading it as "does not resolve" let a name
+ * through unchecked whenever DNS stuttered, and the fetch that followed
+ * resolved it afresh.
+ */
+async function resolved(hostname: string, resolve: HostResolver): Promise<{ addresses: string[] } | { failure: string }> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<string[]>((done) => {
-    timer = setTimeout(() => done([]), RESOLVE_TIMEOUT_MS);
+  const late = new Promise<{ failure: string }>((done) => {
+    timer = setTimeout(() => done({ failure: `resolving it took longer than ${RESOLVE_TIMEOUT_MS / 1000} s` }), RESOLVE_TIMEOUT_MS);
   });
   try {
-    return await Promise.race([resolve(hostname), late]);
-  } catch {
-    // NXDOMAIN, no network, a resolver that threw: the name does not resolve.
-    return [];
+    return await Promise.race([resolve(hostname).then((addresses) => ({ addresses })), late]);
+  } catch (e) {
+    const code = (e as { code?: string })?.code;
+    if (code === "ENOTFOUND" || code === "ENODATA") return { addresses: [] };
+    return { failure: `resolving it failed (${code ?? (e as Error)?.message ?? "unknown error"})` };
   } finally {
     clearTimeout(timer);
   }
@@ -215,7 +259,9 @@ export async function publicUrlRefusal(url: string, resolve: HostResolver = host
   if (literal) return `${host} is ${literal}`;
   if (isIpLiteral(host)) return undefined;
 
-  for (const address of await resolved(host, resolve)) {
+  const answer = await resolved(host, resolve);
+  if ("failure" in answer) return `${host} could not be checked: ${answer.failure}`;
+  for (const address of answer.addresses) {
     const why = privateAddressReason(address);
     if (why) return `${host} resolves to ${address}, ${why}`;
   }

@@ -11860,6 +11860,12 @@ function privateV4(octets) {
   if (a === 192 && b === 168) return "a private address (192.168.0.0/16)";
   if (a === 169 && b === 254) return "a link-local address (169.254.0.0/16, where cloud metadata is served)";
   if (a === 100 && b >= 64 && b <= 127) return "a carrier-grade NAT address (100.64.0.0/10)";
+  if (a === 192 && b === 0 && octets[2] === 0) return "an IETF protocol address (192.0.0.0/24)";
+  if (a === 198 && (b === 18 || b === 19)) return "a benchmarking address (198.18.0.0/15)";
+  if (a === 192 && b === 0 && octets[2] === 2 || a === 198 && b === 51 && octets[2] === 100 || a === 203 && b === 0 && octets[2] === 113)
+    return "a documentation address";
+  if (a >= 224 && a <= 239) return "a multicast address (224.0.0.0/4)";
+  if (a >= 240) return "a reserved address (240.0.0.0/4)";
   return void 0;
 }
 function ipv6Groups(raw) {
@@ -11888,6 +11894,23 @@ function privateV6(groups) {
   if (leadingZeros(7) && g[7] === 1) return "a loopback address";
   if ((g[0] & 65024) === 64512) return "a unique local address (fc00::/7)";
   if ((g[0] & 65472) === 65152) return "a link-local address (fe80::/10)";
+  if ((g[0] & 65472) === 65216) return "a site-local address (fec0::/10)";
+  if ((g[0] & 65280) === 65280) return "a multicast address (ff00::/8)";
+  const v4In = (hi, lo) => privateV4([hi >> 8, hi & 255, lo >> 8, lo & 255]);
+  if (g[0] === 100 && g[1] === 65435) {
+    if (g[2] === 1) return "a local-use NAT64 address (64:ff9b:1::/48)";
+    const inner = v4In(g[6], g[7]);
+    if (inner) return `${inner}, written as NAT64`;
+  }
+  if (g[0] === 8194) {
+    const inner = v4In(g[1], g[2]);
+    if (inner) return `${inner}, written as 6to4`;
+  }
+  if (leadingZeros(4) && g[4] === 65535 && g[5] === 0) {
+    const inner = v4In(g[6], g[7]);
+    if (inner) return `${inner}, written as SIIT`;
+  }
+  if (g[0] === 8193 && g[1] === 0) return "a Teredo tunnel address (2001::/32)";
   if (leadingZeros(5) && g[5] === 65535 || leadingZeros(6)) {
     const inner = privateV4([g[6] >> 8, g[6] & 255, g[7] >> 8, g[7] & 255]);
     if (inner) return `${inner}, written as IPv6`;
@@ -11906,12 +11929,14 @@ function privateAddressReason(address) {
 async function resolved(hostname, resolve4) {
   let timer;
   const late = new Promise((done) => {
-    timer = setTimeout(() => done([]), RESOLVE_TIMEOUT_MS);
+    timer = setTimeout(() => done({ failure: `resolving it took longer than ${RESOLVE_TIMEOUT_MS / 1e3} s` }), RESOLVE_TIMEOUT_MS);
   });
   try {
-    return await Promise.race([resolve4(hostname), late]);
-  } catch {
-    return [];
+    return await Promise.race([resolve4(hostname).then((addresses) => ({ addresses })), late]);
+  } catch (e) {
+    const code = e?.code;
+    if (code === "ENOTFOUND" || code === "ENODATA") return { addresses: [] };
+    return { failure: `resolving it failed (${code ?? e?.message ?? "unknown error"})` };
   } finally {
     clearTimeout(timer);
   }
@@ -11931,7 +11956,9 @@ async function publicUrlRefusal(url, resolve4 = hostResolver) {
   const literal = privateAddressReason(host);
   if (literal) return `${host} is ${literal}`;
   if (isIpLiteral(host)) return void 0;
-  for (const address of await resolved(host, resolve4)) {
+  const answer = await resolved(host, resolve4);
+  if ("failure" in answer) return `${host} could not be checked: ${answer.failure}`;
+  for (const address of answer.addresses) {
     const why = privateAddressReason(address);
     if (why) return `${host} resolves to ${address}, ${why}`;
   }
@@ -20325,19 +20352,22 @@ function describeFailure(failure) {
   return failure.reason === "not-public" ? `refused, ${failure.why}` : failure.reason;
 }
 async function fetchPage2(runDir, placeId, url, role, store, opts = {}) {
-  const hops = opts.keepHtml ? hopGuard(url) : void 0;
-  if (!hops?.authorizeUrl) {
-    const why = await publicUrlRefusal(url);
-    if (why) return { ok: false, reason: "not-public", why };
-  }
+  const hops = hopGuard(url);
+  const refusedUrl = await publicUrlRefusal(url);
+  if (refusedUrl) return { ok: false, reason: "not-public", why: refusedUrl };
+  const guard = hops.authorizeUrl ? { authorizeUrl: hops.authorizeUrl } : {};
   let result;
   try {
-    result = opts.keepHtml ? await fetchAndExtract(url, { keepHtml: true, ...hops?.authorizeUrl ? { authorizeUrl: hops.authorizeUrl } : {} }) : await cachedFetchAndExtract(url);
+    result = opts.keepHtml ? await fetchAndExtract(url, { keepHtml: true, ...guard }) : await cachedFetchAndExtract(url, guard);
   } catch {
     return { ok: false, reason: "unreachable" };
   }
-  const refusedHop = hops?.refusal();
+  const refusedHop = hops.refusal();
   if (refusedHop) return { ok: false, reason: "not-public", why: refusedHop };
+  if (result.finalUrl && result.finalUrl !== url && hops.authorizeUrl) {
+    const why = await publicUrlRefusal(result.finalUrl);
+    if (why) return { ok: false, reason: "not-public", why: `it redirects to ${result.finalUrl}, and ${why}` };
+  }
   const text3 = (result.text ?? "").trim();
   const status = result.status ?? 0;
   if (status === 0) return { ok: false, reason: "unreachable" };

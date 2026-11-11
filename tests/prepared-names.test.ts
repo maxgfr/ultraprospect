@@ -59,17 +59,21 @@ describe("prepared names", () => {
     const right = [...registerNames, ...edge];
     const preparedRight = right.map(prepareName);
     let compared = 0;
+    // Collected rather than asserted pair by pair: tens of thousands of
+    // `expect` calls cost more than the comparisons and pushed this past the
+    // default timeout under a parallel run.
+    const mismatches: string[] = [];
     for (const a of left) {
       const pa = prepareName(a);
       for (const [j, b] of right.entries()) {
         const want = reference(a, b);
-        expect(nameSimilarity(a, b)).toBe(want);
-        expect(preparedSimilarity(pa, preparedRight[j]!)).toBe(want);
+        if (nameSimilarity(a, b) !== want || preparedSimilarity(pa, preparedRight[j]!) !== want) mismatches.push(`${a} | ${b}`);
         compared++;
       }
     }
+    expect(mismatches).toEqual([]);
     expect(compared).toBeGreaterThan(5000);
-  });
+  }, 30_000);
 
   it("pick the same best register name, and report it as written", () => {
     for (const a of [...osmNames.slice(0, 40), ...edge]) {
